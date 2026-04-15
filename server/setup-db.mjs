@@ -3,11 +3,18 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { config } from 'dotenv';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: join(__dirname, '.env') });
 
-const SUPABASE_URL = 'https://illqnrcjhvzbpmdlllmk.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlsbHFucmNqaHZ6YnBtZGxsbG1rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxNjA3NTIsImV4cCI6MjA5MTczNjc1Mn0.xZawT-L91U8lqke8VjhpECTaOt8ifoX_cei9gSTwPXo';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('Missing SUPABASE_URL or SUPABASE_KEY in server/.env');
+  process.exit(1);
+}
 
 const sql = readFileSync(join(__dirname, 'src/data/migrations/001_initial.sql'), 'utf8');
 
@@ -23,7 +30,6 @@ let success = 0;
 let failed = 0;
 
 for (const stmt of statements) {
-  // Use Supabase's PostgREST RPC — try the pg_net or direct approach
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/`, {
     method: 'POST',
     headers: {
@@ -44,7 +50,7 @@ for (const stmt of statements) {
 if (failed > 0) {
   console.log('Direct SQL execution not supported via REST API (expected).');
   console.log('Please run the SQL migration manually:\n');
-  console.log('1. Go to https://supabase.com/dashboard/project/illqnrcjhvzbpmdlllmk/sql');
+  console.log('1. Go to your Supabase project dashboard → SQL Editor');
   console.log('2. Paste the contents of: server/src/data/migrations/001_initial.sql');
   console.log('3. Click "Run"\n');
 

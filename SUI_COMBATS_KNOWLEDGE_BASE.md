@@ -23,7 +23,7 @@
 | **Publisher / Player Test** | `0x3606cd88b355a0b45a859646d093ffb4a821fe2c955a99bd1936ebaa2c04e501` |
 | **NFT Admin (minting)** | `0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60` |
 
-The NFT admin wallet is used for minting items and managing the marketplace. Its private key is in the sui keystore (alias: priceless-turquois).
+The NFT admin wallet is used for minting items and managing the marketplace. Its private key is in the local sui keystore (not committed to git).
 
 ## Move Contract Modules
 

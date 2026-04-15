@@ -70,12 +70,17 @@ export function CharacterProfile({ character, compact }: { character: Character;
   const onChainIds = new Set(state.onChainItems.map((i) => i.id));
   const selectedItem = selectedSlot ? eq[selectedSlot] : null;
 
-  const equippable = selectedSlot
-    ? [...state.inventory, ...state.onChainItems].filter((item) =>
-        SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
-        item.levelReq <= character.level
-      )
-    : [];
+  const equippable = useMemo(() => {
+    if (!selectedSlot) return [];
+    // Merge server + on-chain items, dedup by ID (prefer on-chain version)
+    const byId = new Map<string, Item>();
+    for (const item of state.inventory) byId.set(item.id, item);
+    for (const item of state.onChainItems) byId.set(item.id, item);
+    return Array.from(byId.values()).filter((item) =>
+      SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
+      item.levelReq <= character.level
+    );
+  }, [selectedSlot, state.inventory, state.onChainItems, character.level]);
 
   function handleEquip(item: Item) {
     if (!selectedSlot) return;

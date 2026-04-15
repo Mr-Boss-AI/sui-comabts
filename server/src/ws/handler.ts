@@ -36,6 +36,7 @@ import {
   getChatClients,
 } from './chat';
 import { GAME_CONSTANTS } from '../config';
+import { verifyEquipmentOwnership } from '../utils/sui-verify';
 
 // === Connected Clients Registry ===
 
@@ -217,6 +218,12 @@ async function handleAuth(client: ConnectedClient, msg: ClientMessage): Promise<
   }
   if (character) {
     client.characterId = character.id;
+
+    // Verify on-chain equipped items are still owned by the wallet
+    const removedSlots = await verifyEquipmentOwnership(walletAddress, character.equipment);
+    if (removedSlots.length > 0) {
+      console.log(`[Auth] Removed ghost items from ${walletAddress}: ${removedSlots.join(', ')}`);
+    }
   }
 
   // Register for chat
@@ -346,8 +353,8 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
   const wagerAmount = fightType === 'wager' ? (Number(msg.wagerAmount) || 0) : undefined;
 
   if (fightType === 'wager' && wagerAmount) {
-    if (wagerAmount <= 0) {
-      sendError(client, 'Wager amount must be positive');
+    if (wagerAmount < 0.1) {
+      sendError(client, 'Minimum wager is 0.1 SUI');
       return;
     }
     if (character.gold < wagerAmount) {

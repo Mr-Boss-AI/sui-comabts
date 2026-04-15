@@ -15,7 +15,7 @@ const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: num
 export function MatchmakingQueue() {
   const { state } = useGame();
   const { fightQueue, character } = state;
-  const [wagerAmount, setWagerAmount] = useState(10);
+  const [wagerAmount, setWagerAmount] = useState(0.1);
   const [selectedType, setSelectedType] = useState<FightType>("friendly");
 
   const level = character?.level ?? 1;
@@ -96,9 +96,10 @@ export function MatchmakingQueue() {
             <label className="text-sm text-zinc-400">Wager (SUI):</label>
             <input
               type="number"
-              min={1}
+              min={0.1}
+              step={0.1}
               value={wagerAmount}
-              onChange={(e) => setWagerAmount(Math.max(1, parseInt(e.target.value) || 1))}
+              onChange={(e) => setWagerAmount(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
               className="w-24 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100"
             />
           </div>

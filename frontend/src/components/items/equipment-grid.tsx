@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ItemCard } from "./item-card";
@@ -59,12 +59,17 @@ export function EquipmentGrid() {
   const onChainIds = new Set(onChainItems.map((i) => i.id));
   const selectedItem = selectedSlot ? eq[selectedSlot] : null;
 
-  const equippable = selectedSlot
-    ? [...inventory, ...onChainItems].filter((item) =>
-        SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
-        item.levelReq <= character.level
-      )
-    : [];
+  const equippable = useMemo(() => {
+    if (!selectedSlot) return [];
+    // Merge server + on-chain items, dedup by ID (prefer on-chain version)
+    const byId = new Map<string, Item>();
+    for (const item of inventory) byId.set(item.id, item);
+    for (const item of onChainItems) byId.set(item.id, item);
+    return Array.from(byId.values()).filter((item) =>
+      SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
+      item.levelReq <= character.level
+    );
+  }, [selectedSlot, inventory, onChainItems, character.level]);
 
   function handleEquip(item: Item) {
     if (!selectedSlot) return;

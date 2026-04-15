@@ -3,8 +3,6 @@
   "deployedAt": "2026-04-14",
   "transactionDigest": "91dYe241tXexqzvKMQr4tUbtkVXaHUVazo3hqBcjxgBr",
   "packageId": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303",
-  "publisherId": "0xd91b5d2477d842f027643a5fa6862cedb970bb624250b5f576d1de98688b7246",
-  "upgradeCap": "0xd3d9ae865a17dc13f1bab9d88123ebd0f9ff99b7cad0f4d82a82ac6ee7ace87a",
   "previousPackageId": "0x3759b50226587fdcbdb157a533203735e2d0244535315bd6770839df63418444",
   "modules": {
     "character": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::character",
@@ -13,8 +11,6 @@
     "arena": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::arena",
     "marketplace": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::marketplace"
   },
-  "wallet": "0x3606cd88b355a0b45a859646d093ffb4a821fe2c955a99bd1936ebaa2c04e501",
-  "adminWallet": "0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60",
   "testMints": {
     "ironSword": {
       "objectId": "0x9349e5989adf594cd61bb90a02bf96c91f68f3849822c3e39123c762e317ec6a",
