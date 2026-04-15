@@ -1,0 +1,8 @@
+[package]
+name = "sui_combats"
+edition = "2024.beta"
+
+[dependencies]
+
+[addresses]
+sui_combats = "0x0"
