@@ -1,5 +1,9 @@
 {
+  "name": "sui-comabts",
+  "scripts": {
+    "vercel-build": "cd frontend && npm install && npm run build"
+  },
   "dependencies": {
-    "ws": "^8.20.0"
+    "next": "16.2.3"
   }
 }
