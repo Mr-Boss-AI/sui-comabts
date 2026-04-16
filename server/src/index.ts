@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { CONFIG } from './config';
-import { handleConnection, getOnlineCount } from './ws/handler';
+import { handleConnection, getOnlineCount, initiateWagerAcceptance } from './ws/handler';
 import { initMatchmaking, shutdownMatchmaking } from './game/matchmaking';
 import { createFight } from './ws/fight-room';
 import { getCharacterById, getCharacterByWallet } from './data/characters';
@@ -129,6 +129,15 @@ function onMatchFound(entryA: QueueEntry, entryB: QueueEntry): void {
   console.log(
     `[Matchmaking] Match found: ${charA.name} (${charA.rating}) vs ${charB.name} (${charB.rating}) [${entryA.fightType}]`
   );
+
+  // For wager fights with on-chain escrow, Player B needs to accept first
+  if (entryA.fightType === 'wager' && entryA.wagerMatchId) {
+    initiateWagerAcceptance(
+      { walletAddress: entryA.walletAddress, characterId: entryA.characterId, wagerMatchId: entryA.wagerMatchId, wagerAmount: entryA.wagerAmount || 0 },
+      { walletAddress: entryB.walletAddress, characterId: entryB.characterId },
+    );
+    return;
+  }
 
   createFight(charA, charB, entryA.fightType, entryA.wagerAmount);
 }

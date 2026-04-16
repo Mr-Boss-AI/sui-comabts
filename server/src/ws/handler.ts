@@ -35,8 +35,12 @@ import {
   broadcastSystemMessage,
   getChatClients,
 } from './chat';
-import { GAME_CONSTANTS } from '../config';
+import { CONFIG, GAME_CONSTANTS } from '../config';
 import { verifyEquipmentOwnership } from '../utils/sui-verify';
+import { getWagerStatus } from '../utils/sui-settle';
+import {
+  createFight,
+} from './fight-room';
 
 // === Connected Clients Registry ===
 
@@ -169,6 +173,9 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
       break;
     case 'spectate_fight':
       handleSpectateFight(client, msg);
+      break;
+    case 'wager_accepted':
+      handleWagerAccepted(client, msg);
       break;
     // Marketplace, challenges, etc. — not yet implemented; silently ignore
     case 'get_marketplace':
@@ -351,14 +358,15 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
   }
 
   const wagerAmount = fightType === 'wager' ? (Number(msg.wagerAmount) || 0) : undefined;
+  const wagerMatchId = fightType === 'wager' ? (msg.wagerMatchId as string) : undefined;
 
-  if (fightType === 'wager' && wagerAmount) {
-    if (wagerAmount < 0.1) {
+  if (fightType === 'wager') {
+    if (!wagerAmount || wagerAmount < 0.1) {
       sendError(client, 'Minimum wager is 0.1 SUI');
       return;
     }
-    if (character.gold < wagerAmount) {
-      sendError(client, 'Not enough gold for wager');
+    if (!wagerMatchId) {
+      sendError(client, 'On-chain wager escrow required. Sign the create_wager transaction first.');
       return;
     }
   }
@@ -371,6 +379,7 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
     rating: character.rating,
     joinedAt: Date.now(),
     wagerAmount,
+    wagerMatchId,
   });
 
   if (!added) {
@@ -730,6 +739,123 @@ function handleSpectateFight(client: ConnectedClient, msg: ClientMessage): void 
       },
     },
   });
+}
+
+// === Pending Wager Acceptances ===
+
+interface PendingWagerAccept {
+  wagerMatchId: string;
+  wagerAmount: number;
+  playerAWallet: string;
+  playerACharacterId: string;
+  playerBWallet: string;
+  playerBCharacterId: string;
+  fightType: 'wager';
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingWagerAccepts = new Map<string, PendingWagerAccept>();
+
+/**
+ * Called by matchmaking when two wager players are matched.
+ * Sends Player B a request to sign accept_wager on-chain.
+ */
+export function initiateWagerAcceptance(
+  entryA: { walletAddress: string; characterId: string; wagerMatchId: string; wagerAmount: number },
+  entryB: { walletAddress: string; characterId: string },
+): void {
+  const charA = getCharacterByWallet(entryA.walletAddress);
+  const clientB = getClientByWalletAddress(entryB.walletAddress);
+
+  if (!clientB) {
+    console.error('[Wager] Player B not connected');
+    return;
+  }
+
+  // Send Player B the accept request
+  send(clientB, {
+    type: 'wager_accept_required',
+    wagerMatchId: entryA.wagerMatchId,
+    stakeAmount: entryA.wagerAmount,
+    playerAName: charA?.name || 'Unknown',
+    playerAWallet: entryA.walletAddress,
+  });
+
+  // Set timeout for acceptance
+  const timer = setTimeout(() => {
+    const pending = pendingWagerAccepts.get(entryA.wagerMatchId);
+    if (!pending) return;
+    pendingWagerAccepts.delete(entryA.wagerMatchId);
+
+    // Notify both players
+    const clientA = getClientByWalletAddress(pending.playerAWallet);
+    const cB = getClientByWalletAddress(pending.playerBWallet);
+    if (clientA) send(clientA, { type: 'wager_accept_timeout', wagerMatchId: entryA.wagerMatchId });
+    if (cB) send(cB, { type: 'wager_accept_timeout', wagerMatchId: entryA.wagerMatchId });
+    console.log(`[Wager] Accept timeout for ${entryA.wagerMatchId}`);
+  }, CONFIG.WAGER_ACCEPT_TIMEOUT_MS);
+
+  pendingWagerAccepts.set(entryA.wagerMatchId, {
+    wagerMatchId: entryA.wagerMatchId,
+    wagerAmount: entryA.wagerAmount,
+    playerAWallet: entryA.walletAddress,
+    playerACharacterId: entryA.characterId,
+    playerBWallet: entryB.walletAddress,
+    playerBCharacterId: entryB.characterId,
+    fightType: 'wager',
+    timer,
+  });
+}
+
+function getClientByWalletAddress(wallet: string): ConnectedClient | undefined {
+  for (const [, c] of connectedClients) {
+    if (c.walletAddress === wallet) return c;
+  }
+  return undefined;
+}
+
+async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage): Promise<void> {
+  const wagerMatchId = msg.wagerMatchId as string;
+  if (!wagerMatchId) {
+    sendError(client, 'Missing wagerMatchId');
+    return;
+  }
+
+  const pending = pendingWagerAccepts.get(wagerMatchId);
+  if (!pending) {
+    sendError(client, 'No pending wager acceptance found');
+    return;
+  }
+
+  if (client.walletAddress !== pending.playerBWallet) {
+    sendError(client, 'You are not the expected acceptor');
+    return;
+  }
+
+  // Verify on-chain that the wager is now ACTIVE (status=1)
+  const status = await getWagerStatus(wagerMatchId);
+  if (status !== 1) {
+    sendError(client, `Wager not active on-chain (status: ${status}). Did the accept_wager transaction succeed?`);
+    return;
+  }
+
+  // Clean up pending
+  clearTimeout(pending.timer);
+  pendingWagerAccepts.delete(wagerMatchId);
+
+  // Get characters and start the fight
+  const charA = getCharacterByWallet(pending.playerAWallet);
+  const charB = getCharacterByWallet(pending.playerBWallet);
+
+  if (!charA || !charB) {
+    sendError(client, 'Character not found');
+    return;
+  }
+
+  console.log(`[Wager] Accepted! Starting fight: ${charA.name} vs ${charB.name} (${pending.wagerAmount} SUI)`);
+
+  const fight = createFight(charA, charB, 'wager', pending.wagerAmount);
+  fight.wagerMatchId = wagerMatchId;
 }
 
 // === Utilities ===

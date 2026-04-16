@@ -51,6 +51,13 @@ export interface GameState {
     fightType: string;
   } | null;
 
+  // Wager accept (Player B)
+  pendingWagerAccept: {
+    wagerMatchId: string;
+    stakeAmount: number;
+    opponentName: string;
+  } | null;
+
   // UI
   currentArea: "arena" | "marketplace" | "tavern" | "hall_of_fame";
   errorMessage: string | null;
@@ -74,6 +81,7 @@ export const initialGameState: GameState = {
   marketplaceListings: [],
   spectatingFight: null,
   pendingChallenge: null,
+  pendingWagerAccept: null,
   currentArea: "tavern",
   errorMessage: null,
   errorTimestamp: null,
@@ -102,6 +110,7 @@ export type GameAction =
   | { type: "SET_SPECTATING"; fight: FightState | null }
   | { type: "SET_PENDING_CHALLENGE"; challenge: GameState["pendingChallenge"] }
   | { type: "SET_AREA"; area: GameState["currentArea"] }
+  | { type: "SET_PENDING_WAGER_ACCEPT"; payload: GameState["pendingWagerAccept"] }
   | { type: "SET_ERROR"; message: string | null }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
   | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
@@ -198,6 +207,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, pendingChallenge: action.challenge };
     case "SET_AREA":
       return { ...state, currentArea: action.area };
+    case "SET_PENDING_WAGER_ACCEPT":
+      return { ...state, pendingWagerAccept: action.payload };
     case "UPDATE_TURN":
       if (!state.fight) return state;
       return { ...state, fight: { ...state.fight, turn: action.turn, turnDeadline: action.turnDeadline } };

@@ -28,8 +28,8 @@ module sui_combats::arena {
     const PLATFORM_FEE_BPS: u64 = 500;
     const BPS_BASE: u64 = 10000;
 
-    // Platform treasury address (placeholder -- replace with actual treasury address on deployment)
-    const TREASURY: address = @0xCAFE;
+    // Platform treasury / dev wallet — receives 5% fee from wager settlements
+    const TREASURY: address = @0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60;
 
     // ===== WagerMatch shared object =====
     public struct WagerMatch has key {

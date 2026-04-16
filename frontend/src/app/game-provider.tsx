@@ -57,9 +57,29 @@ export default function GameProvider({
         case "queue_left":
           dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
           break;
+        case "wager_accept_required":
+          dispatch({
+            type: "SET_PENDING_WAGER_ACCEPT",
+            payload: {
+              wagerMatchId: msg.wagerMatchId,
+              stakeAmount: msg.stakeAmount,
+              opponentName: msg.playerAName,
+            },
+          });
+          dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
+          break;
+        case "wager_accept_timeout":
+          dispatch({ type: "SET_PENDING_WAGER_ACCEPT", payload: null });
+          dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
+          break;
+        case "wager_settled":
+          // Informational — the fight_end message handles UI
+          console.log("[Wager] Settled on-chain:", msg.txDigest);
+          break;
         case "fight_start":
           dispatch({ type: "SET_FIGHT", fight: msg.fight });
           dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
+          dispatch({ type: "SET_PENDING_WAGER_ACCEPT", payload: null });
           playSoundIf("challenge");
           break;
         case "turn_start":

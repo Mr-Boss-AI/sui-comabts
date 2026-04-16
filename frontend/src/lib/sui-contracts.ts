@@ -135,3 +135,37 @@ export async function fetchOwnedItems(
 
   return items;
 }
+
+// ===== Wager Transactions =====
+
+/** Build a transaction that creates a wager match with SUI escrow. */
+export function buildCreateWagerTx(stakeAmountMist: bigint): Transaction {
+  const tx = new Transaction();
+  const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::create_wager`,
+    arguments: [stakeCoin],
+  });
+  return tx;
+}
+
+/** Build a transaction that accepts an existing wager match. */
+export function buildAcceptWagerTx(wagerMatchId: string, stakeAmountMist: bigint): Transaction {
+  const tx = new Transaction();
+  const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::accept_wager`,
+    arguments: [tx.object(wagerMatchId), stakeCoin],
+  });
+  return tx;
+}
+
+/** Build a transaction that cancels a wager (only player A, only while waiting). */
+export function buildCancelWagerTx(wagerMatchId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::cancel_wager`,
+    arguments: [tx.object(wagerMatchId)],
+  });
+  return tx;
+}

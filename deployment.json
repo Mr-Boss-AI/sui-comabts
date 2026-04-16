@@ -1,15 +1,14 @@
 {
   "network": "testnet",
-  "deployedAt": "2026-04-14",
-  "transactionDigest": "91dYe241tXexqzvKMQr4tUbtkVXaHUVazo3hqBcjxgBr",
-  "packageId": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303",
-  "previousPackageId": "0x3759b50226587fdcbdb157a533203735e2d0244535315bd6770839df63418444",
+  "deployedAt": "2026-04-16",
+  "packageId": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd",
+  "previousPackageId": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303",
   "modules": {
-    "character": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::character",
-    "item": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::item",
-    "equipment": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::equipment",
-    "arena": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::arena",
-    "marketplace": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303::marketplace"
+    "character": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::character",
+    "item": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::item",
+    "equipment": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::equipment",
+    "arena": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::arena",
+    "marketplace": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::marketplace"
   },
   "testMints": {
     "ironSword": {

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { GAME_CONSTANTS } from '../config';
+import { settleWagerOnChain } from '../utils/sui-settle';
 import {
   applyXp,
   checkFightEnd,
@@ -359,8 +360,21 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
     winnerChar.wins++;
     loserChar.losses++;
 
-    // Wager handling
-    if (fight.type === 'wager' && fight.wagerAmount) {
+    // Wager handling — settle on-chain if wagerMatchId exists, else fall back to gold
+    if (fight.type === 'wager' && fight.wagerMatchId && winnerWallet) {
+      settleWagerOnChain(fight.wagerMatchId, winnerWallet)
+        .then(({ digest }) => {
+          console.log(`[Wager] Settled on-chain: ${digest}`);
+          sendToWallet(fight.playerA.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId: fight.wagerMatchId });
+          sendToWallet(fight.playerB.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId: fight.wagerMatchId });
+        })
+        .catch((err) => {
+          console.error('[Wager] On-chain settlement failed:', err);
+          sendToWallet(fight.playerA.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Contact support.' });
+          sendToWallet(fight.playerB.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Contact support.' });
+        });
+    } else if (fight.type === 'wager' && fight.wagerAmount) {
+      // Fallback: gold-based wager (no on-chain escrow)
       winnerChar.gold += fight.wagerAmount;
       loserChar.gold = Math.max(0, loserChar.gold - fight.wagerAmount);
     }

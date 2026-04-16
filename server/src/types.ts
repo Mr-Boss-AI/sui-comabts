@@ -166,6 +166,7 @@ export interface FightState {
   status: FightStatus;
   winner?: string;
   wagerAmount?: number;
+  wagerMatchId?: string;
   stakedItemIds?: string[];
   spectators: Set<string>;
   turnActions: Map<string, TurnAction>;
@@ -183,6 +184,7 @@ export interface QueueEntry {
   rating: number;
   joinedAt: number;
   wagerAmount?: number;
+  wagerMatchId?: string;
 }
 
 // === WebSocket Messages ===

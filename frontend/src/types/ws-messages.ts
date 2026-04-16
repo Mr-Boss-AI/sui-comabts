@@ -25,8 +25,9 @@ export type ClientMessage =
     }
   | { type: "get_character" }
   | { type: "allocate_points"; strength: number; dexterity: number; intuition: number; endurance: number }
-  | { type: "queue_fight"; fightType: FightType; wagerAmount?: number; onChainEquipment?: Record<string, unknown> }
+  | { type: "queue_fight"; fightType: FightType; wagerAmount?: number; wagerMatchId?: string; onChainEquipment?: Record<string, unknown> }
   | { type: "cancel_queue" }
+  | { type: "wager_accepted"; wagerMatchId: string; txDigest: string }
   | { type: "fight_action"; attackZones: Zone[]; blockZones: Zone[] }
   | { type: "chat_message"; content: string; target?: string }
   | { type: "get_online_players" }
@@ -79,7 +80,10 @@ export type ServerMessage =
   | { type: "item_bought"; listing: MarketplaceListing }
   | { type: "challenge_received"; challengeId: string; from: string; fromName: string; fightType: FightType }
   | { type: "challenge_accepted"; challengeId: string; fight: FightState }
-  | { type: "challenge_declined"; challengeId: string };
+  | { type: "challenge_declined"; challengeId: string }
+  | { type: "wager_accept_required"; wagerMatchId: string; stakeAmount: number; playerAName: string; playerAWallet: string }
+  | { type: "wager_accept_timeout"; wagerMatchId: string }
+  | { type: "wager_settled"; txDigest: string; wagerMatchId: string };
 
 export interface FightHistoryEntry {
   id: string;
