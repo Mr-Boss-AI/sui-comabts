@@ -430,6 +430,7 @@ export function applyXp(character: Character, xpGained: number): { leveledUp: bo
     character.xp -= character.xpToNextLevel;
     character.level++;
     character.xpToNextLevel = xpToNextLevel(character.level);
+    character.unallocatedPoints += GAME_CONSTANTS.STAT_POINTS_PER_LEVEL;
     leveledUp = true;
   }
 

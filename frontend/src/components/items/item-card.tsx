@@ -91,6 +91,11 @@ export function ItemCard({ item, onClick, selected, compact, showPrice }: ItemCa
             </div>
           </div>
         </div>
+        {item.inKiosk && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 border border-amber-700/30 shrink-0">
+            Listed
+          </span>
+        )}
         {showPrice && item.price !== undefined && (
           <div className="text-xs text-amber-400 font-bold shrink-0">
             {item.price}g

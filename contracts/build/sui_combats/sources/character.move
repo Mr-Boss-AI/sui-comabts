@@ -3,6 +3,7 @@ module sui_combats::character {
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
     use sui::event;
+    use sui::clock::{Self, Clock};
     use std::string::String;
     use std::option::{Self, Option};
 
@@ -12,6 +13,7 @@ module sui_combats::character {
     const ENotEnoughPoints: u64 = 2;
     const ENameTooLong: u64 = 3;
     const EStatTooHigh: u64 = 4;
+    const ENotOwner: u64 = 5;
 
     // ===== Constants =====
     const MAX_LEVEL: u8 = 20;
@@ -19,11 +21,16 @@ module sui_combats::character {
     const POINTS_PER_LEVEL: u16 = 3;
     const MAX_NAME_LENGTH: u64 = 32;
     const DEFAULT_RATING: u16 = 1000;
-    const RATING_CHANGE: u16 = 25;
 
-    // ===== Character struct =====
+    // ===== AdminCap — minted once on publish, held by server =====
+    public struct AdminCap has key, store {
+        id: UID,
+    }
+
+    // ===== Character shared object =====
     public struct Character has key {
         id: UID,
+        owner: address,
         name: String,
         level: u8,
         xp: u64,
@@ -38,6 +45,8 @@ module sui_combats::character {
         wins: u32,
         losses: u32,
         rating: u16,
+        // Timestamp of last on-chain update
+        last_updated: u64,
         // Equipment slots (store ID references to equipped items)
         weapon: Option<ID>,
         offhand: Option<ID>,
@@ -64,62 +73,89 @@ module sui_combats::character {
 
     public struct LevelUp has copy, drop {
         character_id: ID,
+        owner: address,
         new_level: u8,
         xp: u64,
+        unallocated_points: u16,
+    }
+
+    public struct FightResultUpdated has copy, drop {
+        character_id: ID,
+        owner: address,
+        won: bool,
+        xp_gained: u64,
+        new_xp: u64,
+        new_rating: u16,
+        new_wins: u32,
+        new_losses: u32,
     }
 
     public struct PointsAllocated has copy, drop {
         character_id: ID,
+        owner: address,
         strength_added: u16,
         dexterity_added: u16,
         intuition_added: u16,
         endurance_added: u16,
+        remaining_points: u16,
+    }
+
+    // ===== Init — creates AdminCap and sends to deployer =====
+    fun init(ctx: &mut TxContext) {
+        let admin_cap = AdminCap {
+            id: object::new(ctx),
+        };
+        transfer::transfer(admin_cap, tx_context::sender(ctx));
     }
 
     // ===== XP thresholds for each level =====
-    // Returns the cumulative XP needed to reach a given level.
     fun xp_for_level(level: u8): u64 {
+        // TESTING: lowered XP thresholds — revert before mainnet!
         if (level <= 1) { 0 }
-        else if (level == 2) { 100 }
-        else if (level == 3) { 300 }
-        else if (level == 4) { 700 }
-        else if (level == 5) { 1500 }
-        else if (level == 6) { 3000 }
-        else if (level == 7) { 6000 }
-        else if (level == 8) { 12000 }
-        else if (level == 9) { 25000 }
-        else if (level == 10) { 50000 }
-        else if (level == 11) { 80000 }
-        else if (level == 12) { 120000 }
-        else if (level == 13) { 180000 }
-        else if (level == 14) { 250000 }
-        else if (level == 15) { 350000 }
-        else if (level == 16) { 500000 }
-        else if (level == 17) { 650000 }
-        else if (level == 18) { 800000 }
-        else if (level == 19) { 900000 }
-        else if (level == 20) { 1000000 }
-        else { 1000000 }
+        else if (level == 2) { 2 }
+        else if (level == 3) { 5 }
+        else if (level == 4) { 10 }
+        else if (level == 5) { 20 }
+        else if (level == 6) { 35 }
+        else if (level == 7) { 55 }
+        else if (level == 8) { 80 }
+        else if (level == 9) { 110 }
+        else if (level == 10) { 150 }
+        else if (level == 11) { 200 }
+        else if (level == 12) { 260 }
+        else if (level == 13) { 330 }
+        else if (level == 14) { 410 }
+        else if (level == 15) { 500 }
+        else if (level == 16) { 600 }
+        else if (level == 17) { 710 }
+        else if (level == 18) { 830 }
+        else if (level == 19) { 960 }
+        else if (level == 20) { 1100 }
+        else { 1100 }
     }
 
-    // ===== Public functions =====
+    // ===== Public entry functions =====
 
-    /// Create a new character with the given stat distribution.
-    /// The total of str + dex + int + end must equal 20.
+    /// Create a new character. Shared object so the server can update it.
+    /// The `owner` field ensures only the player can allocate stats.
     public entry fun create_character(
         name: String,
         str: u16,
         dex: u16,
         int: u16,
         end: u16,
+        clock: &Clock,
         ctx: &mut TxContext,
     ) {
         let name_bytes = std::string::bytes(&name);
         assert!(std::vector::length(name_bytes) <= MAX_NAME_LENGTH, ENameTooLong);
         assert!(str + dex + int + end == INITIAL_STAT_POINTS, EInvalidStatTotal);
 
+        let player = tx_context::sender(ctx);
+
         let character = Character {
             id: object::new(ctx),
+            owner: player,
             name,
             level: 1,
             xp: 0,
@@ -131,6 +167,7 @@ module sui_combats::character {
             wins: 0,
             losses: 0,
             rating: DEFAULT_RATING,
+            last_updated: clock::timestamp_ms(clock),
             weapon: option::none(),
             offhand: option::none(),
             helmet: option::none(),
@@ -144,29 +181,43 @@ module sui_combats::character {
         };
 
         let character_id = object::id(&character);
-        let owner = tx_context::sender(ctx);
 
         event::emit(CharacterCreated {
             character_id,
             name: character.name,
-            owner,
+            owner: player,
             strength: str,
             dexterity: dex,
             intuition: int,
             endurance: end,
         });
 
-        // Soulbound: use transfer (not public_transfer) so only this module can transfer it
-        transfer::transfer(character, owner);
+        transfer::share_object(character);
     }
 
-    /// Add XP to a character and auto-level up if thresholds are met.
-    public(package) fun add_xp(character: &mut Character, amount: u64) {
-        assert!(character.level < MAX_LEVEL, EMaxLevelReached);
+    /// Server calls this after each fight to update the character on-chain.
+    /// Requires AdminCap (only the server holds this).
+    public entry fun update_after_fight(
+        _admin: &AdminCap,
+        character: &mut Character,
+        won: bool,
+        xp_gained: u64,
+        new_rating: u16,
+        clock: &Clock,
+    ) {
+        // Update win/loss
+        if (won) {
+            character.wins = character.wins + 1;
+        } else {
+            character.losses = character.losses + 1;
+        };
 
-        character.xp = character.xp + amount;
+        // Update rating
+        character.rating = new_rating;
 
-        // Check for level-ups
+        // Add XP and check for level-ups
+        character.xp = character.xp + xp_gained;
+
         while (character.level < MAX_LEVEL) {
             let next_level = character.level + 1;
             let required_xp = xp_for_level(next_level);
@@ -176,23 +227,41 @@ module sui_combats::character {
 
                 event::emit(LevelUp {
                     character_id: object::id(character),
+                    owner: character.owner,
                     new_level: character.level,
                     xp: character.xp,
+                    unallocated_points: character.unallocated_points,
                 });
             } else {
                 break
             }
         };
+
+        character.last_updated = clock::timestamp_ms(clock);
+
+        event::emit(FightResultUpdated {
+            character_id: object::id(character),
+            owner: character.owner,
+            won,
+            xp_gained,
+            new_xp: character.xp,
+            new_rating,
+            new_wins: character.wins,
+            new_losses: character.losses,
+        });
     }
 
-    /// Allocate unallocated stat points to the four core stats.
+    /// Player allocates unallocated stat points. Only the character owner can call this.
     public entry fun allocate_points(
         character: &mut Character,
         str: u16,
         dex: u16,
         int: u16,
         end: u16,
+        ctx: &TxContext,
     ) {
+        assert!(tx_context::sender(ctx) == character.owner, ENotOwner);
+
         let total = str + dex + int + end;
         assert!(total > 0 && total <= character.unallocated_points, ENotEnoughPoints);
 
@@ -204,29 +273,16 @@ module sui_combats::character {
 
         event::emit(PointsAllocated {
             character_id: object::id(character),
+            owner: character.owner,
             strength_added: str,
             dexterity_added: dex,
             intuition_added: int,
             endurance_added: end,
+            remaining_points: character.unallocated_points,
         });
     }
 
-    /// Update win/loss record and rating after a match.
-    public(package) fun update_record(character: &mut Character, won: bool) {
-        if (won) {
-            character.wins = character.wins + 1;
-            character.rating = character.rating + RATING_CHANGE;
-        } else {
-            character.losses = character.losses + 1;
-            if (character.rating >= RATING_CHANGE) {
-                character.rating = character.rating - RATING_CHANGE;
-            } else {
-                character.rating = 0;
-            };
-        };
-    }
-
-    // ===== Accessor functions (used by other modules) =====
+    // ===== Package-internal helpers (used by equipment module) =====
 
     public(package) fun uid_mut(character: &mut Character): &mut UID {
         &mut character.id
@@ -236,45 +292,21 @@ module sui_combats::character {
         &character.id
     }
 
-    public fun level(character: &Character): u8 {
-        character.level
-    }
+    // ===== Accessor functions =====
 
-    public fun strength(character: &Character): u16 {
-        character.strength
-    }
-
-    public fun dexterity(character: &Character): u16 {
-        character.dexterity
-    }
-
-    public fun intuition(character: &Character): u16 {
-        character.intuition
-    }
-
-    public fun endurance(character: &Character): u16 {
-        character.endurance
-    }
-
-    public fun rating(character: &Character): u16 {
-        character.rating
-    }
-
-    public fun wins(character: &Character): u32 {
-        character.wins
-    }
-
-    public fun losses(character: &Character): u32 {
-        character.losses
-    }
-
-    public fun xp(character: &Character): u64 {
-        character.xp
-    }
-
-    public fun name(character: &Character): String {
-        character.name
-    }
+    public fun owner(character: &Character): address { character.owner }
+    public fun level(character: &Character): u8 { character.level }
+    public fun strength(character: &Character): u16 { character.strength }
+    public fun dexterity(character: &Character): u16 { character.dexterity }
+    public fun intuition(character: &Character): u16 { character.intuition }
+    public fun endurance(character: &Character): u16 { character.endurance }
+    public fun rating(character: &Character): u16 { character.rating }
+    public fun wins(character: &Character): u32 { character.wins }
+    public fun losses(character: &Character): u32 { character.losses }
+    public fun xp(character: &Character): u64 { character.xp }
+    public fun name(character: &Character): String { character.name }
+    public fun unallocated_points(character: &Character): u16 { character.unallocated_points }
+    public fun last_updated(character: &Character): u64 { character.last_updated }
 
     // Equipment slot accessors
     public fun weapon(character: &Character): Option<ID> { character.weapon }

@@ -12,7 +12,9 @@ import type {
   LeaderboardEntry,
   MarketplaceListing,
   LootBoxResult,
+  WagerLobbyEntry,
 } from "@/types/game";
+import type { OnChainCharacter } from "@/lib/sui-contracts";
 import type { FightHistoryEntry } from "@/types/ws-messages";
 
 export interface GameState {
@@ -24,6 +26,7 @@ export interface GameState {
   inventory: Item[];
   onChainItems: Item[];
   onChainEquipped: Partial<Record<keyof EquipmentSlots, Item>>;
+  onChainCharacter: OnChainCharacter | null;
 
   // Fight
   fight: FightState | null;
@@ -51,6 +54,9 @@ export interface GameState {
     fightType: string;
   } | null;
 
+  // Wager Lobby
+  wagerLobby: WagerLobbyEntry[];
+
   // Wager accept (Player B)
   pendingWagerAccept: {
     wagerMatchId: string;
@@ -59,7 +65,7 @@ export interface GameState {
   } | null;
 
   // UI
-  currentArea: "arena" | "marketplace" | "tavern" | "hall_of_fame";
+  currentArea: "character" | "arena" | "marketplace" | "tavern" | "hall_of_fame";
   errorMessage: string | null;
   errorTimestamp: number | null;
 }
@@ -70,6 +76,7 @@ export const initialGameState: GameState = {
   inventory: [],
   onChainItems: [],
   onChainEquipped: {},
+  onChainCharacter: null,
   fight: null,
   fightQueue: null,
   lootResult: null,
@@ -80,9 +87,10 @@ export const initialGameState: GameState = {
   fightHistory: [],
   marketplaceListings: [],
   spectatingFight: null,
+  wagerLobby: [],
   pendingChallenge: null,
   pendingWagerAccept: null,
-  currentArea: "tavern",
+  currentArea: "character",
   errorMessage: null,
   errorTimestamp: null,
 };
@@ -91,6 +99,7 @@ export type GameAction =
   | { type: "SET_CHARACTER"; character: Character }
   | { type: "SET_INVENTORY"; items: Item[] }
   | { type: "SET_ONCHAIN_ITEMS"; items: Item[] }
+  | { type: "SET_ONCHAIN_CHARACTER"; data: OnChainCharacter | null }
   | { type: "EQUIP_ONCHAIN_ITEM"; item: Item; slot: keyof EquipmentSlots }
   | { type: "UNEQUIP_ONCHAIN_ITEM"; slot: keyof EquipmentSlots }
   | { type: "SET_FIGHT"; fight: FightState | null }
@@ -111,6 +120,9 @@ export type GameAction =
   | { type: "SET_PENDING_CHALLENGE"; challenge: GameState["pendingChallenge"] }
   | { type: "SET_AREA"; area: GameState["currentArea"] }
   | { type: "SET_PENDING_WAGER_ACCEPT"; payload: GameState["pendingWagerAccept"] }
+  | { type: "SET_WAGER_LOBBY"; entries: WagerLobbyEntry[] }
+  | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
+  | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
   | { type: "SET_ERROR"; message: string | null }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
   | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
@@ -123,6 +135,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, inventory: action.items };
     case "SET_ONCHAIN_ITEMS":
       return { ...state, onChainItems: action.items };
+    case "SET_ONCHAIN_CHARACTER":
+      return { ...state, onChainCharacter: action.data };
     case "EQUIP_ONCHAIN_ITEM": {
       const { item, slot } = action;
       const newOnChainItems = state.onChainItems.filter((i) => i.id !== item.id);
@@ -209,6 +223,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, currentArea: action.area };
     case "SET_PENDING_WAGER_ACCEPT":
       return { ...state, pendingWagerAccept: action.payload };
+    case "SET_WAGER_LOBBY":
+      return { ...state, wagerLobby: action.entries };
+    case "ADD_WAGER_LOBBY_ENTRY":
+      return { ...state, wagerLobby: [...state.wagerLobby, action.entry] };
+    case "REMOVE_WAGER_LOBBY_ENTRY":
+      return { ...state, wagerLobby: state.wagerLobby.filter(e => e.wagerMatchId !== action.wagerMatchId) };
     case "UPDATE_TURN":
       if (!state.fight) return state;
       return { ...state, fight: { ...state.fight, turn: action.turn, turnDeadline: action.turnDeadline } };

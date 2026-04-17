@@ -8,6 +8,7 @@ const PACKAGE_ID =
 
 const CHARACTER_TYPE = `${PACKAGE_ID}::character::Character`;
 const ITEM_TYPE = `${PACKAGE_ID}::item::Item`;
+const SUI_CLOCK = '0x6';
 
 export interface OnChainCharacter {
   objectId: string;
@@ -24,37 +25,71 @@ export interface OnChainCharacter {
   rating: number;
 }
 
-/** Query a wallet for an existing Character NFT. Returns the first one found, or null. */
+/**
+ * Find a player's Character NFT. Characters are shared objects, so we query
+ * CharacterCreated events to find the object ID, then fetch it directly.
+ */
 export async function fetchCharacterNFT(
   client: SuiGrpcClient,
   owner: string,
 ): Promise<OnChainCharacter | null> {
-  const { objects } = await client.listOwnedObjects({
-    owner,
-    type: CHARACTER_TYPE,
-    include: { json: true },
-  });
+  // First try: query events to find Character ID for this owner
+  const rpcUrl = "https://fullnode.testnet.sui.io:443";
+  try {
+    const evRes = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "suix_queryEvents",
+        params: [
+          { MoveEventType: `${PACKAGE_ID}::character::CharacterCreated` },
+          null, 50, true,
+        ],
+      }),
+    });
+    const evJson = await evRes.json() as Record<string, unknown>;
+    const evResult = evJson.result as { data?: Array<{ parsedJson?: Record<string, unknown> }> } | undefined;
+    const events = evResult?.data || [];
 
-  if (objects.length === 0) return null;
+    let characterId: string | null = null;
+    for (const event of events) {
+      const parsed = event.parsedJson;
+      if (parsed?.owner === owner) {
+        characterId = String(parsed.character_id);
+        break;
+      }
+    }
 
-  const obj = objects[0];
-  const json = obj.json as Record<string, unknown> | null;
-  if (!json) return null;
+    if (!characterId) return null;
 
-  return {
-    objectId: obj.objectId,
-    name: String(json.name ?? ""),
-    level: Number(json.level ?? 1),
-    xp: Number(json.xp ?? 0),
-    strength: Number(json.strength ?? 5),
-    dexterity: Number(json.dexterity ?? 5),
-    intuition: Number(json.intuition ?? 5),
-    endurance: Number(json.endurance ?? 5),
-    unallocatedPoints: Number(json.unallocated_points ?? 0),
-    wins: Number(json.wins ?? 0),
-    losses: Number(json.losses ?? 0),
-    rating: Number(json.rating ?? 1000),
-  };
+    // Fetch the shared Character object by ID
+    const { object: obj } = await client.getObject({
+      objectId: characterId,
+      include: { json: true },
+    });
+
+    const json = obj.json as Record<string, unknown> | null;
+    if (!json) return null;
+
+    return {
+      objectId: obj.objectId,
+      name: String(json.name ?? ""),
+      level: Number(json.level ?? 1),
+      xp: Number(json.xp ?? 0),
+      strength: Number(json.strength ?? 5),
+      dexterity: Number(json.dexterity ?? 5),
+      intuition: Number(json.intuition ?? 5),
+      endurance: Number(json.endurance ?? 5),
+      unallocatedPoints: Number(json.unallocated_points ?? 0),
+      wins: Number(json.wins ?? 0),
+      losses: Number(json.losses ?? 0),
+      rating: Number(json.rating ?? 1000),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Build a transaction that calls create_character on-chain. */
@@ -70,6 +105,29 @@ export function buildMintCharacterTx(
     target: `${PACKAGE_ID}::character::create_character`,
     arguments: [
       tx.pure.string(name),
+      tx.pure.u16(strength),
+      tx.pure.u16(dexterity),
+      tx.pure.u16(intuition),
+      tx.pure.u16(endurance),
+      tx.object(SUI_CLOCK),
+    ],
+  });
+  return tx;
+}
+
+/** Build a transaction that allocates unallocated stat points on-chain. */
+export function buildAllocateStatsTx(
+  characterObjectId: string,
+  strength: number,
+  dexterity: number,
+  intuition: number,
+  endurance: number,
+): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::character::allocate_points`,
+    arguments: [
+      tx.object(characterObjectId),
       tx.pure.u16(strength),
       tx.pure.u16(dexterity),
       tx.pure.u16(intuition),
@@ -136,6 +194,91 @@ export async function fetchOwnedItems(
   return items;
 }
 
+/** Fetch items locked inside the player's Kiosk(s). */
+export async function fetchKioskItems(
+  client: SuiGrpcClient,
+  owner: string,
+): Promise<Item[]> {
+  const items: Item[] = [];
+
+  // 1. Find KioskOwnerCap objects owned by this wallet
+  const { objects: caps } = await client.listOwnedObjects({
+    owner,
+    type: "0x2::kiosk::KioskOwnerCap",
+    include: { json: true },
+  });
+
+  for (const cap of caps) {
+    const capJson = cap.json as Record<string, unknown> | null;
+    if (!capJson) continue;
+    const kioskId = String(capJson.for ?? "");
+    if (!kioskId) continue;
+
+    // 2. List dynamic fields in this kiosk to find Item objects
+    let dfCursor: string | undefined = undefined;
+    let hasNextPage = true;
+
+    while (hasNextPage) {
+      const res: Awaited<ReturnType<typeof client.listDynamicFields>> =
+        await client.listDynamicFields({
+          parentId: kioskId,
+          cursor: dfCursor,
+          limit: 50,
+        });
+
+      for (const field of res.dynamicFields) {
+        // Kiosk items are DynamicObject fields; the valueType contains the item type
+        if (field.$kind !== "DynamicObject" || !field.valueType?.includes("::item::Item")) continue;
+
+        // Fetch the actual item object
+        try {
+          const { object: obj } = await client.getObject({
+            objectId: field.childId,
+            include: { json: true },
+          });
+          const json = obj.json as Record<string, unknown> | null;
+          if (!json) continue;
+
+          items.push({
+            id: obj.objectId,
+            name: String(json.name ?? ""),
+            imageUrl: String(json.image_url ?? "") || undefined,
+            itemType: Number(json.item_type ?? 1) as Item["itemType"],
+            classReq: Number(json.class_req ?? 0),
+            levelReq: Number(json.level_req ?? 1),
+            rarity: Number(json.rarity ?? 1) as Item["rarity"],
+            statBonuses: {
+              strengthBonus: Number(json.strength_bonus ?? 0),
+              dexterityBonus: Number(json.dexterity_bonus ?? 0),
+              intuitionBonus: Number(json.intuition_bonus ?? 0),
+              enduranceBonus: Number(json.endurance_bonus ?? 0),
+              hpBonus: Number(json.hp_bonus ?? 0),
+              armorBonus: Number(json.armor_bonus ?? 0),
+              defenseBonus: Number(json.defense_bonus ?? 0),
+              attackBonus: Number(json.attack_bonus ?? 0),
+              critChanceBonus: Number(json.crit_chance_bonus ?? 0),
+              critMultiplierBonus: Number(json.crit_multiplier_bonus ?? 0),
+              evasionBonus: Number(json.evasion_bonus ?? 0),
+              antiCritBonus: Number(json.anti_crit_bonus ?? 0),
+              antiEvasionBonus: Number(json.anti_evasion_bonus ?? 0),
+            },
+            minDamage: Number(json.min_damage ?? 0),
+            maxDamage: Number(json.max_damage ?? 0),
+            inKiosk: true,
+          });
+        } catch {
+          // Skip items that fail to fetch
+        }
+      }
+
+      hasNextPage = res.hasNextPage;
+      dfCursor = res.cursor ?? undefined;
+    }
+  }
+
+  return items;
+}
+
 // ===== Wager Transactions =====
 
 /** Build a transaction that creates a wager match with SUI escrow. */
@@ -144,7 +287,7 @@ export function buildCreateWagerTx(stakeAmountMist: bigint): Transaction {
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::create_wager`,
-    arguments: [stakeCoin],
+    arguments: [stakeCoin, tx.object(SUI_CLOCK)],
   });
   return tx;
 }
@@ -155,7 +298,7 @@ export function buildAcceptWagerTx(wagerMatchId: string, stakeAmountMist: bigint
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::accept_wager`,
-    arguments: [tx.object(wagerMatchId), stakeCoin],
+    arguments: [tx.object(wagerMatchId), stakeCoin, tx.object(SUI_CLOCK)],
   });
   return tx;
 }
@@ -166,6 +309,16 @@ export function buildCancelWagerTx(wagerMatchId: string): Transaction {
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::cancel_wager`,
     arguments: [tx.object(wagerMatchId)],
+  });
+  return tx;
+}
+
+/** Build a transaction to cancel an expired wager. Anyone can call this. */
+export function buildCancelExpiredWagerTx(wagerMatchId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::cancel_expired_wager`,
+    arguments: [tx.object(wagerMatchId), tx.object(SUI_CLOCK)],
   });
   return tx;
 }

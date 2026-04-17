@@ -9,6 +9,7 @@ const AREAS: {
   icon: string;
   desc: string;
 }[] = [
+  { id: "character", label: "Character", icon: "\ud83d\udc64", desc: "Stats & gear" },
   { id: "arena", label: "Arena", icon: "\u2694\uFE0F", desc: "Fight players" },
   { id: "marketplace", label: "Market", icon: "\ud83c\udfea", desc: "Buy & sell" },
   { id: "tavern", label: "Tavern", icon: "\ud83c\udf7b", desc: "Chat & social" },

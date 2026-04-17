@@ -179,6 +179,7 @@ export interface Item {
   minDamage: number;
   maxDamage: number;
   price?: number;
+  inKiosk?: boolean;
 }
 
 // ===== FIGHT =====
@@ -268,6 +269,18 @@ export interface MarketplaceListing {
   sellerName: string;
   price: number;
   listedAt: number;
+}
+
+// ===== WAGER LOBBY =====
+export interface WagerLobbyEntry {
+  wagerMatchId: string;
+  creatorWallet: string;
+  creatorName: string;
+  creatorLevel: number;
+  creatorRating: number;
+  creatorStats: CharacterStats;
+  wagerAmount: number;
+  createdAt: number;
 }
 
 // ===== LOOT =====

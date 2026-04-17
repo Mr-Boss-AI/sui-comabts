@@ -3,11 +3,12 @@
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
 import { useDAppKit } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
-import { buildCreateWagerTx, buildAcceptWagerTx } from "@/lib/sui-contracts";
-import type { FightType } from "@/types/game";
+import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
+import type { FightType, WagerLobbyEntry } from "@/types/game";
 
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
   { type: "friendly", label: "Friendly", desc: "No stakes, just practice", minLevel: 1 },
@@ -15,15 +16,89 @@ const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: num
   { type: "wager", label: "Wager", desc: "Stake real SUI on the outcome", minLevel: 1 },
 ];
 
+function getArchetypeLabel(stats: { strength: number; dexterity: number; intuition: number; endurance: number }): string {
+  const max = Math.max(stats.strength, stats.dexterity, stats.intuition, stats.endurance);
+  if (max === stats.strength) return "STR";
+  if (max === stats.dexterity) return "DEX";
+  if (max === stats.intuition) return "INT";
+  return "END";
+}
+
+function getArchetypeColor(label: string): string {
+  switch (label) {
+    case "STR": return "text-red-400";
+    case "DEX": return "text-cyan-400";
+    case "INT": return "text-purple-400";
+    case "END": return "text-amber-400";
+    default: return "text-zinc-400";
+  }
+}
+
+function timeAgo(timestamp: number): string {
+  const secs = Math.floor((Date.now() - timestamp) / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  return `${Math.floor(secs / 60)}m ago`;
+}
+
+function WagerLobbyCard({ entry, isOwn, onAccept, onCancel, signing }: {
+  entry: WagerLobbyEntry;
+  isOwn: boolean;
+  onAccept: () => void;
+  onCancel: () => void;
+  signing: boolean;
+}) {
+  const archetype = getArchetypeLabel(entry.creatorStats);
+  const color = getArchetypeColor(archetype);
+
+  return (
+    <div className={`rounded-lg border p-3 transition-all ${
+      isOwn
+        ? "border-amber-700/40 bg-amber-900/10"
+        : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700"
+    }`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm text-zinc-100 truncate">{entry.creatorName}</span>
+            <Badge variant="info">Lv.{entry.creatorLevel}</Badge>
+            <span className={`text-xs font-bold ${color}`}>{archetype}</span>
+          </div>
+          <div className="flex items-center gap-3 mt-1 text-xs text-zinc-500">
+            <span>{entry.creatorRating} ELO</span>
+            <span>S{entry.creatorStats.strength} D{entry.creatorStats.dexterity} I{entry.creatorStats.intuition} E{entry.creatorStats.endurance}</span>
+            <span>{timeAgo(entry.createdAt)}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-amber-400 font-bold text-sm">{entry.wagerAmount} SUI</span>
+          {isOwn ? (
+            <Button variant="danger" size="sm" onClick={onCancel} disabled={signing}>
+              Cancel
+            </Button>
+          ) : (
+            <Button size="sm" onClick={onAccept} disabled={signing}>
+              {signing ? "Signing..." : "Accept"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MatchmakingQueue() {
   const { state, dispatch } = useGame();
-  const { fightQueue, character, pendingWagerAccept } = state;
+  const { fightQueue, character, wagerLobby } = state;
   const [wagerAmount, setWagerAmount] = useState(0.1);
   const [selectedType, setSelectedType] = useState<FightType>("friendly");
   const [signing, setSigning] = useState(false);
   const dAppKit = useDAppKit();
 
   const level = character?.level ?? 1;
+  const walletAddress = character?.walletAddress ?? "";
+
+  // Check if current player has an open wager in the lobby
+  const ownLobbyEntry = wagerLobby.find(e => e.creatorWallet === walletAddress);
 
   const handleQueue = useCallback(async () => {
     // Include on-chain equipped items so the server can apply their stats in combat
@@ -42,13 +117,16 @@ export function MatchmakingQueue() {
         const signer = new CurrentAccountSigner(dAppKit as any);
         const result = await signer.signAndExecuteTransaction({ transaction: tx });
 
-        // Extract the WagerMatch object ID from created objects
+        // Unwrap discriminated union: { $kind: 'Transaction', Transaction: { effects } }
         const resultAny = result as any;
-        const createdObjects = resultAny.effects?.created || resultAny.objectChanges?.filter((c: any) => c.type === "created") || [];
-        const sharedObj = createdObjects.find((o: any) =>
-          o.owner === "Shared" || o.owner?.Shared || o.objectType?.includes("WagerMatch")
+        const txData = resultAny.Transaction || resultAny.FailedTransaction || resultAny;
+
+        // v2 SDK uses changedObjects with idOperation/outputOwner
+        const changedObjects: any[] = txData.effects?.changedObjects || [];
+        const sharedObj = changedObjects.find((o: any) =>
+          o.idOperation === "Created" && (o.outputOwner?.$kind === "Shared" || o.outputOwner?.Shared)
         );
-        const wagerMatchId = sharedObj?.reference?.objectId || sharedObj?.objectId;
+        const wagerMatchId = sharedObj?.objectId;
 
         if (!wagerMatchId) {
           dispatch({ type: "SET_ERROR", message: "Could not find WagerMatch object in transaction result. Check explorer." });
@@ -87,67 +165,53 @@ export function MatchmakingQueue() {
     state.socket.send({ type: "cancel_queue" });
   }, [state.socket]);
 
-  // Handle incoming wager accept request (Player B flow)
-  const handleAcceptWager = useCallback(async () => {
-    if (!pendingWagerAccept) return;
+  const handleAcceptWager = useCallback(async (entry: WagerLobbyEntry) => {
     setSigning(true);
     try {
-      const stakeAmountMist = BigInt(Math.round(pendingWagerAccept.stakeAmount * 1_000_000_000));
-      const tx = buildAcceptWagerTx(pendingWagerAccept.wagerMatchId, stakeAmountMist);
+      const stakeAmountMist = BigInt(Math.round(entry.wagerAmount * 1_000_000_000));
+      const tx = buildAcceptWagerTx(entry.wagerMatchId, stakeAmountMist);
 
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
       const resultAny = result as any;
-      const digest = resultAny.digest || resultAny.effects?.transactionDigest;
+      const txData = resultAny.Transaction || resultAny.FailedTransaction || resultAny;
+      const digest = txData.digest || txData.effects?.transactionDigest;
 
       state.socket.send({
         type: "wager_accepted",
-        wagerMatchId: pendingWagerAccept.wagerMatchId,
+        wagerMatchId: entry.wagerMatchId,
         txDigest: digest,
       });
-
-      dispatch({ type: "SET_PENDING_WAGER_ACCEPT", payload: null });
     } catch (err: any) {
       console.error("[Wager] accept_wager failed:", err);
       dispatch({ type: "SET_ERROR", message: err?.message || "Wallet transaction rejected" });
     } finally {
       setSigning(false);
     }
-  }, [pendingWagerAccept, dAppKit, state.socket, dispatch]);
+  }, [dAppKit, state.socket, dispatch]);
 
-  const handleDeclineWager = useCallback(() => {
-    dispatch({ type: "SET_PENDING_WAGER_ACCEPT", payload: null });
-    // Server will timeout and handle cleanup
-  }, [dispatch]);
+  const handleCancelWager = useCallback(async (entry: WagerLobbyEntry) => {
+    setSigning(true);
+    try {
+      // Cancel on-chain first (player's own cancel)
+      const tx = buildCancelWagerTx(entry.wagerMatchId);
+      const signer = new CurrentAccountSigner(dAppKit as any);
+      await signer.signAndExecuteTransaction({ transaction: tx });
 
-  // Show wager accept prompt (Player B)
-  if (pendingWagerAccept) {
-    return (
-      <Card glow>
-        <CardBody className="text-center space-y-4 py-6">
-          <div className="text-lg font-bold text-amber-400">Wager Challenge!</div>
-          <div className="text-sm text-zinc-300">
-            <span className="font-semibold">{pendingWagerAccept.opponentName}</span> wants to fight for{" "}
-            <span className="text-amber-400 font-bold">{pendingWagerAccept.stakeAmount} SUI</span>
-          </div>
-          <p className="text-xs text-zinc-500">
-            Your wallet will prompt you to stake {pendingWagerAccept.stakeAmount} SUI into on-chain escrow.
-            Winner takes 95%, 5% platform fee.
-          </p>
-          <div className="flex gap-2 justify-center">
-            <Button onClick={handleAcceptWager} disabled={signing}>
-              {signing ? "Signing..." : "Accept & Stake SUI"}
-            </Button>
-            <Button variant="secondary" onClick={handleDeclineWager} disabled={signing}>
-              Decline
-            </Button>
-          </div>
-        </CardBody>
-      </Card>
-    );
-  }
+      // Tell server to remove from lobby
+      state.socket.send({
+        type: "cancel_wager_lobby",
+        wagerMatchId: entry.wagerMatchId,
+      });
+    } catch (err: any) {
+      console.error("[Wager] cancel_wager failed:", err);
+      dispatch({ type: "SET_ERROR", message: err?.message || "Wallet cancel rejected" });
+    } finally {
+      setSigning(false);
+    }
+  }, [dAppKit, state.socket, dispatch]);
 
-  // Show queue status
+  // Show queue status (friendly/ranked only)
   if (fightQueue) {
     return (
       <Card glow>
@@ -176,6 +240,7 @@ export function MatchmakingQueue() {
         <span className="font-semibold">Find a Fight</span>
       </CardHeader>
       <CardBody className="space-y-3">
+        {/* Fight type selector */}
         {FIGHT_TYPES.map(({ type, label, desc, minLevel }) => {
           const locked = level < minLevel;
           return (
@@ -200,29 +265,66 @@ export function MatchmakingQueue() {
           );
         })}
 
+        {/* Wager lobby */}
         {selectedType === "wager" && (
-          <div className="space-y-2 mt-2">
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-zinc-400">Stake (SUI):</label>
-              <input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={wagerAmount}
-                onChange={(e) => setWagerAmount(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
-                className="w-24 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100"
-              />
+          <div className="space-y-3 mt-2">
+            {/* Create wager form */}
+            {!ownLobbyEntry && (
+              <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-zinc-400">Stake (SUI):</label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={wagerAmount}
+                    onChange={(e) => setWagerAmount(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
+                    className="w-24 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100"
+                  />
+                </div>
+                <p className="text-xs text-zinc-500">
+                  Your wallet will lock {wagerAmount} SUI in on-chain escrow.
+                  Winner gets 95%. 5% platform fee.
+                </p>
+                <Button onClick={handleQueue} className="w-full" disabled={signing}>
+                  {signing ? "Signing transaction..." : "Create Wager & Lock SUI"}
+                </Button>
+              </div>
+            )}
+
+            {/* Open wagers list */}
+            <div>
+              <div className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-2">
+                Open Wagers ({wagerLobby.length})
+              </div>
+              {wagerLobby.length === 0 ? (
+                <p className="text-sm text-zinc-600 text-center py-4">
+                  No open wagers. Create one to challenge others!
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {wagerLobby.map((entry) => (
+                    <WagerLobbyCard
+                      key={entry.wagerMatchId}
+                      entry={entry}
+                      isOwn={entry.creatorWallet === walletAddress}
+                      onAccept={() => handleAcceptWager(entry)}
+                      onCancel={() => handleCancelWager(entry)}
+                      signing={signing}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-            <p className="text-xs text-zinc-500">
-              Your wallet will sign a transaction to lock {wagerAmount} SUI in on-chain escrow.
-              Winner gets 95%. 5% platform fee.
-            </p>
           </div>
         )}
 
-        <Button onClick={handleQueue} className="w-full" disabled={signing}>
-          {signing ? "Signing transaction..." : selectedType === "wager" ? "Stake SUI & Enter Queue" : "Enter Queue"}
-        </Button>
+        {/* Non-wager: Enter Queue button */}
+        {selectedType !== "wager" && (
+          <Button onClick={handleQueue} className="w-full" disabled={signing}>
+            Enter Queue
+          </Button>
+        )}
       </CardBody>
     </Card>
   );

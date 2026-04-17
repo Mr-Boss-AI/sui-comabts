@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { GAME_CONSTANTS } from '../config';
 import { xpToNextLevel } from '../game/combat';
-import { dbSaveCharacter, dbLoadCharacter, dbSaveItems, dbLoadItems } from './db';
+import { dbSaveCharacter, dbLoadCharacter, dbDeleteCharacter, dbSaveItems, dbLoadItems } from './db';
 import type { Character, CharacterStats, EquipmentSlots, FightHistoryEntry, Item, ItemType } from '../types';
 
 // === In-Memory Character Store ===
@@ -64,9 +64,26 @@ export async function restoreCharacterFromDb(walletAddress: string): Promise<Cha
     wins: row.wins,
     losses: row.losses,
     rating: row.rating,
+    unallocatedPoints: row.unallocated_points || 0,
     fightHistory: [],
     createdAt: new Date(row.created_at).getTime(),
   };
+
+  // Retroactively compute unallocated points if DB didn't have them
+  // Total possible = 20 (starting) + (level - 1) * 3
+  // Currently allocated = sum of stats
+  // Unallocated = total_possible - currently_allocated
+  if (character.unallocatedPoints === 0 && character.level > 1) {
+    const totalPossible = GAME_CONSTANTS.STARTING_STAT_POINTS
+      + (character.level - 1) * GAME_CONSTANTS.STAT_POINTS_PER_LEVEL;
+    const allocated = character.stats.strength + character.stats.dexterity
+      + character.stats.intuition + character.stats.endurance;
+    const retroactive = Math.max(0, totalPossible - allocated);
+    if (retroactive > 0) {
+      character.unallocatedPoints = retroactive;
+      console.log(`[DB] Retroactive unallocated points for "${character.name}": ${retroactive} (level ${character.level}, stats total ${allocated}/${totalPossible})`);
+    }
+  }
 
   // Restore items from DB
   const { inventory, equipment } = await dbLoadItems(walletAddress);
@@ -142,6 +159,7 @@ export function createCharacter(
     wins: 0,
     losses: 0,
     rating: GAME_CONSTANTS.DEFAULT_RATING,
+    unallocatedPoints: 0,
     fightHistory: [],
     createdAt: Date.now(),
   };
@@ -154,6 +172,21 @@ export function createCharacter(
   dbSaveCharacter(character).catch(() => {});
 
   return { character };
+}
+
+export function deleteCharacter(walletAddress: string): boolean {
+  const charId = walletToCharacter.get(walletAddress);
+  if (!charId) return false;
+
+  characters.delete(charId);
+  walletToCharacter.delete(walletAddress);
+  fightHistories.delete(charId);
+
+  // Delete from Supabase (fire-and-forget)
+  dbDeleteCharacter(walletAddress).catch(() => {});
+
+  console.log(`[Character] Deleted character for ${walletAddress.slice(0, 10)}...`);
+  return true;
 }
 
 export function updateCharacter(character: Character): void {

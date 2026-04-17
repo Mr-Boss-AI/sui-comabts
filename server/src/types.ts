@@ -110,6 +110,7 @@ export interface Character {
   wins: number;
   losses: number;
   rating: number;
+  unallocatedPoints: number;
   fightHistory: string[];
   createdAt: number;
 }
@@ -185,6 +186,20 @@ export interface QueueEntry {
   joinedAt: number;
   wagerAmount?: number;
   wagerMatchId?: string;
+}
+
+// === Wager Lobby ===
+
+export interface WagerLobbyEntry {
+  wagerMatchId: string;
+  creatorWallet: string;
+  creatorCharacterId: string;
+  creatorName: string;
+  creatorLevel: number;
+  creatorRating: number;
+  creatorStats: CharacterStats;
+  wagerAmount: number;
+  createdAt: number;
 }
 
 // === WebSocket Messages ===

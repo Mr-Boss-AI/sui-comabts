@@ -38,11 +38,10 @@ class MatchmakingQueue {
     return true;
   }
 
-  removeFromQueue(walletAddress: string): boolean {
+  removeFromQueue(walletAddress: string): QueueEntry | null {
     const idx = this.queue.findIndex((e) => e.walletAddress === walletAddress);
-    if (idx === -1) return false;
-    this.queue.splice(idx, 1);
-    return true;
+    if (idx === -1) return null;
+    return this.queue.splice(idx, 1)[0];
   }
 
   isInQueue(walletAddress: string): boolean {

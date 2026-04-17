@@ -58,6 +58,10 @@ export function CharacterProfile({ character, compact }: { character: Character;
   const [showAllocate, setShowAllocate] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(null);
 
+  // Prefer server-tracked unallocatedPoints, fall back to on-chain
+  const unallocatedPoints = character.unallocatedPoints || (state.onChainCharacter?.unallocatedPoints ?? 0);
+  const characterObjectId = state.onChainCharacter?.objectId;
+
   // Merge server equipment with locally-equipped on-chain items
   const eq: EquipmentSlots = useMemo(() => {
     const merged = { ...character.equipment };
@@ -77,6 +81,7 @@ export function CharacterProfile({ character, compact }: { character: Character;
     for (const item of state.inventory) byId.set(item.id, item);
     for (const item of state.onChainItems) byId.set(item.id, item);
     return Array.from(byId.values()).filter((item) =>
+      !item.inKiosk &&
       SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
       item.levelReq <= character.level
     );
@@ -212,9 +217,9 @@ export function CharacterProfile({ character, compact }: { character: Character;
                   );
                 })}
               </div>
-              {character.unallocatedPoints > 0 && (
-                <button onClick={() => setShowAllocate(true)} className="mt-2 text-xs text-amber-400 hover:text-amber-300 font-bold">
-                  +{character.unallocatedPoints} points to allocate
+              {unallocatedPoints > 0 && (
+                <button onClick={() => setShowAllocate(true)} className="mt-2 text-xs text-amber-400 hover:text-amber-300 font-bold animate-pulse">
+                  +{unallocatedPoints} points to allocate
                 </button>
               )}
             </div>
@@ -260,7 +265,13 @@ export function CharacterProfile({ character, compact }: { character: Character;
           </div>
         </div>
       </div>
-      {showAllocate && <StatAllocateModal character={character} onClose={() => setShowAllocate(false)} />}
+      {showAllocate && (
+        <StatAllocateModal
+          character={{ ...character, unallocatedPoints }}
+          characterObjectId={characterObjectId}
+          onClose={() => setShowAllocate(false)}
+        />
+      )}
 
       {/* Equipped slot clicked — show item details + Unequip */}
       {selectedSlot && selectedItem && (

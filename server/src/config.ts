@@ -8,6 +8,7 @@ export const CONFIG = {
   SUI_NETWORK: process.env.SUI_NETWORK || 'testnet',
   SUI_PACKAGE_ID: process.env.SUI_PACKAGE_ID || '0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd',
   PLATFORM_TREASURY: process.env.PLATFORM_TREASURY || '0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60',
+  ADMIN_CAP_ID: process.env.ADMIN_CAP_ID || '0xff993e6ded3683762b3ed04d1e7dbe2e7a1373f3de9ddc52ed762b3c18ca9505',
   WAGER_ACCEPT_TIMEOUT_MS: 30_000,
 } as const;
 

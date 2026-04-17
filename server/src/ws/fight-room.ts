@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { GAME_CONSTANTS } from '../config';
 import { settleWagerOnChain } from '../utils/sui-settle';
+import { updateCharacterOnChain, findCharacterObjectId } from '../utils/sui-settle';
 import {
   applyXp,
   checkFightEnd,
@@ -425,6 +426,27 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
     ).catch(() => {});
     persistItems(winnerChar);
     persistItems(loserChar);
+
+    // Update on-chain Character NFTs (fire-and-forget)
+    (async () => {
+      try {
+        const [winnerObjId, loserObjId] = await Promise.all([
+          findCharacterObjectId(winnerChar.walletAddress),
+          findCharacterObjectId(loserChar.walletAddress),
+        ]);
+        if (winnerObjId) {
+          await updateCharacterOnChain(winnerObjId, true, winnerXp, winnerChar.rating);
+        }
+        if (loserObjId) {
+          await updateCharacterOnChain(loserObjId, false, loserXp, loserChar.rating);
+        }
+        // Notify clients that on-chain character data has been updated
+        sendToWallet(winnerChar.walletAddress, { type: 'character_updated_onchain' });
+        sendToWallet(loserChar.walletAddress, { type: 'character_updated_onchain' });
+      } catch (err: any) {
+        console.error('[Character] On-chain update after fight failed:', err.message);
+      }
+    })();
   } else if (draw) {
     // Draw: both get small XP, no rating change
     const charA = getCharacterById(fight.playerA.characterId);

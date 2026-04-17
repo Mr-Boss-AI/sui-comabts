@@ -4,16 +4,24 @@ import { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { useGame } from "@/hooks/useGameStore";
+import { useDAppKit, useCurrentClient } from "@mysten/dapp-kit-react";
+import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
+import { buildAllocateStatsTx, fetchCharacterNFT } from "@/lib/sui-contracts";
 import type { Character, CharacterStats } from "@/types/game";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
 
 export function StatAllocateModal({
   character,
+  characterObjectId,
   onClose,
 }: {
   character: Character;
+  characterObjectId?: string;
   onClose: () => void;
 }) {
-  const { state } = useGame();
+  const { state, dispatch } = useGame();
+  const dAppKit = useDAppKit();
+  const client = useCurrentClient() as SuiGrpcClient | null;
   const available = character.unallocatedPoints;
   const [alloc, setAlloc] = useState<CharacterStats>({
     strength: 0,
@@ -21,6 +29,7 @@ export function StatAllocateModal({
     intuition: 0,
     endurance: 0,
   });
+  const [signing, setSigning] = useState(false);
 
   const used = alloc.strength + alloc.dexterity + alloc.intuition + alloc.endurance;
   const remaining = available - used;
@@ -37,13 +46,42 @@ export function StatAllocateModal({
     });
   }
 
-  function handleAllocate() {
+  async function handleAllocate() {
     if (used === 0) return;
-    state.socket.send({
-      type: "allocate_points",
-      ...alloc,
-    });
-    onClose();
+    setSigning(true);
+    try {
+      // If on-chain character exists, sign wallet tx first
+      if (characterObjectId) {
+        const tx = buildAllocateStatsTx(
+          characterObjectId,
+          alloc.strength,
+          alloc.dexterity,
+          alloc.intuition,
+          alloc.endurance,
+        );
+        const signer = new CurrentAccountSigner(dAppKit as any);
+        await signer.signAndExecuteTransaction({ transaction: tx });
+
+        // Re-fetch on-chain character for updated unallocated_points
+        if (client) {
+          const nft = await fetchCharacterNFT(client, character.walletAddress);
+          if (nft) dispatch({ type: "SET_ONCHAIN_CHARACTER", data: nft });
+        }
+      }
+
+      // Always update server-side stats
+      state.socket.send({
+        type: "allocate_points",
+        ...alloc,
+      });
+
+      onClose();
+    } catch (err: any) {
+      console.error("[Stats] allocate_points failed:", err);
+      dispatch({ type: "SET_ERROR", message: err?.message || "Stat allocation failed" });
+    } finally {
+      setSigning(false);
+    }
   }
 
   const stats: (keyof CharacterStats)[] = ["strength", "dexterity", "intuition", "endurance"];
@@ -77,7 +115,7 @@ export function StatAllocateModal({
             <div className="flex items-center gap-2">
               <button
                 onClick={() => adjust(stat, -1)}
-                disabled={alloc[stat] <= 0}
+                disabled={alloc[stat] <= 0 || signing}
                 className="w-7 h-7 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-sm font-bold"
               >
                 -
@@ -85,7 +123,7 @@ export function StatAllocateModal({
               <span className="w-6 text-center font-mono">{alloc[stat]}</span>
               <button
                 onClick={() => adjust(stat, 1)}
-                disabled={remaining <= 0}
+                disabled={remaining <= 0 || signing}
                 className="w-7 h-7 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-sm font-bold"
               >
                 +
@@ -93,8 +131,13 @@ export function StatAllocateModal({
             </div>
           </div>
         ))}
-        <Button onClick={handleAllocate} disabled={used === 0} className="w-full">
-          Allocate Points
+        {characterObjectId && (
+          <p className="text-xs text-zinc-500">
+            This will open your wallet to sign the transaction on-chain.
+          </p>
+        )}
+        <Button onClick={handleAllocate} disabled={used === 0 || signing} className="w-full">
+          {signing ? "Signing transaction..." : "Allocate Points"}
         </Button>
       </div>
     </Modal>

@@ -77,6 +77,37 @@ function HowToPlayButton() {
   );
 }
 
+function ResetCharacterButton() {
+  const { state } = useGame();
+  const [confirming, setConfirming] = useState(false);
+
+  function handleReset() {
+    state.socket.send({ type: "delete_character" });
+    setConfirming(false);
+  }
+
+  if (confirming) {
+    return (
+      <div className="rounded border border-red-900/40 bg-red-950/20 p-3 space-y-2">
+        <p className="text-xs text-red-300">This will delete your character and let you create a new one under the current on-chain package. Your old character data will be lost.</p>
+        <div className="flex gap-2">
+          <Button variant="danger" size="sm" onClick={handleReset}>Confirm Reset</Button>
+          <Button variant="secondary" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setConfirming(true)}
+      className="w-full text-xs text-zinc-600 hover:text-red-400 transition-colors py-2"
+    >
+      Reset Character (migrate to current package)
+    </button>
+  );
+}
+
 function AreaContent() {
   const { state } = useGame();
   const { currentArea, character } = state;
@@ -84,23 +115,27 @@ function AreaContent() {
   if (!character) return null;
 
   switch (currentArea) {
+    case "character":
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-4">
+            <CharacterProfile character={character} />
+            <FightHistory />
+          </div>
+          <div className="space-y-4">
+            <Inventory />
+            <ResetCharacterButton />
+          </div>
+        </div>
+      );
     case "arena":
       return (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 space-y-4">
-              <div className="flex items-center justify-between">
-                <div />
-                <HowToPlayButton />
-              </div>
-              <MatchmakingQueue />
-              <FightHistory />
-            </div>
-            <div className="space-y-4">
-              <CharacterProfile character={character} />
-              <Inventory />
-            </div>
+          <div className="flex items-center justify-between">
+            <div />
+            <HowToPlayButton />
           </div>
+          <MatchmakingQueue />
         </div>
       );
     case "marketplace":
@@ -137,7 +172,6 @@ function AreaContent() {
                 <PlayerList />
               </CardBody>
             </Card>
-            <CharacterProfile character={character} />
           </div>
         </div>
       );
@@ -147,9 +181,7 @@ function AreaContent() {
           <div className="lg:col-span-2">
             <Leaderboard />
           </div>
-          <div>
-            <CharacterProfile character={character} />
-          </div>
+          <div />
         </div>
       );
     default:

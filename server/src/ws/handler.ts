@@ -6,6 +6,7 @@ import type {
   EquipmentSlots,
   ServerMessage,
   TurnAction,
+  WagerLobbyEntry,
   Zone,
 } from '../types';
 import {
@@ -16,6 +17,8 @@ import {
   unequipItem,
   addToInventory,
   getFightHistory,
+  updateCharacter,
+  deleteCharacter,
 } from '../data/characters';
 import { getShopCatalog, getShopItemById, getShopItemPrice, purchaseShopItem } from '../data/items';
 import { getLeaderboard } from '../data/leaderboard';
@@ -37,7 +40,7 @@ import {
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { verifyEquipmentOwnership } from '../utils/sui-verify';
-import { getWagerStatus } from '../utils/sui-settle';
+import { getWagerStatus, adminCancelWagerOnChain } from '../utils/sui-settle';
 import {
   createFight,
 } from './fight-room';
@@ -98,12 +101,24 @@ function handleDisconnect(client: ConnectedClient): void {
   console.log(`[WS] Client disconnected: ${client.id} (wallet: ${client.walletAddress || 'none'})`);
 
   if (client.walletAddress) {
-    // Remove from matchmaking queue
+    // Remove from matchmaking queue (friendly/ranked only now)
     try {
       getMatchmaking().removeFromQueue(client.walletAddress);
     } catch { /* matchmaking may not be initialized */ }
 
-    // Handle active fight disconnect (forfeit)
+    // Cancel any open wager lobby entry
+    for (const [id, entry] of wagerLobby) {
+      if (entry.creatorWallet === client.walletAddress) {
+        wagerLobby.delete(id);
+        broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
+        adminCancelWagerOnChain(id).catch((err) => {
+          console.error('[Wager Lobby] On-chain cancel after disconnect failed:', err.message);
+        });
+        break;
+      }
+    }
+
+    // Handle active fight disconnect (forfeit — settles wager on-chain via fight-room)
     handlePlayerDisconnect(client.walletAddress);
 
     // Remove from chat
@@ -131,6 +146,9 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
       break;
     case 'create_character':
       handleCreateCharacter(client, msg);
+      break;
+    case 'delete_character':
+      handleDeleteCharacter(client);
       break;
     case 'get_character':
       handleGetCharacter(client, msg);
@@ -177,12 +195,20 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
     case 'wager_accepted':
       handleWagerAccepted(client, msg);
       break;
+    case 'get_wager_lobby':
+      handleGetWagerLobby(client);
+      break;
+    case 'cancel_wager_lobby':
+      handleCancelWagerLobby(client, msg);
+      break;
     // Marketplace, challenges, etc. — not yet implemented; silently ignore
     case 'get_marketplace':
     case 'list_item':
     case 'delist_item':
     case 'buy_listing':
     case 'allocate_points':
+      handleAllocatePoints(client, msg);
+      break;
     case 'stop_spectating':
     case 'challenge_player':
     case 'accept_challenge':
@@ -282,6 +308,30 @@ function handleCreateCharacter(client: ConnectedClient, msg: ClientMessage): voi
   });
 }
 
+// === Delete Character ===
+
+function handleDeleteCharacter(client: ConnectedClient): void {
+  if (!client.walletAddress) {
+    sendError(client, 'Not authenticated');
+    return;
+  }
+
+  if (client.currentFightId) {
+    sendError(client, 'Cannot delete character while in a fight');
+    return;
+  }
+
+  const deleted = deleteCharacter(client.walletAddress);
+  if (!deleted) {
+    sendError(client, 'No character to delete');
+    return;
+  }
+
+  client.characterId = undefined;
+  send(client, { type: 'character_deleted' });
+  console.log(`[Character] Deleted character for ${client.walletAddress.slice(0, 10)}... — ready for re-creation`);
+}
+
 // === Get Character ===
 
 function handleGetCharacter(client: ConnectedClient, msg: ClientMessage): void {
@@ -357,10 +407,11 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
     return;
   }
 
-  const wagerAmount = fightType === 'wager' ? (Number(msg.wagerAmount) || 0) : undefined;
-  const wagerMatchId = fightType === 'wager' ? (msg.wagerMatchId as string) : undefined;
-
+  // Wager fights go through the lobby, not the matchmaking queue
   if (fightType === 'wager') {
+    const wagerAmount = Number(msg.wagerAmount) || 0;
+    const wagerMatchId = msg.wagerMatchId as string | undefined;
+
     if (!wagerAmount || wagerAmount < 0.1) {
       sendError(client, 'Minimum wager is 0.1 SUI');
       return;
@@ -369,8 +420,34 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
       sendError(client, 'On-chain wager escrow required. Sign the create_wager transaction first.');
       return;
     }
+
+    // Check if player already has a wager in the lobby
+    for (const entry of wagerLobby.values()) {
+      if (entry.creatorWallet === client.walletAddress) {
+        sendError(client, 'You already have an open wager. Cancel it first.');
+        return;
+      }
+    }
+
+    const entry: WagerLobbyEntry = {
+      wagerMatchId,
+      creatorWallet: client.walletAddress!,
+      creatorCharacterId: client.characterId,
+      creatorName: character.name,
+      creatorLevel: character.level,
+      creatorRating: character.rating,
+      creatorStats: { ...character.stats },
+      wagerAmount,
+      createdAt: Date.now(),
+    };
+
+    wagerLobby.set(wagerMatchId, entry);
+    broadcastAll({ type: 'wager_lobby_added', entry });
+    console.log(`[Wager Lobby] ${character.name} created wager for ${wagerAmount} SUI (${wagerMatchId})`);
+    return;
   }
 
+  // Non-wager: use matchmaking queue
   const mm = getMatchmaking();
   const added = mm.addToQueue({
     walletAddress: client.walletAddress!,
@@ -378,8 +455,6 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
     fightType: fightType as any,
     rating: character.rating,
     joinedAt: Date.now(),
-    wagerAmount,
-    wagerMatchId,
   });
 
   if (!added) {
@@ -402,7 +477,14 @@ function handleCancelQueue(client: ConnectedClient): void {
   }
 
   const mm = getMatchmaking();
-  mm.removeFromQueue(client.walletAddress);
+  const removed = mm.removeFromQueue(client.walletAddress);
+
+  // If the player had an on-chain wager in the queue, cancel it to refund
+  if (removed?.wagerMatchId) {
+    adminCancelWagerOnChain(removed.wagerMatchId).catch((err) => {
+      console.error('[Wager] On-chain cancel after queue leave failed:', err.message);
+    });
+  }
 
   send(client, {
     type: 'queue_left',
@@ -741,77 +823,71 @@ function handleSpectateFight(client: ConnectedClient, msg: ClientMessage): void 
   });
 }
 
-// === Pending Wager Acceptances ===
+// === Wager Lobby ===
 
-interface PendingWagerAccept {
-  wagerMatchId: string;
-  wagerAmount: number;
-  playerAWallet: string;
-  playerACharacterId: string;
-  playerBWallet: string;
-  playerBCharacterId: string;
-  fightType: 'wager';
-  timer: ReturnType<typeof setTimeout>;
-}
+const wagerLobby = new Map<string, WagerLobbyEntry>();
 
-const pendingWagerAccepts = new Map<string, PendingWagerAccept>();
-
-/**
- * Called by matchmaking when two wager players are matched.
- * Sends Player B a request to sign accept_wager on-chain.
- */
-export function initiateWagerAcceptance(
-  entryA: { walletAddress: string; characterId: string; wagerMatchId: string; wagerAmount: number },
-  entryB: { walletAddress: string; characterId: string },
-): void {
-  const charA = getCharacterByWallet(entryA.walletAddress);
-  const clientB = getClientByWalletAddress(entryB.walletAddress);
-
-  if (!clientB) {
-    console.error('[Wager] Player B not connected');
-    return;
+// Periodic cleanup of expired lobby entries (10 min)
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of wagerLobby) {
+    if (now - entry.createdAt > 10 * 60 * 1000) {
+      wagerLobby.delete(id);
+      broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
+      // On-chain expiry is handled by cancel_expired_wager (anyone can call)
+      adminCancelWagerOnChain(id).catch(() => {});
+      console.log(`[Wager Lobby] Expired: ${id}`);
+    }
   }
-
-  // Send Player B the accept request
-  send(clientB, {
-    type: 'wager_accept_required',
-    wagerMatchId: entryA.wagerMatchId,
-    stakeAmount: entryA.wagerAmount,
-    playerAName: charA?.name || 'Unknown',
-    playerAWallet: entryA.walletAddress,
-  });
-
-  // Set timeout for acceptance
-  const timer = setTimeout(() => {
-    const pending = pendingWagerAccepts.get(entryA.wagerMatchId);
-    if (!pending) return;
-    pendingWagerAccepts.delete(entryA.wagerMatchId);
-
-    // Notify both players
-    const clientA = getClientByWalletAddress(pending.playerAWallet);
-    const cB = getClientByWalletAddress(pending.playerBWallet);
-    if (clientA) send(clientA, { type: 'wager_accept_timeout', wagerMatchId: entryA.wagerMatchId });
-    if (cB) send(cB, { type: 'wager_accept_timeout', wagerMatchId: entryA.wagerMatchId });
-    console.log(`[Wager] Accept timeout for ${entryA.wagerMatchId}`);
-  }, CONFIG.WAGER_ACCEPT_TIMEOUT_MS);
-
-  pendingWagerAccepts.set(entryA.wagerMatchId, {
-    wagerMatchId: entryA.wagerMatchId,
-    wagerAmount: entryA.wagerAmount,
-    playerAWallet: entryA.walletAddress,
-    playerACharacterId: entryA.characterId,
-    playerBWallet: entryB.walletAddress,
-    playerBCharacterId: entryB.characterId,
-    fightType: 'wager',
-    timer,
-  });
-}
+}, 30_000);
 
 function getClientByWalletAddress(wallet: string): ConnectedClient | undefined {
   for (const [, c] of connectedClients) {
     if (c.walletAddress === wallet) return c;
   }
   return undefined;
+}
+
+function broadcastAll(msg: ServerMessage): void {
+  for (const [, c] of connectedClients) {
+    if (c.authenticated && c.socket.readyState === c.socket.OPEN) {
+      c.socket.send(JSON.stringify(msg));
+    }
+  }
+}
+
+function handleGetWagerLobby(client: ConnectedClient): void {
+  const entries = Array.from(wagerLobby.values());
+  send(client, { type: 'wager_lobby_list', entries });
+}
+
+function handleCancelWagerLobby(client: ConnectedClient, msg: ClientMessage): void {
+  const wagerMatchId = msg.wagerMatchId as string;
+  if (!wagerMatchId) {
+    sendError(client, 'Missing wagerMatchId');
+    return;
+  }
+
+  const entry = wagerLobby.get(wagerMatchId);
+  if (!entry) {
+    sendError(client, 'Wager not found in lobby');
+    return;
+  }
+
+  if (entry.creatorWallet !== client.walletAddress) {
+    sendError(client, 'You can only cancel your own wager');
+    return;
+  }
+
+  wagerLobby.delete(wagerMatchId);
+  broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
+
+  // Cancel on-chain to refund
+  adminCancelWagerOnChain(wagerMatchId).catch((err) => {
+    console.error('[Wager Lobby] On-chain cancel failed:', err.message);
+  });
+
+  console.log(`[Wager Lobby] ${entry.creatorName} cancelled wager (${wagerMatchId})`);
 }
 
 async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage): Promise<void> {
@@ -821,15 +897,29 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     return;
   }
 
-  const pending = pendingWagerAccepts.get(wagerMatchId);
-  if (!pending) {
-    sendError(client, 'No pending wager acceptance found');
+  const entry = wagerLobby.get(wagerMatchId);
+  if (!entry) {
+    sendError(client, 'Wager not found in lobby (may have been cancelled or accepted by someone else)');
     return;
   }
 
-  if (client.walletAddress !== pending.playerBWallet) {
-    sendError(client, 'You are not the expected acceptor');
+  if (client.walletAddress === entry.creatorWallet) {
+    sendError(client, 'You cannot accept your own wager');
     return;
+  }
+
+  // Prevent accepting while in a fight
+  if (client.currentFightId) {
+    sendError(client, 'Cannot accept a wager while in a fight');
+    return;
+  }
+
+  // Prevent accepting if player has an active open wager in the lobby
+  for (const lobbyEntry of wagerLobby.values()) {
+    if (lobbyEntry.creatorWallet === client.walletAddress) {
+      sendError(client, 'You have an open wager. Cancel it first before accepting another.');
+      return;
+    }
   }
 
   // Verify on-chain that the wager is now ACTIVE (status=1)
@@ -839,28 +929,93 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     return;
   }
 
-  // Clean up pending
-  clearTimeout(pending.timer);
-  pendingWagerAccepts.delete(wagerMatchId);
+  // Remove from lobby
+  wagerLobby.delete(wagerMatchId);
+  broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
 
   // Get characters and start the fight
-  const charA = getCharacterByWallet(pending.playerAWallet);
-  const charB = getCharacterByWallet(pending.playerBWallet);
+  const charA = getCharacterByWallet(entry.creatorWallet);
+  const charB = getCharacterByWallet(client.walletAddress!);
 
   if (!charA || !charB) {
     sendError(client, 'Character not found');
     return;
   }
 
-  console.log(`[Wager] Accepted! Starting fight: ${charA.name} vs ${charB.name} (${pending.wagerAmount} SUI)`);
+  if (!client.characterId) {
+    sendError(client, 'Create a character first');
+    return;
+  }
 
-  const fight = createFight(charA, charB, 'wager', pending.wagerAmount);
+  console.log(`[Wager Lobby] ${charB.name} accepted ${charA.name}'s wager for ${entry.wagerAmount} SUI`);
+
+  const fight = createFight(charA, charB, 'wager', entry.wagerAmount);
   fight.wagerMatchId = wagerMatchId;
+
+  // Auto-cancel any remaining open wagers for either player (safety net for race conditions)
+  for (const [id, lobbyEntry] of wagerLobby) {
+    if (lobbyEntry.creatorWallet === entry.creatorWallet || lobbyEntry.creatorWallet === client.walletAddress) {
+      wagerLobby.delete(id);
+      broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
+      adminCancelWagerOnChain(id).catch((err) => {
+        console.error('[Wager Lobby] Auto-cancel on fight start failed:', err.message);
+      });
+    }
+  }
+}
+
+// === Allocate Points ===
+
+function handleAllocatePoints(client: ConnectedClient, msg: ClientMessage): void {
+  if (!client.characterId) {
+    sendError(client, 'No character');
+    return;
+  }
+
+  const character = getCharacterByWallet(client.walletAddress!);
+  if (!character) {
+    sendError(client, 'Character not found');
+    return;
+  }
+
+  const strength = Number(msg.strength) || 0;
+  const dexterity = Number(msg.dexterity) || 0;
+  const intuition = Number(msg.intuition) || 0;
+  const endurance = Number(msg.endurance) || 0;
+
+  const total = strength + dexterity + intuition + endurance;
+  if (total === 0) {
+    sendError(client, 'No points to allocate');
+    return;
+  }
+
+  if (total > character.unallocatedPoints) {
+    sendError(client, `Not enough points. Have ${character.unallocatedPoints}, trying to spend ${total}`);
+    return;
+  }
+
+  // Update server-side stats and deduct points
+  character.stats.strength += strength;
+  character.stats.dexterity += dexterity;
+  character.stats.intuition += intuition;
+  character.stats.endurance += endurance;
+  character.unallocatedPoints -= total;
+
+  updateCharacter(character);
+
+  send(client, {
+    type: 'points_allocated',
+    character: sanitizeCharacter(character),
+  });
 }
 
 // === Utilities ===
 
 function sanitizeCharacter(character: any): Record<string, any> {
+  const unallocatedPoints = character.unallocatedPoints || 0;
+  if (unallocatedPoints > 0) {
+    console.log(`[Character] Sending ${character.name} with ${unallocatedPoints} unallocated points`);
+  }
   return {
     id: character.id,
     name: character.name,
@@ -873,7 +1028,7 @@ function sanitizeCharacter(character: any): Record<string, any> {
       intuition: character.stats.intuition,
       endurance: character.stats.endurance,
     },
-    unallocatedPoints: 0,
+    unallocatedPoints,
     equipment: character.equipment,
     wins: character.wins,
     losses: character.losses,

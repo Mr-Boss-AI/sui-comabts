@@ -23,6 +23,7 @@ export interface DbCharacter {
   rating: number;
   wins: number;
   losses: number;
+  unallocated_points?: number;
   created_at: string;
 }
 
@@ -44,6 +45,7 @@ export async function dbSaveCharacter(char: Character): Promise<void> {
     rating: char.rating,
     wins: char.wins,
     losses: char.losses,
+    unallocated_points: char.unallocatedPoints,
     created_at: new Date(char.createdAt).toISOString(),
   };
 
@@ -73,6 +75,22 @@ export async function dbLoadCharacter(walletAddress: string): Promise<DbCharacte
   }
 
   return data as DbCharacter | null;
+}
+
+/** Delete a character and their items from Supabase. */
+export async function dbDeleteCharacter(walletAddress: string): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+
+  // Delete items first (foreign key constraint)
+  await sb.from('items').delete().eq('owner_wallet', walletAddress);
+  // Delete character
+  const { error } = await sb.from('characters').delete().eq('wallet_address', walletAddress);
+  if (error) {
+    console.error('[DB] Failed to delete character:', error.message);
+  } else {
+    console.log(`[DB] Deleted character for ${walletAddress.slice(0, 10)}...`);
+  }
 }
 
 // ─── Fight history ──────────────────────────────────────────────────

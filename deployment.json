@@ -1,23 +1,21 @@
 {
   "network": "testnet",
-  "deployedAt": "2026-04-16",
-  "packageId": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd",
-  "previousPackageId": "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303",
+  "deployedAt": "2026-04-17",
+  "packageId": "0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d",
+  "upgradedPackageId": "0xd8f27ff0996b98f8de1bce9a28cdebda30a128e5ed196d489a132815a3dfad11",
+  "previousPackages": [
+    "0x543db61f2eba29fdcd7a3701924d011ddfcc5ceb5c80062d15117366f455b098",
+    "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd",
+    "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303"
+  ],
+  "upgradeCap": "0x82c84dce1de7373677617b2941b0c10320f060d6a94157c6194772b6011239d7",
+  "adminCap": "0xff993e6ded3683762b3ed04d1e7dbe2e7a1373f3de9ddc52ed762b3c18ca9505",
   "modules": {
-    "character": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::character",
-    "item": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::item",
-    "equipment": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::equipment",
-    "arena": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::arena",
-    "marketplace": "0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd::marketplace"
+    "character": "0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d::character",
+    "item": "0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d::item",
+    "equipment": "0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d::equipment",
+    "arena": "0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d::arena",
+    "marketplace": "0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d::marketplace"
   },
-  "testMints": {
-    "ironSword": {
-      "objectId": "0x9349e5989adf594cd61bb90a02bf96c91f68f3849822c3e39123c762e317ec6a",
-      "txDigest": "Bvw84VexeuZuc1U4fMGYRQnY5gFJUKgqBvcFCZLfYpMP",
-      "name": "Iron Sword",
-      "type": "WEAPON",
-      "rarity": "COMMON",
-      "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeie4pcqfdj7c7j33bt3ko42dv7yarjzvqwij2tyd7sjndoqrm2sdjq"
-    }
-  }
+  "notes": "v4 — living character NFTs with AdminCap. Upgraded with lowered XP thresholds for testing (revert before mainnet). Original package ID used for all calls (Sui routes to latest version automatically)."
 }

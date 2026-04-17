@@ -10,6 +10,7 @@ import type {
   LeaderboardEntry,
   MarketplaceListing,
   LootBoxResult,
+  WagerLobbyEntry,
 } from "./game";
 
 // ===== CLIENT → SERVER =====
@@ -24,6 +25,7 @@ export type ClientMessage =
       endurance: number;
     }
   | { type: "get_character" }
+  | { type: "delete_character" }
   | { type: "allocate_points"; strength: number; dexterity: number; intuition: number; endurance: number }
   | { type: "queue_fight"; fightType: FightType; wagerAmount?: number; wagerMatchId?: string; onChainEquipment?: Record<string, unknown> }
   | { type: "cancel_queue" }
@@ -46,7 +48,9 @@ export type ClientMessage =
   | { type: "get_marketplace" }
   | { type: "challenge_player"; targetAddress: string; fightType: FightType }
   | { type: "accept_challenge"; challengeId: string }
-  | { type: "decline_challenge"; challengeId: string };
+  | { type: "decline_challenge"; challengeId: string }
+  | { type: "get_wager_lobby" }
+  | { type: "cancel_wager_lobby"; wagerMatchId: string };
 
 // ===== SERVER → CLIENT =====
 export type ServerMessage =
@@ -83,7 +87,12 @@ export type ServerMessage =
   | { type: "challenge_declined"; challengeId: string }
   | { type: "wager_accept_required"; wagerMatchId: string; stakeAmount: number; playerAName: string; playerAWallet: string }
   | { type: "wager_accept_timeout"; wagerMatchId: string }
-  | { type: "wager_settled"; txDigest: string; wagerMatchId: string };
+  | { type: "wager_settled"; txDigest: string; wagerMatchId: string }
+  | { type: "wager_lobby_list"; entries: WagerLobbyEntry[] }
+  | { type: "wager_lobby_added"; entry: WagerLobbyEntry }
+  | { type: "wager_lobby_removed"; wagerMatchId: string }
+  | { type: "character_updated_onchain" }
+  | { type: "character_deleted" };
 
 export interface FightHistoryEntry {
   id: string;

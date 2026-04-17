@@ -9,8 +9,9 @@ import {
   initialGameState,
 } from "@/hooks/useGameStore";
 import type { ServerMessage } from "@/types/ws-messages";
+import type { Item } from "@/types/game";
 import { playSoundIf } from "@/lib/sounds";
-import { fetchCharacterNFT, fetchOwnedItems } from "@/lib/sui-contracts";
+import { fetchCharacterNFT, fetchOwnedItems, fetchKioskItems } from "@/lib/sui-contracts";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 
 export default function GameProvider({
@@ -76,6 +77,15 @@ export default function GameProvider({
           // Informational — the fight_end message handles UI
           console.log("[Wager] Settled on-chain:", msg.txDigest);
           break;
+        case "wager_lobby_list":
+          dispatch({ type: "SET_WAGER_LOBBY", entries: msg.entries });
+          break;
+        case "wager_lobby_added":
+          dispatch({ type: "ADD_WAGER_LOBBY_ENTRY", entry: msg.entry });
+          break;
+        case "wager_lobby_removed":
+          dispatch({ type: "REMOVE_WAGER_LOBBY_ENTRY", wagerMatchId: msg.wagerMatchId });
+          break;
         case "fight_start":
           dispatch({ type: "SET_FIGHT", fight: msg.fight });
           dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
@@ -103,10 +113,27 @@ export default function GameProvider({
           });
           dispatch({ type: "SET_LOOT_RESULT", loot: msg.loot });
           dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
+          // Re-fetch server character data (updated XP, wins, losses, rating)
+          socket.send({ type: "get_character" });
           if (msg.fight.winner === walletAddress) {
             playSoundIf("victory");
           } else {
             playSoundIf("defeat");
+          }
+          break;
+        case "character_deleted":
+          dispatch({ type: "SET_CHARACTER", character: null as any });
+          dispatch({ type: "SET_ONCHAIN_CHARACTER", data: null });
+          break;
+        case "character_updated_onchain":
+          // On-chain update complete — re-fetch for unallocated points / level
+          if (client && walletAddress) {
+            (async () => {
+              try {
+                const nft = await fetchCharacterNFT(client, walletAddress);
+                if (nft) dispatch({ type: "SET_ONCHAIN_CHARACTER", data: nft });
+              } catch {}
+            })();
           }
           break;
         case "chat":
@@ -192,7 +219,7 @@ export default function GameProvider({
           break;
       }
     },
-    [walletAddress]
+    [walletAddress, socket, client]
   );
 
   useEffect(() => {
@@ -205,6 +232,7 @@ export default function GameProvider({
       socket.send({ type: "get_character" });
       socket.send({ type: "get_online_players" });
       socket.send({ type: "get_inventory" });
+      socket.send({ type: "get_wager_lobby" });
     }
     // Reset on-chain check when auth state changes
     onChainCheckDone.current = false;
@@ -241,6 +269,21 @@ export default function GameProvider({
     return () => clearTimeout(timer);
   }, [socket, socket.authenticated, walletAddress, client, state.character]);
 
+  // Fetch on-chain Character NFT (for unallocated_points, level, xp)
+  useEffect(() => {
+    if (!socket.authenticated || !walletAddress || !client) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const nft = await fetchCharacterNFT(client, walletAddress);
+        if (!cancelled && nft) {
+          dispatch({ type: "SET_ONCHAIN_CHARACTER", data: nft });
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [socket.authenticated, walletAddress, client]);
+
   // Fetch on-chain Item NFTs owned by this wallet
   useEffect(() => {
     if (!socket.authenticated || !walletAddress || !client) return;
@@ -248,9 +291,12 @@ export default function GameProvider({
     let cancelled = false;
     (async () => {
       try {
-        const items = await fetchOwnedItems(client, walletAddress);
+        const [owned, kiosk] = await Promise.all([
+          fetchOwnedItems(client, walletAddress),
+          fetchKioskItems(client, walletAddress).catch((): Item[] => []),
+        ]);
         if (!cancelled) {
-          dispatch({ type: "SET_ONCHAIN_ITEMS", items });
+          dispatch({ type: "SET_ONCHAIN_ITEMS", items: [...owned, ...kiosk] });
         }
       } catch {
         // On-chain query failed — server inventory still works
