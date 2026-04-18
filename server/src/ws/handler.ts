@@ -234,9 +234,10 @@ async function handleAuth(client: ConnectedClient, msg: ClientMessage): Promise<
   for (const [, existing] of connectedClients) {
     if (existing.walletAddress === walletAddress && existing.id !== client.id) {
       // Disconnect old session (handleDisconnect will skip teardown since we delete first)
+      // Close code 4001 signals "replaced by newer session" — client must not auto-reconnect
       isReconnect = true;
       connectedClients.delete(existing.id);
-      existing.socket.close();
+      existing.socket.close(4001, 'replaced');
       break;
     }
   }

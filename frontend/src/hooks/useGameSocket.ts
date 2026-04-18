@@ -51,10 +51,13 @@ export function useGameSocket(walletAddress: string | null) {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setConnected(false);
         setAuthenticated(false);
         wsRef.current = null;
+        // 4001 = server deliberately replaced this session with a newer one.
+        // Reconnecting would just kick that newer session out → infinite loop.
+        if (event.code === 4001) return;
         reconnectTimeout.current = setTimeout(connect, 3000);
       };
 
