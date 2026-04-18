@@ -270,6 +270,7 @@ export default function GameProvider({
   }, [socket, socket.authenticated, walletAddress, client, state.character]);
 
   // Fetch on-chain Character NFT (for unallocated_points, level, xp)
+  // Re-runs when onChainRefreshTrigger bumps (after successful equip/unequip).
   useEffect(() => {
     if (!socket.authenticated || !walletAddress || !client) return;
     let cancelled = false;
@@ -282,9 +283,11 @@ export default function GameProvider({
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [socket.authenticated, walletAddress, client]);
+  }, [socket.authenticated, walletAddress, client, state.onChainRefreshTrigger]);
 
-  // Fetch on-chain Item NFTs owned by this wallet
+  // Fetch on-chain Item NFTs owned by this wallet.
+  // Re-runs on onChainRefreshTrigger bump — critical because equipped items
+  // become DOFs and should disappear from the wallet-owned list here.
   useEffect(() => {
     if (!socket.authenticated || !walletAddress || !client) return;
 
@@ -304,7 +307,7 @@ export default function GameProvider({
     })();
 
     return () => { cancelled = true; };
-  }, [socket.authenticated, walletAddress, client]);
+  }, [socket.authenticated, walletAddress, client, state.onChainRefreshTrigger]);
 
   return (
     <GameContext.Provider value={{ state: stateWithSocket, dispatch }}>

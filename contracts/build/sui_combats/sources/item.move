@@ -6,9 +6,12 @@ module sui_combats::item {
     use sui::package;
     use std::string::String;
 
+    use sui_combats::character::AdminCap;
+
     // ===== Error constants =====
     const EInvalidItemType: u64 = 0;
     const EInvalidRarity: u64 = 1;
+    const EDeprecated: u64 = 2;
 
     // ===== Item type constants =====
     const WEAPON: u8 = 1;
@@ -76,8 +79,39 @@ module sui_combats::item {
 
     // ===== Public functions =====
 
-    /// Mint a new item NFT. Items are tradeable (have `store`).
+    /// DEPRECATED v1 mint. Anyone could mint arbitrary items before the AdminCap
+    /// gate was added — this version now aborts unconditionally. Use `mint_item_admin`.
     public entry fun mint_item(
+        _name: String,
+        _image_url: String,
+        _item_type: u8,
+        _class_req: u8,
+        _level_req: u8,
+        _rarity: u8,
+        _strength_bonus: u16,
+        _dexterity_bonus: u16,
+        _intuition_bonus: u16,
+        _endurance_bonus: u16,
+        _hp_bonus: u16,
+        _armor_bonus: u16,
+        _defense_bonus: u16,
+        _attack_bonus: u16,
+        _crit_chance_bonus: u16,
+        _crit_multiplier_bonus: u16,
+        _evasion_bonus: u16,
+        _anti_crit_bonus: u16,
+        _anti_evasion_bonus: u16,
+        _min_damage: u16,
+        _max_damage: u16,
+        _ctx: &mut TxContext,
+    ) {
+        abort EDeprecated
+    }
+
+    /// Mint a new item NFT. Admin-only — requires the AdminCap held by the server/treasury.
+    /// Items mint to the TREASURY (sender) and can be transferred to players afterwards.
+    public entry fun mint_item_admin(
+        _admin: &AdminCap,
         name: String,
         image_url: String,
         item_type: u8,

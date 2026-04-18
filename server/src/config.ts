@@ -6,10 +6,16 @@ export const CONFIG = {
   SUPABASE_URL: process.env.SUPABASE_URL || '',
   SUPABASE_KEY: process.env.SUPABASE_KEY || '',
   SUI_NETWORK: process.env.SUI_NETWORK || 'testnet',
-  SUI_PACKAGE_ID: process.env.SUI_PACKAGE_ID || '0x50a536845980969dfa54c274f437f9da426e58b1ea5f1f38fe79ff29e8a684fd',
+  // Original package ID — used for type references and event queries (types live at original pkg)
+  SUI_PACKAGE_ID: process.env.SUI_PACKAGE_ID || '0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d',
+  // Latest upgraded package ID — used for all moveCall targets (gets the new bytecode with owner checks etc.)
+  SUI_UPGRADED_PACKAGE_ID: process.env.SUI_UPGRADED_PACKAGE_ID || '0x5f9011c8eb31f321fbd5b2ad5c811f34011a96a4c8a2ddfc6262727dee55c76b',
   PLATFORM_TREASURY: process.env.PLATFORM_TREASURY || '0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60',
   ADMIN_CAP_ID: process.env.ADMIN_CAP_ID || '0xff993e6ded3683762b3ed04d1e7dbe2e7a1373f3de9ddc52ed762b3c18ca9505',
   WAGER_ACCEPT_TIMEOUT_MS: 30_000,
+  // Fight-lock duration — how long equip/unequip is on-chain blocked after fight start.
+  // Auto-expires this far in the future; server sets explicit 0 unlock on normal fight end.
+  FIGHT_LOCK_DURATION_MS: 10 * 60 * 1000,
 } as const;
 
 export const GAME_CONSTANTS = {

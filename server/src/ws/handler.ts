@@ -4,6 +4,7 @@ import type {
   ClientMessage,
   ConnectedClient,
   EquipmentSlots,
+  FightType,
   ServerMessage,
   TurnAction,
   WagerLobbyEntry,
@@ -56,6 +57,10 @@ function send(client: ConnectedClient, msg: ServerMessage): void {
   if (client.socket.readyState === client.socket.OPEN) {
     client.socket.send(JSON.stringify(msg));
   }
+}
+
+function isValidFightType(v: unknown): v is FightType {
+  return v === 'friendly' || v === 'ranked' || v === 'wager' || v === 'item_stake';
 }
 
 function sendError(client: ConnectedClient, message: string): void {
@@ -402,11 +407,12 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
     }
   }
 
-  const fightType = (msg.fightType as string) || 'ranked';
-  if (!['friendly', 'ranked', 'wager', 'item_stake'].includes(fightType)) {
+  const rawFightType: unknown = msg.fightType ?? 'ranked';
+  if (!isValidFightType(rawFightType)) {
     sendError(client, 'Invalid fight type');
     return;
   }
+  const fightType: FightType = rawFightType;
 
   // Wager fights go through the lobby, not the matchmaking queue
   if (fightType === 'wager') {
@@ -453,7 +459,7 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
   const added = mm.addToQueue({
     walletAddress: client.walletAddress!,
     characterId: client.characterId,
-    fightType: fightType as any,
+    fightType,
     rating: character.rating,
     joinedAt: Date.now(),
   });
@@ -577,6 +583,17 @@ function handleEquipItem(client: ConnectedClient, msg: ClientMessage): void {
     return;
   }
 
+  // On-chain items must be equipped via wallet-signed tx (equipment::equip_*_v2),
+  // not a server-side dispatch. Reject with an actionable message so the client
+  // can build the correct tx. Hex object IDs on testnet are 66 chars ("0x" + 64 hex).
+  if (itemId.startsWith('0x') && itemId.length >= 42) {
+    sendError(
+      client,
+      'This is an on-chain item. Sign the equip transaction in your wallet instead.',
+    );
+    return;
+  }
+
   const result = equipItem(client.characterId, itemId);
   if (!result.success) {
     sendError(client, result.error || 'Failed to equip item');
@@ -619,6 +636,17 @@ function handleUnequipItem(client: ConnectedClient, msg: ClientMessage): void {
   // Get the item before unequipping so we can return it
   const charBefore = getCharacterByWallet(client.walletAddress!);
   const unequippedItem = charBefore?.equipment[slot] || null;
+
+  // On-chain items are stored as DOFs on the Character NFT. To unequip them
+  // we need a wallet-signed tx calling equipment::unequip_*_v2 — the server
+  // has no authority. Refuse here and let the client build the tx.
+  if (unequippedItem?.id && unequippedItem.id.startsWith('0x') && unequippedItem.id.length >= 42) {
+    sendError(
+      client,
+      'This slot holds an on-chain item. Sign the unequip transaction in your wallet instead.',
+    );
+    return;
+  }
 
   const result = unequipItem(client.characterId, slot);
   if (!result.success) {

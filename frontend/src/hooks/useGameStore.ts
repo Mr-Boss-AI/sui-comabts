@@ -68,6 +68,12 @@ export interface GameState {
   currentArea: "character" | "arena" | "marketplace" | "tavern" | "hall_of_fame";
   errorMessage: string | null;
   errorTimestamp: number | null;
+
+  // Bump to force GameProvider to re-fetch on-chain items + character NFT.
+  // Incremented after every successful on-chain equip/unequip so the UI reconverges
+  // with chain truth (especially important: equipped items become DOFs and should
+  // disappear from the wallet-owned list).
+  onChainRefreshTrigger: number;
 }
 
 export const initialGameState: GameState = {
@@ -93,6 +99,7 @@ export const initialGameState: GameState = {
   currentArea: "character",
   errorMessage: null,
   errorTimestamp: null,
+  onChainRefreshTrigger: 0,
 };
 
 export type GameAction =
@@ -124,6 +131,7 @@ export type GameAction =
   | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
   | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
   | { type: "SET_ERROR"; message: string | null }
+  | { type: "BUMP_ONCHAIN_REFRESH" }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
   | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
 
@@ -237,6 +245,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, fight: { ...action.fight, log: [...(state.fight.log || []), action.result] } };
     case "SET_ERROR":
       return { ...state, errorMessage: action.message, errorTimestamp: action.message ? Date.now() : null };
+    case "BUMP_ONCHAIN_REFRESH":
+      return { ...state, onChainRefreshTrigger: state.onChainRefreshTrigger + 1 };
     default:
       return state;
   }

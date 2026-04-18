@@ -2,13 +2,36 @@ import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import type { Item } from "@/types/game";
 
+// Original package — types anchor here (Character, Item are first defined here).
+// Use PACKAGE_ID for event queries and struct type names.
 const PACKAGE_ID =
   process.env.NEXT_PUBLIC_SUI_PACKAGE_ID ??
-  "0x7fd54c4d9294269f88e24a6e5912477910d024b3b7efbba16b18876d072f2303";
+  "0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d";
+
+// Upgraded package — all moveCall targets route here so new bytecode runs
+// (owner checks, fight locks, mint AdminCap gate, listing fee).
+// Fallback to PACKAGE_ID means pre-upgrade testnet builds still work.
+const CALL_PACKAGE =
+  process.env.NEXT_PUBLIC_SUI_UPGRADED_PACKAGE_ID ??
+  "0x5f9011c8eb31f321fbd5b2ad5c811f34011a96a4c8a2ddfc6262727dee55c76b";
 
 const CHARACTER_TYPE = `${PACKAGE_ID}::character::Character`;
 const ITEM_TYPE = `${PACKAGE_ID}::item::Item`;
 const SUI_CLOCK = '0x6';
+
+// Treasury wallet — receives listing fees and wager platform fees.
+// Passed as an argument to list_item_with_fee (config-driven, not hardcoded in contract).
+const TREASURY_ADDRESS =
+  process.env.NEXT_PUBLIC_TREASURY_ADDRESS ??
+  "0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60";
+
+// 0.01 SUI, in MIST
+const LISTING_FEE_MIST: bigint = BigInt(10_000_000);
+
+// Equipment slot key → the "_v2" function suffix used in equipment.move
+export type EquipSlotKey =
+  | "weapon" | "offhand" | "helmet" | "chest" | "gloves"
+  | "boots" | "belt" | "ring_1" | "ring_2" | "necklace";
 
 export interface OnChainCharacter {
   objectId: string;
@@ -102,7 +125,7 @@ export function buildMintCharacterTx(
 ): Transaction {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${PACKAGE_ID}::character::create_character`,
+    target: `${CALL_PACKAGE}::character::create_character`,
     arguments: [
       tx.pure.string(name),
       tx.pure.u16(strength),
@@ -125,7 +148,7 @@ export function buildAllocateStatsTx(
 ): Transaction {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${PACKAGE_ID}::character::allocate_points`,
+    target: `${CALL_PACKAGE}::character::allocate_points`,
     arguments: [
       tx.object(characterObjectId),
       tx.pure.u16(strength),
@@ -286,7 +309,7 @@ export function buildCreateWagerTx(stakeAmountMist: bigint): Transaction {
   const tx = new Transaction();
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
-    target: `${PACKAGE_ID}::arena::create_wager`,
+    target: `${CALL_PACKAGE}::arena::create_wager`,
     arguments: [stakeCoin, tx.object(SUI_CLOCK)],
   });
   return tx;
@@ -297,7 +320,7 @@ export function buildAcceptWagerTx(wagerMatchId: string, stakeAmountMist: bigint
   const tx = new Transaction();
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
-    target: `${PACKAGE_ID}::arena::accept_wager`,
+    target: `${CALL_PACKAGE}::arena::accept_wager`,
     arguments: [tx.object(wagerMatchId), stakeCoin, tx.object(SUI_CLOCK)],
   });
   return tx;
@@ -307,7 +330,7 @@ export function buildAcceptWagerTx(wagerMatchId: string, stakeAmountMist: bigint
 export function buildCancelWagerTx(wagerMatchId: string): Transaction {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${PACKAGE_ID}::arena::cancel_wager`,
+    target: `${CALL_PACKAGE}::arena::cancel_wager`,
     arguments: [tx.object(wagerMatchId)],
   });
   return tx;
@@ -317,8 +340,166 @@ export function buildCancelWagerTx(wagerMatchId: string): Transaction {
 export function buildCancelExpiredWagerTx(wagerMatchId: string): Transaction {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${PACKAGE_ID}::arena::cancel_expired_wager`,
+    target: `${CALL_PACKAGE}::arena::cancel_expired_wager`,
     arguments: [tx.object(wagerMatchId), tx.object(SUI_CLOCK)],
+  });
+  return tx;
+}
+
+// ============================================================================
+//  Equipment (on-chain DOF pattern — equip_*_v2 / unequip_*_v2)
+// ============================================================================
+
+/**
+ * Build an equip tx for a specific slot. Item becomes a dynamic object field
+ * on the Character NFT — no longer transferable, can't be listed, can't be
+ * stolen. Owner check + fight-lock check enforced on-chain.
+ */
+export function buildEquipTx(
+  slot: EquipSlotKey,
+  characterObjectId: string,
+  itemObjectId: string,
+): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::equipment::equip_${slot}_v2`,
+    arguments: [
+      tx.object(characterObjectId),
+      tx.object(itemObjectId),
+      tx.object(SUI_CLOCK),
+    ],
+  });
+  return tx;
+}
+
+/**
+ * Build an unequip tx for a specific slot. Item returns to the character's
+ * owner as a free, transferable, listable NFT. Owner check + fight-lock check
+ * enforced on-chain.
+ */
+export function buildUnequipTx(
+  slot: EquipSlotKey,
+  characterObjectId: string,
+): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::equipment::unequip_${slot}_v2`,
+    arguments: [
+      tx.object(characterObjectId),
+      tx.object(SUI_CLOCK),
+    ],
+  });
+  return tx;
+}
+
+/**
+ * Build a swap tx (PTB): unequip current item, equip new item in the same slot,
+ * one wallet signature. Both calls go through the _v2 functions so owner +
+ * fight-lock are enforced on each half.
+ */
+export function buildSwapEquipmentTx(
+  slot: EquipSlotKey,
+  characterObjectId: string,
+  newItemObjectId: string,
+): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::equipment::unequip_${slot}_v2`,
+    arguments: [
+      tx.object(characterObjectId),
+      tx.object(SUI_CLOCK),
+    ],
+  });
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::equipment::equip_${slot}_v2`,
+    arguments: [
+      tx.object(characterObjectId),
+      tx.object(newItemObjectId),
+      tx.object(SUI_CLOCK),
+    ],
+  });
+  return tx;
+}
+
+// ============================================================================
+//  Marketplace (Kiosk + listing fee)
+// ============================================================================
+
+/** Create a per-player Kiosk. Each wallet typically only needs one. */
+export function buildCreateKioskTx(): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::marketplace::create_player_kiosk`,
+    arguments: [],
+  });
+  return tx;
+}
+
+/**
+ * List an item in the seller's Kiosk with the mandatory 0.01 SUI fee routed
+ * to the configured TREASURY. The fee coin is split from gas; any excess
+ * (above LISTING_FEE_MIST) is refunded to the sender inside the Move function.
+ */
+export function buildListItemTx(
+  kioskId: string,
+  kioskCapId: string,
+  itemObjectId: string,
+  priceMist: bigint,
+): Transaction {
+  const tx = new Transaction();
+  const [feeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(LISTING_FEE_MIST)]);
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::marketplace::list_item_with_fee`,
+    arguments: [
+      tx.object(kioskId),
+      tx.object(kioskCapId),
+      tx.object(itemObjectId),
+      tx.pure.u64(priceMist),
+      feeCoin,
+      tx.pure.address(TREASURY_ADDRESS),
+    ],
+  });
+  return tx;
+}
+
+/** Remove an item from a kiosk listing (does NOT refund the listing fee). */
+export function buildDelistItemTx(
+  kioskId: string,
+  kioskCapId: string,
+  itemObjectId: string,
+): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::marketplace::delist_item`,
+    arguments: [
+      tx.object(kioskId),
+      tx.object(kioskCapId),
+      tx.pure.id(itemObjectId),
+    ],
+  });
+  return tx;
+}
+
+/**
+ * Buy a listed item from another player's Kiosk. Pays in SUI at the listing
+ * price; the TransferPolicy takes the 2.5% royalty.
+ */
+export function buildBuyItemTx(
+  kioskId: string,
+  itemObjectId: string,
+  priceMist: bigint,
+  transferPolicyId: string,
+): Transaction {
+  const tx = new Transaction();
+  const [paymentCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(priceMist)]);
+  tx.moveCall({
+    target: `${CALL_PACKAGE}::marketplace::buy_item`,
+    arguments: [
+      tx.object(kioskId),
+      tx.pure.id(itemObjectId),
+      paymentCoin,
+      tx.object(transferPolicyId),
+    ],
   });
   return tx;
 }

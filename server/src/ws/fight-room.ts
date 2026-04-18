@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { GAME_CONSTANTS } from '../config';
+import { CONFIG, GAME_CONSTANTS } from '../config';
 import { settleWagerOnChain } from '../utils/sui-settle';
-import { updateCharacterOnChain, findCharacterObjectId } from '../utils/sui-settle';
+import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain } from '../utils/sui-settle';
 import {
   applyXp,
   checkFightEnd,
@@ -155,6 +155,24 @@ export function createFight(
   };
 
   broadcastToFight(fight, startMsg);
+
+  // On-chain fight-lock (fire-and-forget — auto-expiry is the safety net if this fails,
+  // and server-side fight state is authoritative for combat resolution regardless).
+  (async () => {
+    try {
+      const [aObjId, bObjId] = await Promise.all([
+        findCharacterObjectId(characterA.walletAddress),
+        findCharacterObjectId(characterB.walletAddress),
+      ]);
+      const expiry = Date.now() + CONFIG.FIGHT_LOCK_DURATION_MS;
+      const locks: Promise<unknown>[] = [];
+      if (aObjId) locks.push(setFightLockOnChain(aObjId, expiry));
+      if (bObjId) locks.push(setFightLockOnChain(bObjId, expiry));
+      await Promise.allSettled(locks);
+    } catch (err: any) {
+      console.error('[FightLock] Acquire failed at fight start:', err?.message || err);
+    }
+  })();
 
   // Start first turn
   startNextTurn(fight);
@@ -427,7 +445,7 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
     persistItems(winnerChar);
     persistItems(loserChar);
 
-    // Update on-chain Character NFTs (fire-and-forget)
+    // Update on-chain Character NFTs + release fight-lock (fire-and-forget)
     (async () => {
       try {
         const [winnerObjId, loserObjId] = await Promise.all([
@@ -439,6 +457,16 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
         }
         if (loserObjId) {
           await updateCharacterOnChain(loserObjId, false, loserXp, loserChar.rating);
+        }
+        // Release on-chain fight-lock so players can equip/unequip again immediately.
+        // If these fail, the 10-minute auto-expiry from createFight is the safety net.
+        if (winnerObjId) {
+          setFightLockOnChain(winnerObjId, 0).catch((err) =>
+            console.error('[FightLock] Release (winner) failed:', err?.message || err));
+        }
+        if (loserObjId) {
+          setFightLockOnChain(loserObjId, 0).catch((err) =>
+            console.error('[FightLock] Release (loser) failed:', err?.message || err));
         }
         // Notify clients that on-chain character data has been updated
         sendToWallet(winnerChar.walletAddress, { type: 'character_updated_onchain' });

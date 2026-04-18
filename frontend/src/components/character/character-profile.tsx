@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
+import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { computeDerivedStats, getArchetype, getArchetypeColor } from "@/lib/combat";
 import { getXpForNextLevel, getXpProgress } from "@/types/game";
 import type { Character, EquipmentSlots, Item } from "@/types/game";
@@ -54,7 +55,8 @@ function EquipSlot({ slot, item, onClick }: { slot: keyof EquipmentSlots; item: 
 }
 
 export function CharacterProfile({ character, compact }: { character: Character; compact?: boolean }) {
-  const { state, dispatch } = useGame();
+  const { state } = useGame();
+  const { equip, unequip } = useEquipmentActions();
   const [showAllocate, setShowAllocate] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(null);
 
@@ -71,8 +73,26 @@ export function CharacterProfile({ character, compact }: { character: Character;
     return merged;
   }, [character.equipment, state.onChainEquipped]);
 
-  const onChainIds = new Set(state.onChainItems.map((i) => i.id));
   const selectedItem = selectedSlot ? eq[selectedSlot] : null;
+
+  // Items already equipped on-chain (anywhere) — excluded from the picker so
+  // the user can't try to re-equip an item that's already a DOF (which would
+  // hit Sui's "owned by object" input-validation error).
+  const equippedOnChainIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of Object.values(state.onChainEquipped)) {
+      if (item) set.add(item.id);
+    }
+    return set;
+  }, [state.onChainEquipped]);
+
+  // Effective equip level = min(server.level, onChain.level).
+  // Server level can be ahead of chain (pre-revert test-XP drift). Filtering by
+  // the minimum prevents offering items the chain will reject with ELevelTooLow.
+  const effectiveLevel = Math.min(
+    character.level,
+    state.onChainCharacter?.level ?? character.level,
+  );
 
   const equippable = useMemo(() => {
     if (!selectedSlot) return [];
@@ -82,28 +102,24 @@ export function CharacterProfile({ character, compact }: { character: Character;
     for (const item of state.onChainItems) byId.set(item.id, item);
     return Array.from(byId.values()).filter((item) =>
       !item.inKiosk &&
+      !equippedOnChainIds.has(item.id) &&
       SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
-      item.levelReq <= character.level
+      item.levelReq <= effectiveLevel
     );
-  }, [selectedSlot, state.inventory, state.onChainItems, character.level]);
+  }, [selectedSlot, state.inventory, state.onChainItems, equippedOnChainIds, effectiveLevel]);
 
-  function handleEquip(item: Item) {
+  async function handleEquip(item: Item) {
     if (!selectedSlot) return;
-    if (onChainIds.has(item.id)) {
-      dispatch({ type: "EQUIP_ONCHAIN_ITEM", item, slot: selectedSlot });
-    } else {
-      state.socket.send({ type: "equip_item", itemId: item.id, slot: selectedSlot });
-    }
+    const currentItem = eq[selectedSlot] || null;
+    const ok = await equip(item, selectedSlot, currentItem);
+    // Close modal regardless — on failure the error toast already surfaced why.
     setSelectedSlot(null);
+    void ok;
   }
 
-  function handleUnequip() {
+  async function handleUnequip() {
     if (!selectedSlot) return;
-    if (state.onChainEquipped[selectedSlot]) {
-      dispatch({ type: "UNEQUIP_ONCHAIN_ITEM", slot: selectedSlot });
-    } else {
-      state.socket.send({ type: "unequip_item", slot: selectedSlot });
-    }
+    await unequip(selectedSlot);
     setSelectedSlot(null);
   }
 

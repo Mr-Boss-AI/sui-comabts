@@ -1,7 +1,11 @@
 import { execSync } from 'child_process';
 import { CONFIG } from '../config';
 
-const PACKAGE_ID = CONFIG.SUI_PACKAGE_ID;
+// All moveCall targets use the UPGRADED package so new bytecode (owner checks,
+// fight locks, admin gates) runs. Types and event queries still reference
+// the original package where they were first defined.
+const CALL_PACKAGE = CONFIG.SUI_UPGRADED_PACKAGE_ID || CONFIG.SUI_PACKAGE_ID;
+const TYPE_PACKAGE = CONFIG.SUI_PACKAGE_ID;
 
 /**
  * Call settle_wager on-chain. The winner gets 95%, treasury gets 5%.
@@ -16,7 +20,7 @@ export async function settleWagerOnChain(
 
     const cmd = [
       'sui client call',
-      `--package ${PACKAGE_ID}`,
+      `--package ${CALL_PACKAGE}`,
       '--module arena',
       '--function settle_wager',
       `--args ${wagerMatchId} ${winnerAddress}`,
@@ -53,7 +57,7 @@ export async function adminCancelWagerOnChain(
 
     const cmd = [
       'sui client call',
-      `--package ${PACKAGE_ID}`,
+      `--package ${CALL_PACKAGE}`,
       '--module arena',
       '--function admin_cancel_wager',
       `--args ${wagerMatchId}`,
@@ -92,7 +96,7 @@ export async function updateCharacterOnChain(
 
     const cmd = [
       'sui client call',
-      `--package ${PACKAGE_ID}`,
+      `--package ${CALL_PACKAGE}`,
       '--module character',
       '--function update_after_fight',
       `--args ${CONFIG.ADMIN_CAP_ID} ${characterObjectId} ${won} ${xpGained} ${newRating} 0x6`,
@@ -134,7 +138,7 @@ export async function findCharacterObjectId(walletAddress: string): Promise<stri
         id: 1,
         method: 'suix_queryEvents',
         params: [
-          { MoveEventType: `${PACKAGE_ID}::character::CharacterCreated` },
+          { MoveEventType: `${TYPE_PACKAGE}::character::CharacterCreated` },
           null, 50, true,
         ],
       }),
@@ -181,5 +185,46 @@ export async function getWagerStatus(wagerMatchId: string): Promise<number | nul
     return Number(fields.status);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Admin-set the fight-lock expiry on a Character. While the stored timestamp
+ * is in the future, all equip/unequip calls against the Character abort on-chain.
+ *
+ * Pass `expiresAtMs = 0` to clear a lock immediately.
+ * Auto-expires at the stored timestamp — if this call fails after fight end,
+ * the lock still releases itself, so callers may fire-and-forget the unlock.
+ */
+export async function setFightLockOnChain(
+  characterObjectId: string,
+  expiresAtMs: number,
+): Promise<{ digest: string }> {
+  try {
+    console.log(`[FightLock] ${expiresAtMs === 0 ? 'Clearing' : 'Setting'} lock on ${characterObjectId} (expires=${expiresAtMs})`);
+
+    const cmd = [
+      'sui client call',
+      `--package ${CALL_PACKAGE}`,
+      '--module character',
+      '--function set_fight_lock',
+      `--args ${CONFIG.ADMIN_CAP_ID} ${characterObjectId} ${expiresAtMs}`,
+      '--gas-budget 30000000',
+      '--json',
+    ].join(' ');
+
+    const result = execSync(cmd, {
+      timeout: 30_000,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}` },
+    });
+
+    const json = JSON.parse(result);
+    const digest = json.digest || json.effects?.transactionDigest || 'unknown';
+    console.log(`[FightLock] Tx: ${digest}`);
+    return { digest };
+  } catch (err: any) {
+    console.error('[FightLock] Set failed:', err.message || err);
+    throw new Error(`Fight lock update failed: ${err.message || 'unknown error'}`);
   }
 }

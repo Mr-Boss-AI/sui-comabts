@@ -4,6 +4,7 @@ module sui_combats::character {
     use sui::tx_context::{Self, TxContext};
     use sui::event;
     use sui::clock::{Self, Clock};
+    use sui::dynamic_field as df;
     use std::string::String;
     use std::option::{Self, Option};
 
@@ -14,6 +15,11 @@ module sui_combats::character {
     const ENameTooLong: u64 = 3;
     const EStatTooHigh: u64 = 4;
     const ENotOwner: u64 = 5;
+
+    // ===== Fight-lock key for dynamic field =====
+    // Value stored under this key is a u64 Unix millis timestamp. The character
+    // is considered locked while block_time < stored_value. Zero or missing = unlocked.
+    const LOCK_KEY: vector<u8> = b"fight_lock_expires_at";
 
     // ===== Constants =====
     const MAX_LEVEL: u8 = 20;
@@ -108,30 +114,41 @@ module sui_combats::character {
         transfer::transfer(admin_cap, tx_context::sender(ctx));
     }
 
-    // ===== XP thresholds for each level =====
+    #[test_only]
+    public fun init_for_testing(ctx: &mut TxContext) {
+        init(ctx);
+    }
+
+    #[test_only]
+    public fun xp_for_level_for_testing(level: u8): u64 {
+        xp_for_level(level)
+    }
+
+    // ===== XP thresholds for each level (PRODUCTION values — reverted from test) =====
+    // Anchor points from GDD: L2=100, L5=1500, L10=50k, L15=350k, L20=1M.
+    // Missing levels interpolated geometrically from those anchors.
     fun xp_for_level(level: u8): u64 {
-        // TESTING: lowered XP thresholds — revert before mainnet!
         if (level <= 1) { 0 }
-        else if (level == 2) { 2 }
-        else if (level == 3) { 5 }
-        else if (level == 4) { 10 }
-        else if (level == 5) { 20 }
-        else if (level == 6) { 35 }
-        else if (level == 7) { 55 }
-        else if (level == 8) { 80 }
-        else if (level == 9) { 110 }
-        else if (level == 10) { 150 }
-        else if (level == 11) { 200 }
-        else if (level == 12) { 260 }
-        else if (level == 13) { 330 }
-        else if (level == 14) { 410 }
-        else if (level == 15) { 500 }
-        else if (level == 16) { 600 }
-        else if (level == 17) { 710 }
-        else if (level == 18) { 830 }
-        else if (level == 19) { 960 }
-        else if (level == 20) { 1100 }
-        else { 1100 }
+        else if (level == 2) { 100 }
+        else if (level == 3) { 300 }
+        else if (level == 4) { 700 }
+        else if (level == 5) { 1500 }
+        else if (level == 6) { 3000 }
+        else if (level == 7) { 6000 }
+        else if (level == 8) { 12000 }
+        else if (level == 9) { 25000 }
+        else if (level == 10) { 50000 }
+        else if (level == 11) { 80000 }
+        else if (level == 12) { 120000 }
+        else if (level == 13) { 170000 }
+        else if (level == 14) { 250000 }
+        else if (level == 15) { 350000 }
+        else if (level == 16) { 430000 }
+        else if (level == 17) { 550000 }
+        else if (level == 18) { 700000 }
+        else if (level == 19) { 850000 }
+        else if (level == 20) { 1000000 }
+        else { 1000000 }
     }
 
     // ===== Public entry functions =====
@@ -280,6 +297,35 @@ module sui_combats::character {
             endurance_added: end,
             remaining_points: character.unallocated_points,
         });
+    }
+
+    // ===== Fight-lock (admin-gated on-chain proof that equipment cannot change mid-fight) =====
+
+    /// Server sets a lock expiry on a character. Passing `expires_at_ms = 0` clears
+    /// any existing lock. While the stored timestamp is greater than the current
+    /// block time, `is_fight_locked` returns true and all equip/unequip calls abort.
+    public entry fun set_fight_lock(
+        _admin: &AdminCap,
+        character: &mut Character,
+        expires_at_ms: u64,
+    ) {
+        let uid = &mut character.id;
+        if (df::exists_<vector<u8>>(uid, LOCK_KEY)) {
+            let slot: &mut u64 = df::borrow_mut(uid, LOCK_KEY);
+            *slot = expires_at_ms;
+        } else if (expires_at_ms > 0) {
+            df::add(uid, LOCK_KEY, expires_at_ms);
+        };
+        // If no DF exists and expires_at_ms == 0, nothing to do.
+    }
+
+    /// True iff the character has an unexpired fight lock. Auto-expires once
+    /// `clock::timestamp_ms > stored_expires_at_ms` — no cleanup call needed.
+    public fun is_fight_locked(character: &Character, clock: &Clock): bool {
+        let uid = &character.id;
+        if (!df::exists_<vector<u8>>(uid, LOCK_KEY)) return false;
+        let expires: &u64 = df::borrow(uid, LOCK_KEY);
+        *expires > clock::timestamp_ms(clock)
     }
 
     // ===== Package-internal helpers (used by equipment module) =====

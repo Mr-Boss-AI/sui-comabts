@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useGame } from "@/hooks/useGameStore";
+import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ItemCard } from "./item-card";
 import { ItemDetailModal } from "./item-detail-modal";
@@ -41,8 +42,9 @@ const SLOT_ICONS: Record<keyof EquipmentSlots, string> = {
 };
 
 export function EquipmentGrid() {
-  const { state, dispatch } = useGame();
+  const { state } = useGame();
   const { character, inventory, onChainItems, onChainEquipped } = state;
+  const { equip, unequip } = useEquipmentActions();
   const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(null);
 
   if (!character) return null;
@@ -56,8 +58,25 @@ export function EquipmentGrid() {
     return merged;
   }, [character.equipment, onChainEquipped]);
 
-  const onChainIds = new Set(onChainItems.map((i) => i.id));
+  // Items already equipped anywhere on-chain — hidden from the picker so we
+  // never offer an already-attached DOF as an input (would hit Sui's PTB
+  // "object owned by object" rejection).
+  const equippedOnChainIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of Object.values(onChainEquipped)) {
+      if (item) set.add(item.id);
+    }
+    return set;
+  }, [onChainEquipped]);
+
   const selectedItem = selectedSlot ? eq[selectedSlot] : null;
+
+  // Effective equip level = min(server.level, onChain.level) to avoid offering
+  // items that would fail the on-chain ELevelTooLow check.
+  const effectiveLevel = Math.min(
+    character.level,
+    state.onChainCharacter?.level ?? character.level,
+  );
 
   const equippable = useMemo(() => {
     if (!selectedSlot) return [];
@@ -66,27 +85,21 @@ export function EquipmentGrid() {
     for (const item of inventory) byId.set(item.id, item);
     for (const item of onChainItems) byId.set(item.id, item);
     return Array.from(byId.values()).filter((item) =>
+      !equippedOnChainIds.has(item.id) &&
       SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
-      item.levelReq <= character.level
+      item.levelReq <= effectiveLevel
     );
-  }, [selectedSlot, inventory, onChainItems, character.level]);
+  }, [selectedSlot, inventory, onChainItems, equippedOnChainIds, effectiveLevel]);
 
-  function handleEquip(item: Item) {
+  async function handleEquip(item: Item) {
     if (!selectedSlot) return;
-    if (onChainIds.has(item.id)) {
-      dispatch({ type: "EQUIP_ONCHAIN_ITEM", item, slot: selectedSlot });
-    } else {
-      state.socket.send({ type: "equip_item", itemId: item.id, slot: selectedSlot });
-    }
+    const currentItem = eq[selectedSlot] || null;
+    await equip(item, selectedSlot, currentItem);
     setSelectedSlot(null);
   }
 
-  function handleUnequip(slot: keyof EquipmentSlots) {
-    if (onChainEquipped[slot]) {
-      dispatch({ type: "UNEQUIP_ONCHAIN_ITEM", slot });
-    } else {
-      state.socket.send({ type: "unequip_item", slot });
-    }
+  async function handleUnequip(slot: keyof EquipmentSlots) {
+    await unequip(slot);
     setSelectedSlot(null);
   }
 

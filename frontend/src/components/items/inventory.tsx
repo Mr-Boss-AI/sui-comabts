@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useGame } from "@/hooks/useGameStore";
+import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ItemCard } from "./item-card";
 import { ItemDetailModal } from "./item-detail-modal";
@@ -105,18 +106,26 @@ function VirtualList({ items, renderItem, maxHeight }: {
 }
 
 export function Inventory() {
-  const { state, dispatch } = useGame();
+  const { state } = useGame();
   const { inventory, onChainItems, onChainEquipped, character } = state;
+  const { equip } = useEquipmentActions();
   const [category, setCategory] = useState<Category>("all");
   const [filterRarity, setFilterRarity] = useState<Rarity | "all">("all");
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
 
   if (!character) return null;
 
-  // Merge server inventory + on-chain items, dedup by id
-  const onChainIds = new Set(onChainItems.map((i) => i.id));
+  // Items already equipped on-chain — excluded from the merged list so a just-
+  // equipped item can't reappear here due to fullnode propagation lag or stale
+  // optimistic state. Defense-in-depth against "object owned by object" PTB errors.
+  const equippedIds = new Set(
+    Object.values(onChainEquipped).map((i) => i?.id).filter(Boolean) as string[]
+  );
   const serverIds = new Set(inventory.map((i) => i.id));
-  const allItems = [...inventory, ...onChainItems.filter((i) => !serverIds.has(i.id))];
+  const allItems = [
+    ...inventory,
+    ...onChainItems.filter((i) => !serverIds.has(i.id) && !equippedIds.has(i.id)),
+  ];
 
   // Merge equipment for "Replaces" display
   const eq: EquipmentSlots = useMemo(() => {
@@ -134,17 +143,21 @@ export function Inventory() {
     return true;
   });
 
-  function handleEquip(item: Item, slot: keyof EquipmentSlots) {
-    if (onChainIds.has(item.id)) {
-      dispatch({ type: "EQUIP_ONCHAIN_ITEM", item, slot });
-    } else {
-      state.socket.send({ type: "equip_item", itemId: item.id, slot });
-    }
-    setSelectedItem(null);
+  async function handleEquip(item: Item, slot: keyof EquipmentSlots) {
+    const currentItem = eq[slot] || null;
+    const ok = await equip(item, slot, currentItem);
+    if (ok) setSelectedItem(null);
   }
 
+  // Effective equip level = min(server.level, onChain.level).
+  // See character-profile.tsx for the rationale (pre-revert test-XP drift).
+  const effectiveLevel = Math.min(
+    character.level,
+    state.onChainCharacter?.level ?? character.level,
+  );
+
   const selectedSlots = selectedItem
-    ? getSlotsForItem(selectedItem).filter(() => selectedItem.levelReq <= character.level)
+    ? getSlotsForItem(selectedItem).filter(() => selectedItem.levelReq <= effectiveLevel)
     : [];
 
   return (
