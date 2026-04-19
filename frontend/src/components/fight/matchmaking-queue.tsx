@@ -129,20 +129,51 @@ export function MatchmakingQueue() {
         const wagerMatchId = sharedObj?.objectId;
 
         if (!wagerMatchId) {
-          dispatch({ type: "SET_ERROR", message: "Could not find WagerMatch object in transaction result. Check explorer." });
+          // Sticky: the user just locked real SUI on-chain. If we fail to
+          // extract the wager ID, the lobby entry will never get created
+          // and the escrow is orphaned until admin recovery. They MUST see
+          // this error — a 5s toast is too easy to miss.
+          const digest = txData.digest || txData.effects?.transactionDigest || "(unknown)";
+          dispatch({
+            type: "SET_ERROR",
+            sticky: true,
+            message:
+              `Your ${wagerAmount} SUI was locked on-chain (tx ${digest}) but the app couldn't read the wager ID from the transaction result. ` +
+              `The funds are NOT lost — ping the dev to run the admin-adopt-wager endpoint with your tx digest. ` +
+              `Do NOT retry or you'll lock a second stake.`,
+          });
+          console.error("[Wager] wagerMatchId extraction failed. tx data:", txData);
           setSigning(false);
           return;
         }
 
         console.log("[Wager] Created on-chain escrow:", wagerMatchId);
 
-        state.socket.send({
+        const delivered = state.socket.send({
           type: "queue_fight",
           fightType: "wager",
           wagerAmount,
           wagerMatchId,
           onChainEquipment: Object.keys(onChainEquipment).length > 0 ? onChainEquipment : undefined,
         });
+
+        if (!delivered) {
+          // WS was disconnected when we tried to register the wager with
+          // the server. The on-chain escrow is real; the lobby entry is not.
+          // Block the user from retrying (double-stake risk) and surface the
+          // admin recovery path. Sticky = must dismiss.
+          const digest = txData.digest || txData.effects?.transactionDigest || "(unknown)";
+          dispatch({
+            type: "SET_ERROR",
+            sticky: true,
+            message:
+              `Your ${wagerAmount} SUI is locked on-chain (tx ${digest}, wager ${wagerMatchId.slice(0, 12)}...) ` +
+              `but the WebSocket to the game server was disconnected when we tried to register the lobby entry. ` +
+              `Do NOT retry — you'll lock a second stake. Ping the dev to run: ` +
+              `POST /api/admin/adopt-wager { wagerMatchId: "${wagerMatchId}" }`,
+          });
+          console.error("[Wager] queue_fight send DROPPED. wagerMatchId:", wagerMatchId);
+        }
       } catch (err: any) {
         console.error("[Wager] create_wager failed:", err);
         dispatch({ type: "SET_ERROR", message: err?.message || "Wallet transaction rejected" });

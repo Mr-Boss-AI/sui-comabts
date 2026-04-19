@@ -16,6 +16,7 @@ import type {
 } from "@/types/game";
 import type { OnChainCharacter } from "@/lib/sui-contracts";
 import type { FightHistoryEntry } from "@/types/ws-messages";
+import { EMPTY_EQUIPMENT, cloneEquipment } from "@/lib/loadout";
 
 export interface GameState {
   // Connection
@@ -27,6 +28,18 @@ export interface GameState {
   onChainItems: Item[];
   onChainEquipped: Partial<Record<keyof EquipmentSlots, Item>>;
   onChainCharacter: OnChainCharacter | null;
+
+  // Loadout save flow (LOADOUT_DESIGN.md D1-D5). Two parallel slices:
+  //   committedEquipment — snapshot of the last chain-saved loadout. Written
+  //     on SET_CHARACTER (server hydrates from DOFs) and on COMMIT_SAVED
+  //     (after a saveLoadout PTB lands). This is what combat uses.
+  //   pendingEquipment — mutable local copy the user fiddles with via
+  //     STAGE_EQUIP / STAGE_UNEQUIP. `computeDirtySlots(committed, pending)`
+  //     produces the set of slots that changed.
+  // The `onChainEquipped` slice above will be removed in Step 5 once UI
+  // surfaces migrate to pendingEquipment.
+  committedEquipment: EquipmentSlots;
+  pendingEquipment: EquipmentSlots;
 
   // Fight
   fight: FightState | null;
@@ -68,6 +81,10 @@ export interface GameState {
   currentArea: "character" | "arena" | "marketplace" | "tavern" | "hall_of_fame";
   errorMessage: string | null;
   errorTimestamp: number | null;
+  // Sticky errors bypass the 5s auto-fade and require user dismissal.
+  // Use for irreversible/financial events the player must see — e.g. a
+  // wager lock that didn't register with the server.
+  errorSticky: boolean;
 
   // Bump to force GameProvider to re-fetch on-chain items + character NFT.
   // Incremented after every successful on-chain equip/unequip so the UI reconverges
@@ -83,6 +100,8 @@ export const initialGameState: GameState = {
   onChainItems: [],
   onChainEquipped: {},
   onChainCharacter: null,
+  committedEquipment: EMPTY_EQUIPMENT,
+  pendingEquipment: EMPTY_EQUIPMENT,
   fight: null,
   fightQueue: null,
   lootResult: null,
@@ -99,6 +118,7 @@ export const initialGameState: GameState = {
   currentArea: "character",
   errorMessage: null,
   errorTimestamp: null,
+  errorSticky: false,
   onChainRefreshTrigger: 0,
 };
 
@@ -109,6 +129,11 @@ export type GameAction =
   | { type: "SET_ONCHAIN_CHARACTER"; data: OnChainCharacter | null }
   | { type: "EQUIP_ONCHAIN_ITEM"; item: Item; slot: keyof EquipmentSlots }
   | { type: "UNEQUIP_ONCHAIN_ITEM"; slot: keyof EquipmentSlots }
+  // Loadout save flow (Step 2 plumbing; hook + UI come in Steps 3 and 5).
+  | { type: "STAGE_EQUIP"; item: Item; slot: keyof EquipmentSlots }
+  | { type: "STAGE_UNEQUIP"; slot: keyof EquipmentSlots }
+  | { type: "STAGE_DISCARD" }
+  | { type: "COMMIT_SAVED"; committed: EquipmentSlots }
   | { type: "SET_FIGHT"; fight: FightState | null }
   | { type: "SET_FIGHT_QUEUE"; fightType: string | null }
   | { type: "SET_LOOT_RESULT"; loot: LootBoxResult | null }
@@ -130,15 +155,33 @@ export type GameAction =
   | { type: "SET_WAGER_LOBBY"; entries: WagerLobbyEntry[] }
   | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
   | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
-  | { type: "SET_ERROR"; message: string | null }
+  | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
   | { type: "BUMP_ONCHAIN_REFRESH" }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
   | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
-    case "SET_CHARACTER":
-      return { ...state, character: action.character };
+    case "SET_CHARACTER": {
+      // Snapshot committed = chain-truth from server. Only overwrite pending
+      // when the slots actually changed on chain (i.e., the server's committed
+      // differs from our current committed) — otherwise keep the user's
+      // in-progress fiddling intact. Without this guard every server character
+      // refresh would blow away staged changes.
+      const nextCommitted = cloneEquipment(action.character.equipment);
+      let nextPending = state.pendingEquipment;
+      const committedChanged = (Object.keys(nextCommitted) as (keyof EquipmentSlots)[])
+        .some((slot) => nextCommitted[slot]?.id !== state.committedEquipment[slot]?.id);
+      if (committedChanged) {
+        nextPending = cloneEquipment(nextCommitted);
+      }
+      return {
+        ...state,
+        character: action.character,
+        committedEquipment: nextCommitted,
+        pendingEquipment: nextPending,
+      };
+    }
     case "SET_INVENTORY":
       return { ...state, inventory: action.items };
     case "SET_ONCHAIN_ITEMS":
@@ -147,21 +190,97 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, onChainCharacter: action.data };
     case "EQUIP_ONCHAIN_ITEM": {
       const { item, slot } = action;
-      const newOnChainItems = state.onChainItems.filter((i) => i.id !== item.id);
+      let newOnChainItems = state.onChainItems.filter((i) => i.id !== item.id);
       const newEquipped = { ...state.onChainEquipped };
-      // If slot already has an on-chain item, move it back to inventory
-      const displaced = newEquipped[slot];
-      if (displaced) newOnChainItems.push(displaced);
+      const sessionDisplaced = newEquipped[slot];
+      if (sessionDisplaced) newOnChainItems.push(sessionDisplaced);
       newEquipped[slot] = item;
-      return { ...state, onChainItems: newOnChainItems, onChainEquipped: newEquipped };
+
+      // Mirror write into character.equipment so server-hydrated (DOF) state
+      // stays in sync through live equips. A DOF item already in the slot
+      // goes back to the wallet list. Short-term patch — the committed/pending
+      // split in step 2 supersedes this.
+      let newCharacter = state.character;
+      if (newCharacter) {
+        const serverDisplaced = newCharacter.equipment?.[slot];
+        if (
+          serverDisplaced &&
+          serverDisplaced.id !== item.id &&
+          !newOnChainItems.some((i) => i.id === serverDisplaced.id)
+        ) {
+          newOnChainItems = [...newOnChainItems, serverDisplaced];
+        }
+        newCharacter = {
+          ...newCharacter,
+          equipment: { ...newCharacter.equipment, [slot]: item as typeof newCharacter.equipment[typeof slot] },
+        };
+      }
+
+      return { ...state, character: newCharacter, onChainItems: newOnChainItems, onChainEquipped: newEquipped };
+    }
+    // === Loadout save flow (Step 2 plumbing) ===
+    // These mutate ONLY pendingEquipment. No chain tx fires here; saveLoadout
+    // (Step 3) will diff committed→pending and emit a PTB. On success the
+    // COMMIT_SAVED action rebases committed = pending.
+    case "STAGE_EQUIP": {
+      const { item, slot } = action;
+      if (state.pendingEquipment[slot]?.id === item.id) return state;
+      return {
+        ...state,
+        pendingEquipment: { ...state.pendingEquipment, [slot]: item },
+      };
+    }
+    case "STAGE_UNEQUIP": {
+      const { slot } = action;
+      if (state.pendingEquipment[slot] == null) return state;
+      return {
+        ...state,
+        pendingEquipment: { ...state.pendingEquipment, [slot]: null },
+      };
+    }
+    case "STAGE_DISCARD":
+      return {
+        ...state,
+        pendingEquipment: cloneEquipment(state.committedEquipment),
+      };
+    case "COMMIT_SAVED": {
+      // Called by saveLoadout after the PTB lands and chain DOFs are re-read.
+      // Committed becomes chain truth; pending snaps to match so isDirty → false.
+      const next = cloneEquipment(action.committed);
+      return {
+        ...state,
+        committedEquipment: next,
+        pendingEquipment: cloneEquipment(next),
+      };
     }
     case "UNEQUIP_ONCHAIN_ITEM": {
       const { slot } = action;
       const newEquipped = { ...state.onChainEquipped };
-      const item = newEquipped[slot];
+      const sessionItem = newEquipped[slot] ?? null;
       delete newEquipped[slot];
-      const newOnChainItems = item ? [...state.onChainItems, item] : state.onChainItems;
-      return { ...state, onChainItems: newOnChainItems, onChainEquipped: newEquipped };
+
+      // Clear character.equipment[slot] — DOF-hydrated items live there and
+      // the old reducer left them stale, which made the slot still look
+      // "equipped" after unequip and caused second-click ESlotEmpty aborts.
+      let newCharacter = state.character;
+      const serverItem = state.character?.equipment?.[slot] ?? null;
+      if (newCharacter && serverItem) {
+        newCharacter = {
+          ...newCharacter,
+          equipment: { ...newCharacter.equipment, [slot]: null },
+        };
+      }
+
+      // Optimistic insert into wallet-owned list so UI updates before
+      // BUMP_ONCHAIN_REFRESH re-fetches. Source either: session cache (set
+      // during THIS session's equip) or the server-hydrated DOF item.
+      const returned = sessionItem ?? serverItem;
+      const newOnChainItems =
+        returned && !state.onChainItems.some((i) => i.id === returned.id)
+          ? [...state.onChainItems, returned]
+          : state.onChainItems;
+
+      return { ...state, character: newCharacter, onChainItems: newOnChainItems, onChainEquipped: newEquipped };
     }
     case "SET_FIGHT":
       return { ...state, fight: action.fight };
@@ -244,7 +363,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       if (!state.fight) return state;
       return { ...state, fight: { ...action.fight, log: [...(state.fight.log || []), action.result] } };
     case "SET_ERROR":
-      return { ...state, errorMessage: action.message, errorTimestamp: action.message ? Date.now() : null };
+      return {
+        ...state,
+        errorMessage: action.message,
+        errorTimestamp: action.message ? Date.now() : null,
+        errorSticky: !!(action.message && action.sticky),
+      };
     case "BUMP_ONCHAIN_REFRESH":
       return { ...state, onChainRefreshTrigger: state.onChainRefreshTrigger + 1 };
     default:

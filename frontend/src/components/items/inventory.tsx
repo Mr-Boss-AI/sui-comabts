@@ -117,13 +117,16 @@ export function Inventory() {
 
   // Items already equipped on-chain — excluded from the merged list so a just-
   // equipped item can't reappear here due to fullnode propagation lag or stale
-  // optimistic state. Defense-in-depth against "object owned by object" PTB errors.
-  const equippedIds = new Set(
-    Object.values(onChainEquipped).map((i) => i?.id).filter(Boolean) as string[]
-  );
+  // optimistic state. Sources both: session cache (set when user equips in
+  // this session) AND character.equipment (server-hydrated DOF state that
+  // survives reloads). Defense-in-depth against "object owned by object" PTB
+  // errors and against legacy NPC-item ids colliding with chain-equipped ids.
+  const equippedIds = new Set<string>();
+  for (const item of Object.values(onChainEquipped)) if (item) equippedIds.add(item.id);
+  for (const item of Object.values(character.equipment)) if (item?.id) equippedIds.add(item.id);
   const serverIds = new Set(inventory.map((i) => i.id));
   const allItems = [
-    ...inventory,
+    ...inventory.filter((i) => !equippedIds.has(i.id)),
     ...onChainItems.filter((i) => !serverIds.has(i.id) && !equippedIds.has(i.id)),
   ];
 

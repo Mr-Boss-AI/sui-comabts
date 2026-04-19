@@ -183,7 +183,20 @@ export function useEquipmentActions() {
   }
 
   async function unequip(slot: keyof EquipmentSlots): Promise<boolean> {
-    const currentItem = state.onChainEquipped[slot];
+    // Detect on-chain items from two sources:
+    //   1. state.onChainEquipped — session cache (populated when user signs
+    //      a wallet equip in THIS session).
+    //   2. state.character.equipment — server-hydrated from chain DOFs at
+    //      auth, so it survives reloads. Items carry 0x... hex IDs.
+    // Without #2, DOF-equipped items from a previous session fall through
+    // to the legacy WS path, which the server rejects with a red toast.
+    const sessionItem = state.onChainEquipped[slot] ?? null;
+    const serverItem = state.character?.equipment?.[slot] ?? null;
+    const serverOnChain =
+      serverItem && typeof serverItem.id === "string" && serverItem.id.startsWith("0x") && serverItem.id.length >= 42
+        ? serverItem
+        : null;
+    const currentItem = sessionItem ?? serverOnChain;
 
     // No on-chain item in this slot → server-only unequip path
     if (!currentItem) {

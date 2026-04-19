@@ -21,10 +21,21 @@ export function useGameSocket(walletAddress: string | null) {
     };
   }, []);
 
-  const send = useCallback((msg: ClientMessage) => {
+  // Returns true when the message was handed to an OPEN socket, false when
+  // the socket is missing / connecting / closed. Callers that care about
+  // delivery (wager creation, wager accept, fight actions) must check the
+  // return value and surface failure to the user — silent drops caused the
+  // orphaned-wager bug. Routine polling calls can ignore it.
+  const send = useCallback((msg: ClientMessage): boolean => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(msg));
+      return true;
     }
+    console.error(
+      `[WS] DROPPED outbound ${msg.type} — readyState=${wsRef.current?.readyState ?? "null"}`,
+      msg,
+    );
+    return false;
   }, []);
 
   useEffect(() => {
@@ -52,6 +63,12 @@ export function useGameSocket(walletAddress: string | null) {
       };
 
       ws.onclose = (event) => {
+        // Stale close — a newer connect() already replaced wsRef with a
+        // different socket. Ignore this handler so we don't null out the
+        // live ref and silently drop every send() that follows. (Root cause
+        // of the 2026-04-19 orphaned-wager incidents.)
+        if (wsRef.current !== ws) return;
+
         setConnected(false);
         setAuthenticated(false);
         wsRef.current = null;

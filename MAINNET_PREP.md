@@ -133,6 +133,7 @@ Each item below must be verified before running `sui client publish` against mai
 
 ### Shared
 
+- [ ] **Unify StatBonuses shape between `server/src/types.ts` and `frontend/src/types/game.ts`.** Currently server uses `{armor, hp, defense, damage, critBonus, strength, dexterity, intuition, endurance}` while frontend expects `{armorBonus, hpBonus, defenseBonus, attackBonus, critChanceBonus, strengthBonus, ...}`. Translation layer in `sanitizeItem` (server handler.ts) masks the divergence today but drops 4 stat fields (`critMultiplierBonus`, `evasionBonus`, `antiCritBonus`, `antiEvasionBonus`). Resolve before mainnet.
 - [ ] **All `.env.example` files contain only placeholders**:
   - [ ] `server/.env.example` — `SUPABASE_URL=https://your-project.supabase.co`, `SUI_PACKAGE_ID=0x...`, etc.
   - [ ] `frontend/.env.local.example` (create if missing)
@@ -283,6 +284,49 @@ Explicitly do not bring into mainnet:
 - [ ] Bug bounty budget should be reserved — recommend $5-10k initial pool for Immunefi launch
 
 ---
+
+## Testnet recovery endpoints
+
+These endpoints are **testnet-only** — all guarded by `CONFIG.SUI_NETWORK !== 'mainnet'` and respond with 403 on mainnet. They exist to rescue state when normal flows fail during development. Do NOT build features that depend on them.
+
+### `POST /api/admin/grant-xp`
+Grants XP to a character server-side AND on-chain (via `update_after_fight` with `won=false`). Bumps on-chain level so level-gated items become equippable without grinding fights.
+
+**Side effect:** increments the character's loss counter by 1 per call. Acceptable on testnet; document per-character if leaderboard is important.
+
+```bash
+curl -X POST http://localhost:3001/api/admin/grant-xp \
+  -H 'Content-Type: application/json' \
+  -d '{"wallet":"0x...","xp":300}'
+```
+
+### `POST /api/admin/adopt-wager`
+Recovers an on-chain WagerMatch that never made it into the in-memory lobby (e.g. WS reconnect race, frontend extraction failure, server restart mid-flow). Queries chain, validates status=WAITING, inserts lobby entry, broadcasts `wager_lobby_added`. Creator must be logged in at the time of adoption.
+
+```bash
+curl -X POST http://localhost:3001/api/admin/adopt-wager \
+  -H 'Content-Type: application/json' \
+  -d '{"wagerMatchId":"0x..."}'
+```
+
+Returns 409 if already in lobby, 409 if status != WAITING, 404 if not a WagerMatch object.
+
+---
+
+## Known races & reliability gaps
+
+### WS reconnect vs outbound message
+On unstable connections, the browser socket can reconnect silently during the gap between a successful on-chain tx landing and the frontend's follow-up WS message (`queue_fight`, `wager_accepted`, etc.). The outbound send either fires on the old (closing) socket and gets dropped, or fires before the new session has completed auth handshake. Result: chain state exists, server state doesn't, user sees nothing.
+
+**Current mitigations:**
+- Sticky (non-fading) error banner when wager-id extraction fails after create_wager sign — user cannot miss the state divergence. Banner tells them to contact admin rather than retry (retry would lock a second stake).
+- Testnet `/api/admin/adopt-wager` endpoint for manual recovery.
+- Server-side `DEBUG_WS=1` logs every inbound WS message with type + key fields — diagnoses "did the server receive it" in one log line.
+
+**To resolve before mainnet:**
+- [ ] Outbound message queue on the WS client — buffer sends while socket is disconnected, flush on reconnect+auth success.
+- [ ] Make the post-tx WS message idempotent (server tolerates duplicate `queue_fight` for the same `wagerMatchId`) so a retry is safe.
+- [ ] Automated orphan-wager scanner: server periodically queries chain for WagerMatch objects in WAITING state whose creator is connected but has no lobby entry, auto-adopt. Eliminates manual curl.
 
 ## Change log
 

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { settleWagerOnChain } from '../utils/sui-settle';
 import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain } from '../utils/sui-settle';
+import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import {
   applyXp,
   checkFightEnd,
@@ -115,12 +116,39 @@ function buildFightStatePayload(fight: FightState): Record<string, any> {
 
 // === Create a Fight ===
 
-export function createFight(
+export async function createFight(
   characterA: Character,
   characterB: Character,
   fightType: FightType,
   wagerAmount?: number
-): FightState {
+): Promise<FightState> {
+  // D3 (strict): re-read chain DOFs right before the combat snapshot. This is
+  // the anti-cheat seam — even if the client lied about equipment at
+  // queue/accept time, chain-truth is what enters the fight. Also catches
+  // any save the player did between auth and this moment. Done in parallel
+  // with the character lookup so fight-start latency stays in the same
+  // budget as the RPC we already pay for fight-lock acquisition.
+  const [aObjId, bObjId] = await Promise.all([
+    findCharacterObjectId(characterA.walletAddress),
+    findCharacterObjectId(characterB.walletAddress),
+  ]);
+  const [dofA, dofB] = await Promise.all([
+    aObjId ? fetchEquippedFromDOFs(aObjId) : Promise.resolve(null),
+    bObjId ? fetchEquippedFromDOFs(bObjId) : Promise.resolve(null),
+  ]);
+  if (dofA) {
+    const changed = applyDOFEquipment(characterA.equipment, dofA);
+    if (changed.length > 0) {
+      console.log(`[Fight] ${characterA.name} DOF-synced slots: ${changed.join(', ')}`);
+    }
+  }
+  if (dofB) {
+    const changed = applyDOFEquipment(characterB.equipment, dofB);
+    if (changed.length > 0) {
+      console.log(`[Fight] ${characterB.name} DOF-synced slots: ${changed.join(', ')}`);
+    }
+  }
+
   const fighterA = createFighterState(characterA, characterB);
   const fighterB = createFighterState(characterB, characterA);
 
@@ -156,14 +184,11 @@ export function createFight(
 
   broadcastToFight(fight, startMsg);
 
-  // On-chain fight-lock (fire-and-forget — auto-expiry is the safety net if this fails,
-  // and server-side fight state is authoritative for combat resolution regardless).
+  // On-chain fight-lock (fire-and-forget — auto-expiry is the safety net if
+  // this fails, and server-side fight state is authoritative for combat
+  // resolution regardless). Reuses the object IDs fetched above.
   (async () => {
     try {
-      const [aObjId, bObjId] = await Promise.all([
-        findCharacterObjectId(characterA.walletAddress),
-        findCharacterObjectId(characterB.walletAddress),
-      ]);
       const expiry = Date.now() + CONFIG.FIGHT_LOCK_DURATION_MS;
       const locks: Promise<unknown>[] = [];
       if (aObjId) locks.push(setFightLockOnChain(aObjId, expiry));

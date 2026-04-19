@@ -40,8 +40,8 @@ import {
   getChatClients,
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
-import { verifyEquipmentOwnership } from '../utils/sui-verify';
-import { getWagerStatus, adminCancelWagerOnChain } from '../utils/sui-settle';
+import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId } from '../utils/sui-settle';
+import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import {
   createFight,
 } from './fight-room';
@@ -138,11 +138,25 @@ function handleDisconnect(client: ConnectedClient): void {
 
 // === Message Router ===
 
+// Testnet-only inbound WS logging. Surfaces messages the server is
+// actually receiving so silent drops (WS reconnect race, malformed
+// payload) show up immediately. Disable on testnet with DEBUG_WS=0.
+const DEBUG_WS = process.env.DEBUG_WS !== '0' && CONFIG.SUI_NETWORK !== 'mainnet';
+
 function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
   // Auth must be first
   if (msg.type !== 'auth' && !client.authenticated) {
     sendError(client, 'Not authenticated. Send auth message first.');
     return;
+  }
+
+  if (DEBUG_WS) {
+    const extras: string[] = [];
+    if (msg.wagerMatchId) extras.push(`wager=${String(msg.wagerMatchId).slice(0, 12)}`);
+    if (msg.fightType) extras.push(`fightType=${msg.fightType}`);
+    if (msg.slot) extras.push(`slot=${msg.slot}`);
+    const tag = extras.length ? ` [${extras.join(', ')}]` : '';
+    console.log(`[WS in] ${client.walletAddress?.slice(0, 10) ?? '??'} ${msg.type}${tag}`);
   }
 
   switch (msg.type) {
@@ -258,11 +272,36 @@ async function handleAuth(client: ConnectedClient, msg: ClientMessage): Promise<
   if (character) {
     client.characterId = character.id;
 
-    // Verify on-chain equipped items are still owned by the wallet
-    const removedSlots = await verifyEquipmentOwnership(walletAddress, character.equipment);
-    if (removedSlots.length > 0) {
-      console.log(`[Auth] Removed ghost items from ${walletAddress}: ${removedSlots.join(', ')}`);
+    // Hydrate equipment from on-chain DOFs so server state matches the
+    // player's "last saved" loadout before any fight resolution uses it.
+    // Chain DOFs are authoritative for on-chain items; off-chain NPC items
+    // are preserved in slots the chain doesn't touch.
+    const charObjectId = await findCharacterObjectId(walletAddress);
+    if (charObjectId) {
+      const dof = await fetchEquippedFromDOFs(charObjectId);
+      if (dof) {
+        const populated = (Object.entries(dof) as Array<[string, unknown]>)
+          .filter(([, v]) => v !== null)
+          .map(([k]) => k);
+        const changed = applyDOFEquipment(character.equipment, dof);
+        console.log(
+          `[Auth] DOF ${walletAddress.slice(0, 10)}: chain has ${populated.length} equipped` +
+          `${populated.length ? ` (${populated.join(', ')})` : ''}` +
+          `, ${changed.length} slot(s) synced`,
+        );
+      } else {
+        console.log(`[Auth] DOF ${walletAddress.slice(0, 10)}: read failed — keeping server state`);
+      }
+    } else {
+      console.log(`[Auth] DOF ${walletAddress.slice(0, 10)}: no on-chain character found`);
     }
+    // NOTE: verifyEquipmentOwnership used to run here as a ghost-item sweep.
+    // Removed because its mental model ("equipped items live in the wallet")
+    // is wrong under Phase 0.5 — equipped items are dynamic object fields on
+    // the Character NFT, so `suix_getOwnedObjects` on the wallet correctly
+    // does not list them. Keeping the sweep would clobber every DOF slot we
+    // just hydrated. Chain-empty slots that still hold a stale on-chain ID
+    // are already cleared by applyDOFEquipment above.
   }
 
   // Register for chat
@@ -378,34 +417,10 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
     return;
   }
 
-  // Merge on-chain equipped items into character equipment for combat
-  const onChainEquipment = msg.onChainEquipment as Record<string, Record<string, unknown>> | undefined;
-  if (onChainEquipment) {
-    for (const [slot, raw] of Object.entries(onChainEquipment)) {
-      if (!raw || !(slot in character.equipment)) continue;
-      const sb = (raw.statBonuses || {}) as Record<string, number>;
-      (character.equipment as unknown as Record<string, unknown>)[slot] = {
-        id: raw.id,
-        name: raw.name,
-        itemType: raw.itemType,
-        rarity: raw.rarity,
-        levelReq: raw.levelReq || 1,
-        statBonuses: {
-          strength: sb.strengthBonus || 0,
-          dexterity: sb.dexterityBonus || 0,
-          intuition: sb.intuitionBonus || 0,
-          endurance: sb.enduranceBonus || 0,
-          hp: sb.hpBonus || 0,
-          armor: sb.armorBonus || 0,
-          defense: sb.defenseBonus || 0,
-          critBonus: sb.critChanceBonus || 0,
-          damage: sb.attackBonus || 0,
-        },
-        minDamage: raw.minDamage || 0,
-        maxDamage: raw.maxDamage || 0,
-      };
-    }
-  }
+  // NOTE: we intentionally ignore msg.onChainEquipment. Equipment for combat
+  // is read directly from on-chain DOFs inside createFight (see fight-room.ts
+  // — D3-strict per LOADOUT_DESIGN.md). Trusting a client-supplied payload
+  // would let a dishonest client fight with gear they never committed.
 
   const rawFightType: unknown = msg.fightType ?? 'ranked';
   if (!isValidFightType(rawFightType)) {
@@ -978,7 +993,7 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
 
   console.log(`[Wager Lobby] ${charB.name} accepted ${charA.name}'s wager for ${entry.wagerAmount} SUI`);
 
-  const fight = createFight(charA, charB, 'wager', entry.wagerAmount);
+  const fight = await createFight(charA, charB, 'wager', entry.wagerAmount);
   fight.wagerMatchId = wagerMatchId;
 
   // Auto-cancel any remaining open wagers for either player (safety net for race conditions)
@@ -1040,6 +1055,61 @@ function handleAllocatePoints(client: ConnectedClient, msg: ClientMessage): void
 
 // === Utilities ===
 
+/**
+ * Translate a server-shape Item into the shape the frontend expects.
+ *
+ * The two layers use different keys for stat bonuses:
+ *   server  →  { armor, hp, defense, damage, critBonus, strength, ... }
+ *   frontend → { armorBonus, hpBonus, defenseBonus, attackBonus, critChanceBonus, ... }
+ *
+ * Before Phase 0.5 this divergence was invisible because the frontend read
+ * on-chain items from its own wallet fetch (already in frontend shape) and
+ * ignored `character.equipment`. Now that the server hydrates DOFs into
+ * `character.equipment`, we have to emit the frontend shape on the wire.
+ */
+function sanitizeItem(item: any): unknown {
+  if (!item) return null;
+  const s = item.statBonuses || {};
+  return {
+    id: item.id,
+    name: item.name,
+    imageUrl: item.imageUrl ?? undefined,
+    itemType: item.itemType,
+    rarity: item.rarity,
+    classReq: item.classReq ?? 0,
+    levelReq: item.levelReq,
+    minDamage: item.minDamage ?? 0,
+    maxDamage: item.maxDamage ?? 0,
+    statBonuses: {
+      strengthBonus: s.strength || 0,
+      dexterityBonus: s.dexterity || 0,
+      intuitionBonus: s.intuition || 0,
+      enduranceBonus: s.endurance || 0,
+      hpBonus: s.hp || 0,
+      armorBonus: s.armor || 0,
+      defenseBonus: s.defense || 0,
+      attackBonus: s.damage || 0,
+      critChanceBonus: s.critBonus || 0,
+      // TODO(loadout-cleanup): server StatBonuses type is missing these 4
+      // fields. On-chain items have them but they're dropped here. Unify
+      // server/frontend stat shape as part of mainnet prep. Tracked in
+      // MAINNET_PREP.md.
+      critMultiplierBonus: 0,
+      evasionBonus: 0,
+      antiCritBonus: 0,
+      antiEvasionBonus: 0,
+    },
+  };
+}
+
+function sanitizeEquipment(equipment: Record<string, any>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [slot, item] of Object.entries(equipment)) {
+    out[slot] = sanitizeItem(item);
+  }
+  return out;
+}
+
 function sanitizeCharacter(character: any): Record<string, any> {
   const unallocatedPoints = character.unallocatedPoints || 0;
   if (unallocatedPoints > 0) {
@@ -1058,7 +1128,7 @@ function sanitizeCharacter(character: any): Record<string, any> {
       endurance: character.stats.endurance,
     },
     unallocatedPoints,
-    equipment: character.equipment,
+    equipment: sanitizeEquipment(character.equipment),
     wins: character.wins,
     losses: character.losses,
     rating: character.rating,
@@ -1069,6 +1139,24 @@ function sanitizeCharacter(character: any): Record<string, any> {
 
 export function getConnectedClients(): Map<string, ConnectedClient> {
   return connectedClients;
+}
+
+/**
+ * Insert a wager into the in-memory lobby and broadcast to all connected
+ * clients. Returns `false` if the wager is already present (idempotent).
+ *
+ * Used by the testnet-only `/api/admin/adopt-wager` recovery endpoint when
+ * a wager exists on-chain but never made it through the WS `queue_fight`
+ * flow (e.g. WS reconnect race). Not wired up for normal traffic.
+ */
+export function adoptWagerIntoLobby(entry: WagerLobbyEntry): boolean {
+  if (wagerLobby.has(entry.wagerMatchId)) return false;
+  wagerLobby.set(entry.wagerMatchId, entry);
+  broadcastAll({ type: 'wager_lobby_added', entry });
+  console.log(
+    `[Wager Lobby] ADOPTED orphan wager ${entry.wagerMatchId} for ${entry.creatorName} (${entry.wagerAmount} SUI)`,
+  );
+  return true;
 }
 
 export function getOnlineCount(): number {
