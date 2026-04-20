@@ -19,7 +19,7 @@ export const CONFIG = {
 } as const;
 
 export const GAME_CONSTANTS = {
-  TURN_TIMER_MS: 60_000,
+  TURN_TIMER_MS: 20_000,
   MAX_LEVEL: 8,
   STAT_POINTS_PER_LEVEL: 3,
   STARTING_STAT_POINTS: 20,

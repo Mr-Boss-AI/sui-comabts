@@ -317,7 +317,8 @@ function resolveFightTurn(fight: FightState): void {
 
   fight.turnResults.push(turnResult);
 
-  // Build turn result message
+  // Build turn result message. hpAfter is included so the frontend damage log
+  // can render post-turn HP (without this the log shows "Your HP: ?").
   const turnResultMsg: ServerMessage = {
     type: 'turn_result',
     result: {
@@ -325,10 +326,12 @@ function resolveFightTurn(fight: FightState): void {
       playerA: {
         actions: turnResult.playerA.actions,
         hits: turnResult.playerA.hits,
+        hpAfter: turnResult.playerA.hpAfter,
       },
       playerB: {
         actions: turnResult.playerB.actions,
         hits: turnResult.playerB.hits,
+        hpAfter: turnResult.playerB.hpAfter,
       },
     },
     fight: buildFightStatePayload(fight),
@@ -340,7 +343,7 @@ function resolveFightTurn(fight: FightState): void {
   const endCheck = checkFightEnd(fight.playerA, fight.playerB);
 
   if (endCheck.finished) {
-    finishFight(fight, endCheck.winner, endCheck.draw);
+    finishFight(fight, endCheck.winner, endCheck.draw, endCheck.draw ? 'draw' : 'hp_zero');
   } else {
     // Start next turn after a short delay
     setTimeout(() => {
@@ -353,9 +356,28 @@ function resolveFightTurn(fight: FightState): void {
 
 // === Finish Fight ===
 
-function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void {
+type FinishReason = 'hp_zero' | 'draw' | 'disconnect';
+
+function finishFight(
+  fight: FightState,
+  winnerId?: string,
+  draw?: boolean,
+  reason: FinishReason = 'hp_zero',
+): void {
   fight.status = 'finished';
   fight.finishedAt = Date.now();
+
+  // Bug C diagnostic — distinguishes HP-zero / draw / disconnect-forfeit end
+  // paths. If a reported "fight ended without HP zero" happens, the log line
+  // tells us whether the cause was a disconnect (reason=disconnect, both HPs
+  // above 0) or something else entirely.
+  console.log(
+    `[Fight] End id=${fight.id.slice(0, 8)} reason=${reason}` +
+    ` winner=${winnerId ? winnerId.slice(0, 10) : 'none'} draw=${!!draw}` +
+    ` turn=${fight.turn}` +
+    ` hpA=${fight.playerA.currentHp}/${fight.playerA.maxHp}` +
+    ` hpB=${fight.playerB.currentHp}/${fight.playerB.maxHp}`,
+  );
 
   if (fight.turnTimer) {
     clearTimeout(fight.turnTimer);
@@ -667,5 +689,5 @@ export function handlePlayerDisconnect(walletAddress: string): void {
   const isPlayerA = fight.playerA.walletAddress === walletAddress;
   const winnerId = isPlayerA ? fight.playerB.characterId : fight.playerA.characterId;
 
-  finishFight(fight, winnerId, false);
+  finishFight(fight, winnerId, false, 'disconnect');
 }

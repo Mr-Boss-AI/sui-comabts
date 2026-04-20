@@ -12,6 +12,11 @@ export function FightHistory() {
   const { fightHistory } = state;
 
   useEffect(() => {
+    // Wait for the WS to finish auth before requesting history — on first
+    // mount the socket is still CONNECTING and the send() would drop with a
+    // console error. state.socket re-memoizes on authenticated flip, so this
+    // effect re-runs once auth lands.
+    if (!state.socket.authenticated) return;
     state.socket.send({ type: "get_fight_history" });
   }, [state.socket]);
 

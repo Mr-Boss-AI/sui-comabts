@@ -164,7 +164,7 @@ Browser (Next.js 16) ──WebSocket──> Game Server (Express + ws, port 3001
 
 ### Combat (PvP)
 - Zone-based PvP combat with ranked matchmaking (blind queue for friendly/ranked)
-- Fight resolution on server with turn timer (60s per turn, auto-action on timeout)
+- Fight resolution on server with turn timer (10s per turn, auto-action on timeout)
 - Loot drops on wins (server-side)
 - **Leaderboard / Hall of Fame working**
 - **Tavern chat working** with global messages, whispers, player list

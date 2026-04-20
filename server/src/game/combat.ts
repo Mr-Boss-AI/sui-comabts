@@ -100,9 +100,18 @@ function getEquipmentBonuses(equipment: EquipmentSlots): {
 // === Offhand detection ===
 
 export function getOffhandType(equipment: EquipmentSlots): OffhandType {
-  if (!equipment.offhand) return 'none';
-  if (equipment.offhand.offhandType === 'shield') return 'shield';
-  if (equipment.offhand.offhandType === 'dual_wield') return 'dual_wield';
+  const off = equipment.offhand;
+  if (!off) return 'none';
+  // Prefer the explicit offhandType label if the item carries one (set by
+  // the legacy NPC-item factory). On-chain items hydrated through
+  // sui-read.ts::parseItemFromContent don't carry offhandType — the Move
+  // Item struct only has item_type: u8. Fall back to itemType so shield
+  // owners actually get 3 block slots and dual-wielders get 2 attack slots.
+  if (off.offhandType === 'shield') return 'shield';
+  if (off.offhandType === 'dual_wield') return 'dual_wield';
+  // ITEM_TYPES.SHIELD = 2, ITEM_TYPES.WEAPON = 1 (weapon in offhand slot = dual wield).
+  if (off.itemType === 2) return 'shield';
+  if (off.itemType === 1) return 'dual_wield';
   return 'none';
 }
 

@@ -3,17 +3,22 @@
 import { useState, useEffect } from "react";
 import { playSoundIf } from "@/lib/sounds";
 
-const TURN_SECONDS = 60;
+const TURN_SECONDS = 20;
 
 interface TurnTimerProps {
   deadline: number; // unix ms
   onExpired?: () => void;
+  // When this player has locked in, freeze the countdown at its current
+  // value. The server-side turn timer still runs (waiting for opponent),
+  // but for the local player the time pressure is over.
+  frozen?: boolean;
 }
 
-export function TurnTimer({ deadline, onExpired }: TurnTimerProps) {
+export function TurnTimer({ deadline, onExpired, frozen }: TurnTimerProps) {
   const [remaining, setRemaining] = useState(TURN_SECONDS);
 
   useEffect(() => {
+    if (frozen) return;
     const interval = setInterval(() => {
       const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
       setRemaining(left);
@@ -24,7 +29,7 @@ export function TurnTimer({ deadline, onExpired }: TurnTimerProps) {
       }
     }, 250);
     return () => clearInterval(interval);
-  }, [deadline, onExpired]);
+  }, [deadline, onExpired, frozen]);
 
   const pct = Math.max(0, (remaining / TURN_SECONDS) * 100);
   const color =

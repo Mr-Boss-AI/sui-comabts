@@ -105,6 +105,12 @@ export function FightArena() {
 
   const submitAction = useCallback(() => {
     if (attackZones.length !== maxAttacks || blockZones.length !== maxBlocks) return;
+    // Diagnostic log — if the damage log shows different zones than what
+    // was sent, we compare this console output (client truth) against the
+    // server-side `[Fight] action` log (server truth). If both match but
+    // the damage log differs, the bug is in the display; if they differ,
+    // the bug is in the WS transport or client state.
+    console.log("[fight_action send]", { attackZones, blockZones });
     state.socket.send({ type: "fight_action", attackZones, blockZones });
     setSubmitted(true);
   }, [attackZones, blockZones, maxAttacks, maxBlocks, state.socket]);

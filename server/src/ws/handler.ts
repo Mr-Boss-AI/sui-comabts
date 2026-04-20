@@ -530,6 +530,16 @@ function handleFightAction(client: ConnectedClient, msg: ClientMessage): void {
   }
 
   const action: TurnAction = { attackZones, blockZones };
+
+  // Diagnostic — pair this with the frontend's `[fight_action send]`
+  // console log. If they disagree, the WS transport or the client state
+  // at send time was off. If they agree but the damage log shows
+  // different zones, the resolver or display is wrong.
+  console.log(
+    `[Fight] action ${client.walletAddress?.slice(0, 10)} ` +
+    `atk=${JSON.stringify(attackZones)} blk=${JSON.stringify(blockZones)}`,
+  );
+
   const result = submitTurnAction(client.currentFightId, client.characterId, action);
 
   if (!result.success) {
