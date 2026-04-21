@@ -157,7 +157,7 @@ Fights are **1v1 turn-based**. Each turn, both players simultaneously choose:
 
 Zones: **Head, Chest, Stomach, Belt, Legs** (5 total)
 
-Turns resolve on a **10-second timer**. If you don't pick, random zones are chosen.
+Turns resolve on a **20-second timer** (design spec was 10s; widened after live testing for ergonomics). If you don't pick, random zones are chosen.
 
 ### 4.2 Turn Resolution (executed on server)
 
@@ -500,7 +500,7 @@ Items are the real economy. Rare+ items are scarce and valuable because:
 |----------|--------|-----------|
 | No abilities | Stats + gear only | Eliminates cheating, simplifies balance, makes gear more valuable |
 | 5 body zones | Head, Chest, Stomach, Belt, Legs | Proven by 20+ years in combats.ru — enough variety without overwhelm |
-| 10-second turns | Timed simultaneous | Fast enough to not bore, slow enough to think |
+| 20-second turns (spec: 10s) | Timed simultaneous | Fast enough to not bore, slow enough to think — widened from 10s after live testing |
 | Items as NFTs | Sui Kiosk | Real ownership, tradeable, royalty-enforced |
 | Characters soulbound | Non-transferable | Prevents account selling, keeps progression meaningful |
 | SUI as currency | No custom token at launch | Lower barrier to entry, real value from day 1 |

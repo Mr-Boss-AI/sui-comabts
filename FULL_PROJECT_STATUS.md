@@ -164,7 +164,7 @@ Browser (Next.js 16) ──WebSocket──> Game Server (Express + ws, port 3001
 
 ### Combat (PvP)
 - Zone-based PvP combat with ranked matchmaking (blind queue for friendly/ranked)
-- Fight resolution on server with turn timer (10s per turn, auto-action on timeout)
+- Fight resolution on server with turn timer (20s per turn, auto-action on timeout)
 - Loot drops on wins (server-side)
 - **Leaderboard / Hall of Fame working**
 - **Tavern chat working** with global messages, whispers, player list
@@ -214,6 +214,14 @@ Browser (Next.js 16) ──WebSocket──> Game Server (Express + ws, port 3001
 | unallocatedPoints hardcoded 0 | Fixed, server-side tracking + retroactive computation on restore | Apr 17 |
 | Stat allocate button not showing | Fixed, button uses server data (not dependent on on-chain character) | Apr 17 |
 | On-chain character not found | Root cause: characters from old package; fixed with Reset Character migration | Apr 17 |
+| Turn timer 60s (spec is 10s) | Lowered to 20s after live testing (server `TURN_TIMER_MS` + frontend `TURN_SECONDS`) | Apr 20 |
+| Shield owners rejected with "Expected 2 block zones" | On-chain items don't carry `offhand_type` label; `getOffhandType` now falls back to `itemType` (2=SHIELD, 1=WEAPON-in-offhand=dual-wield) | Apr 20 |
+| Damage log showed "Your HP: ?" | Server `turn_result` payload now includes `hpAfter` per player | Apr 20 |
+| No diagnostic when fight ends without HP zero | `finishFight` takes a `reason: 'hp_zero' \| 'draw' \| 'disconnect'` and logs it with turn + both HPs | Apr 20 |
+| Zone-pick mismatch reports (hard to diagnose) | Added `[fight_action send]` (frontend console) + `[Fight] action …` (server log) on every submit — pins client vs server truth | Apr 20 |
+| `[WS] DROPPED outbound get_fight_history` on first mount | FightHistory `useEffect` now gates send on `state.socket.authenticated` | Apr 20 |
+| Unequip click silently sent legacy `unequip_item` WS for on-chain items | `stageUnequip` now consults both `pendingEquipment` and `committedEquipment`; if either holds an on-chain NFT, dispatches `STAGE_UNEQUIP` instead of falling through to the WS path | Apr 21 |
+| Pending loadout stayed empty after first `SET_CHARACTER` hydration | Reducer now rebases `pendingEquipment` on first hydration (pending all-null + incoming committed populated), not just on committed change | Apr 21 |
 
 ---
 
@@ -271,21 +279,34 @@ Browser (Next.js 16) ──WebSocket──> Game Server (Express + ws, port 3001
 - **Reset Character button** — deletes server/DB character, triggers re-creation under current package for v4 migration
 - **Contract upgrade** — XP thresholds lowered for testing (2, 5, 10, 20... instead of 100, 300, 700, 1500...)
 
+### April 21 — Loadout-Save flow
+- **Shipped the `save_loadout` UX** (`feature/loadout-save` → commit `b7b8eac`). Players manipulate equipment locally, then one wallet popup commits all slot changes in a single atomic PTB.
+- **New hook API** `useEquipmentActions()` returns `{ stageEquip, stageUnequip, stageDiscard, saveLoadout, signing, isDirty, dirtySlots }`. Per-click wallet popups are gone; `saveLoadout` builds one PTB that unequips + equips every dirty slot via `equipment::*_v2` primitives (D1 = PTB-of-primitives, D2 = no version counter).
+- **New PTB builder** `frontend/src/lib/loadout-tx.ts::buildSaveLoadoutTx(characterId, committed, pending)` — diffs slots, emits `unequip_<slot>_v2` + `equip_<slot>_v2` pairs per dirty slot, gas budget 150M MIST.
+- **State split** — `committedEquipment` (chain truth) and `pendingEquipment` (local staging) now live in `GameState`. Dirty detection via `computeDirtySlots(committed, pending)`.
+- **UI** — Save Loadout + Discard buttons in character-profile header (count badge with N dirty slots). Every `EquipSlot` on the doll gets an amber ring + corner dot when dirty. Save disabled during active fights (with tooltip), auto-fires a fight-start toast if pending was dirty.
+- **D3-strict server side** (already landed in Step 2) — `fetchEquippedFromDOFs` + `applyDOFEquipment` hydrate server equipment from chain at auth and again at fight start. Server ignores any client-sent `onChainEquipment` payload; matchmaking queue cleanup removed the obsolete field.
+- **D4** — combat reads `committedEquipment`; fight-arena renders chain truth, not pending. Pending is inactive during fights.
+- **Cleanup** — removed `onChainEquipped` slice + `EQUIP_ONCHAIN_ITEM` / `UNEQUIP_ONCHAIN_ITEM` action types. UI surfaces migrated to read pending.
+- **Verified live** — three back-to-back real-SUI wager fights (0.51 SUI, 0.1 SUI, 0.1 SUI) completed with zero regressions. Settlement, fight-lock set/clear, character NFT updates all on-chain, no errors.
+- **New doc** `ARCHITECTURE_MAP.md` — complete reference (on-chain modules / addresses / objects / DOFs, off-chain WS+REST+Supabase+memory+external calls, full data-flow traces, trust boundaries) for building a visual wiring diagram.
+
 ---
 
 ## What's Next
 
-1. **Migrate characters to v4** — both test players use Reset Character, re-create, verify on-chain allocation via Suiscan
-2. **Revert XP thresholds** — restore production values in character.move before any public testing
-3. **Register Sui Object Display** — so NFTs show metadata in Sui wallets
-4. **Wire marketplace UI** — connect Kiosk contracts to game frontend
-5. **Mint new items under v4** — replace incompatible old items
-6. **Badge NFTs** — achievement system
-7. **Settlement retry** — automatic retry if on-chain calls fail
-8. **Show opponent equipment in fight UI**
-9. **Gold on-chain** — move gold to on-chain balance
-10. **Medieval theme redesign**
-11. **Production server deployment**
+1. **Merge `feature/loadout-save` to main** once onboarding modal + final browser regression pass are done
+2. **Migrate characters to v4** — both test players use Reset Character, re-create, verify on-chain allocation via Suiscan
+3. **Revert XP thresholds** — restore production values in character.move before any public testing
+4. **Register Sui Object Display** — so NFTs show metadata in Sui wallets
+5. **Wire marketplace UI** — connect Kiosk contracts to game frontend
+6. **Mint new items under v4** — replace incompatible old items
+7. **Badge NFTs** — achievement system
+8. **Settlement retry** — automatic retry if on-chain calls fail
+9. **Show opponent equipment in fight UI**
+10. **Gold on-chain** — move gold to on-chain balance
+11. **Medieval theme redesign**
+12. **Production server deployment**
 
 ---
 

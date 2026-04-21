@@ -1,6 +1,6 @@
 # Loadout-Save UX Design
 
-> **Status:** Draft for review. Branch: `feature/loadout-save`. Base commit: `08ff991`.
+> **Status:** SHIPPED on `feature/loadout-save` — commit `b7b8eac` (2026-04-21). D1=PTB-of-primitives, D2=no version counter, D3=strict (server re-reads DOFs at fight start), D4=combat uses last saved, D5=keep v2 primitives. Verified live across three real-SUI wager fights. Not yet merged to `main`.
 > **Goal:** Replace per-item "click → wallet popup" with classic-game "fiddle → Save Loadout → one wallet popup."
 
 ---
