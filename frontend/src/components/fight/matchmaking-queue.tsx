@@ -101,12 +101,11 @@ export function MatchmakingQueue() {
   const ownLobbyEntry = wagerLobby.find(e => e.creatorWallet === walletAddress);
 
   const handleQueue = useCallback(async () => {
-    // Include on-chain equipped items so the server can apply their stats in combat
-    const onChainEquipment: Record<string, unknown> = {};
-    for (const [slot, item] of Object.entries(state.onChainEquipped)) {
-      if (item) onChainEquipment[slot] = item;
-    }
-
+    // Note: we no longer include an onChainEquipment payload. Per D3-strict
+    // (LOADOUT_DESIGN.md), the server re-reads DOFs at fight start via
+    // fight-room.ts::createFight — any client-sent equipment claim is
+    // ignored and could only lie. The hook's Save Loadout flow puts the
+    // truth on-chain in DOFs; the server reads those.
     if (selectedType === "wager") {
       // Sign create_wager on-chain first
       setSigning(true);
@@ -154,7 +153,6 @@ export function MatchmakingQueue() {
           fightType: "wager",
           wagerAmount,
           wagerMatchId,
-          onChainEquipment: Object.keys(onChainEquipment).length > 0 ? onChainEquipment : undefined,
         });
 
         if (!delivered) {
@@ -188,9 +186,8 @@ export function MatchmakingQueue() {
       type: "queue_fight",
       fightType: selectedType,
       wagerAmount: undefined,
-      onChainEquipment: Object.keys(onChainEquipment).length > 0 ? onChainEquipment : undefined,
     });
-  }, [selectedType, wagerAmount, state.onChainEquipped, state.socket, dAppKit, dispatch]);
+  }, [selectedType, wagerAmount, state.socket, dAppKit, dispatch]);
 
   const handleCancel = useCallback(() => {
     state.socket.send({ type: "cancel_queue" });

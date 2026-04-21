@@ -12,6 +12,7 @@ import type { ServerMessage } from "@/types/ws-messages";
 import type { Item } from "@/types/game";
 import { playSoundIf } from "@/lib/sounds";
 import { fetchCharacterNFT, fetchOwnedItems, fetchKioskItems } from "@/lib/sui-contracts";
+import { computeDirtySlots } from "@/lib/loadout";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 
 export default function GameProvider({
@@ -28,6 +29,7 @@ export default function GameProvider({
     socket,
   });
   const onChainCheckDone = useRef(false);
+  const toastedFightIdRef = useRef<string | null>(null);
 
   // Keep socket ref in sync
   const stateWithSocket = { ...state, socket };
@@ -284,6 +286,28 @@ export default function GameProvider({
     })();
     return () => { cancelled = true; };
   }, [socket.authenticated, walletAddress, client, state.onChainRefreshTrigger]);
+
+  // Fight-with-dirty toast (LOADOUT_DESIGN.md D4). When a fight begins and the
+  // user had staged-but-unsaved changes, surface a one-time info message so
+  // they understand why the combat stats reflect last-saved gear instead of
+  // what's on their doll. Keyed to fightId so the toast doesn't retrigger on
+  // every turn_result within the same fight.
+  useEffect(() => {
+    const fightId = state.fight?.id ?? null;
+    if (!fightId) {
+      toastedFightIdRef.current = null;
+      return;
+    }
+    if (fightId === toastedFightIdRef.current) return;
+    toastedFightIdRef.current = fightId;
+    const dirty = computeDirtySlots(state.committedEquipment, state.pendingEquipment);
+    if (dirty.size > 0) {
+      dispatch({
+        type: "SET_ERROR",
+        message: `Fighting with last saved loadout. ${dirty.size} staged change${dirty.size === 1 ? "" : "s"} inactive until you Save.`,
+      });
+    }
+  }, [state.fight, state.committedEquipment, state.pendingEquipment]);
 
   // Fetch on-chain Item NFTs owned by this wallet.
   // Re-runs on onChainRefreshTrigger bump — critical because equipped items

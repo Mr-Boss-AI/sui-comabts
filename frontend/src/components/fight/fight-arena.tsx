@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { ZoneSelector } from "./zone-selector";
@@ -61,7 +61,7 @@ function FighterDisplay({ name, level, equipment }: { name: string; level: numbe
 export function FightArena() {
   const { state, dispatch } = useGame();
   const account = useCurrentAccount();
-  const { fight, lootResult, onChainEquipped } = state;
+  const { fight, lootResult, committedEquipment } = state;
   const myAddress = account?.address;
 
   const [attackZones, setAttackZones] = useState<Zone[]>([]);
@@ -70,15 +70,12 @@ export function FightArena() {
 
   const character = state.character;
 
-  // Merge server equipment with on-chain equipped items for display
-  const meEquip: EquipmentSlots = useMemo(() => {
-    const base = character?.equipment || ({} as EquipmentSlots);
-    const merged = { ...base };
-    for (const [slot, item] of Object.entries(onChainEquipped)) {
-      if (item) merged[slot as keyof EquipmentSlots] = item;
-    }
-    return merged;
-  }, [character?.equipment, onChainEquipped]);
+  // Combat display uses committed (what's actually on chain). Per D4 in
+  // LOADOUT_DESIGN.md, fights run against the last saved loadout — the
+  // server re-reads DOFs at fight start (fight-room.ts::createFight) — so
+  // we must NOT show pending here or the UI would promise stats the combat
+  // math isn't using.
+  const meEquip: EquipmentSlots = committedEquipment;
 
   const hasShield = meEquip.offhand?.itemType === ITEM_TYPES.SHIELD;
   const hasDualWield = meEquip.offhand?.itemType === ITEM_TYPES.WEAPON;

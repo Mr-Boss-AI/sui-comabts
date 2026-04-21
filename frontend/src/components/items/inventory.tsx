@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -107,37 +107,33 @@ function VirtualList({ items, renderItem, maxHeight }: {
 
 export function Inventory() {
   const { state } = useGame();
-  const { inventory, onChainItems, onChainEquipped, character } = state;
-  const { equip } = useEquipmentActions();
+  const { inventory, onChainItems, pendingEquipment, committedEquipment, character } = state;
+  const { stageEquip } = useEquipmentActions();
   const [category, setCategory] = useState<Category>("all");
   const [filterRarity, setFilterRarity] = useState<Rarity | "all">("all");
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
 
   if (!character) return null;
 
-  // Items already equipped on-chain — excluded from the merged list so a just-
-  // equipped item can't reappear here due to fullnode propagation lag or stale
-  // optimistic state. Sources both: session cache (set when user equips in
-  // this session) AND character.equipment (server-hydrated DOF state that
-  // survives reloads). Defense-in-depth against "object owned by object" PTB
-  // errors and against legacy NPC-item ids colliding with chain-equipped ids.
+  // Hide from the list any item currently slotted in pending (visible on the
+  // doll) OR currently a DOF in committed (chain says it's equipped — passing
+  // it as a tx input would fail with "object owned by object"). Union covers
+  // the moment between "user stages unequip" and "save commits on chain":
+  // pending says free, committed says DOF — until Save lands, the item is
+  // genuinely not passable as a fresh input.
   const equippedIds = new Set<string>();
-  for (const item of Object.values(onChainEquipped)) if (item) equippedIds.add(item.id);
-  for (const item of Object.values(character.equipment)) if (item?.id) equippedIds.add(item.id);
+  for (const item of Object.values(pendingEquipment)) if (item) equippedIds.add(item.id);
+  for (const item of Object.values(committedEquipment)) if (item?.id) equippedIds.add(item.id);
   const serverIds = new Set(inventory.map((i) => i.id));
   const allItems = [
     ...inventory.filter((i) => !equippedIds.has(i.id)),
     ...onChainItems.filter((i) => !serverIds.has(i.id) && !equippedIds.has(i.id)),
   ];
 
-  // Merge equipment for "Replaces" display
-  const eq: EquipmentSlots = useMemo(() => {
-    const merged = { ...character.equipment };
-    for (const [slot, item] of Object.entries(onChainEquipped)) {
-      if (item) merged[slot as keyof EquipmentSlots] = item;
-    }
-    return merged;
-  }, [character.equipment, onChainEquipped]);
+  // "Replaces: X" blurb in the slot picker uses the pending view, since that's
+  // what the user will see on the doll after the click (and what the save PTB
+  // will diff against committed).
+  const eq: EquipmentSlots = pendingEquipment;
 
   const filtered = allItems.filter((item) => {
     const typeList = CATEGORY_TYPES[category];
@@ -146,10 +142,10 @@ export function Inventory() {
     return true;
   });
 
-  async function handleEquip(item: Item, slot: keyof EquipmentSlots) {
+  function handleEquip(item: Item, slot: keyof EquipmentSlots) {
     const currentItem = eq[slot] || null;
-    const ok = await equip(item, slot, currentItem);
-    if (ok) setSelectedItem(null);
+    stageEquip(item, slot, currentItem);
+    setSelectedItem(null);
   }
 
   // Effective equip level = min(server.level, onChain.level).

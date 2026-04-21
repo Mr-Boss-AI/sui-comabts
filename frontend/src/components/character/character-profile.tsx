@@ -26,65 +26,111 @@ function sumEquipmentStat(equipment: EquipmentSlots, key: keyof Item["statBonuse
   return total;
 }
 
-function EquipSlot({ slot, item, onClick }: { slot: keyof EquipmentSlots; item: Item | null; onClick: () => void }) {
+function EquipSlot({
+  slot,
+  item,
+  onClick,
+  isDirty,
+}: {
+  slot: keyof EquipmentSlots;
+  item: Item | null;
+  onClick: () => void;
+  isDirty?: boolean;
+}) {
+  // Dirty slots get an amber ring + a corner dot; both survive next to the
+  // rarity-color border by riding on an outer wrapper. This is the "staged
+  // but not saved" signal — the Save Loadout button commits them.
+  const innerBorder = item
+    ? `${RARITY_COLORS[item.rarity].replace("text-", "border-").replace("400", "700")} bg-zinc-900/80 hover:brightness-125 hover:scale-110`
+    : "border-zinc-700/40 bg-zinc-900/40 hover:border-zinc-500 hover:bg-zinc-800/60";
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-11 h-11 rounded-sm flex items-center justify-center transition-all overflow-hidden cursor-pointer
-        border-2 ${item
-          ? `${RARITY_COLORS[item.rarity].replace("text-", "border-").replace("400", "700")} bg-zinc-900/80 hover:brightness-125 hover:scale-110`
-          : "border-zinc-700/40 bg-zinc-900/40 hover:border-zinc-500 hover:bg-zinc-800/60"
+    <div className={`relative ${isDirty ? "ring-2 ring-amber-400/70 ring-offset-1 ring-offset-black rounded-sm" : ""}`}>
+      <button
+        type="button"
+        onClick={onClick}
+        className={`w-11 h-11 rounded-sm flex items-center justify-center transition-all overflow-hidden cursor-pointer
+          border-2 ${innerBorder}
+          shadow-[inset_0_1px_0_rgba(255,255,255,0.05),inset_0_-1px_0_rgba(0,0,0,0.3)]`}
+        title={
+          isDirty
+            ? `${item?.name ?? EQUIPMENT_SLOT_LABELS[slot]} (staged — click Save Loadout to commit)`
+            : item
+              ? `${item.name} (click to manage)`
+              : `${EQUIPMENT_SLOT_LABELS[slot]} (click to equip)`
         }
-        shadow-[inset_0_1px_0_rgba(255,255,255,0.05),inset_0_-1px_0_rgba(0,0,0,0.3)]`}
-      title={item ? `${item.name} (click to manage)` : `${EQUIPMENT_SLOT_LABELS[slot]} (click to equip)`}
-    >
-      {item ? (
-        item.imageUrl ? (
-          <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+      >
+        {item ? (
+          item.imageUrl ? (
+            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+          ) : (
+            <span className={`text-sm ${RARITY_COLORS[item.rarity]}`}>
+              {SLOT_ICONS[slot]}
+            </span>
+          )
         ) : (
-          <span className={`text-sm ${RARITY_COLORS[item.rarity]}`}>
-            {SLOT_ICONS[slot]}
-          </span>
-        )
-      ) : (
-        <span className="text-zinc-700 text-sm">{SLOT_ICONS[slot]}</span>
+          <span className="text-zinc-700 text-sm">{SLOT_ICONS[slot]}</span>
+        )}
+      </button>
+      {isDirty && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.8)]"
+        />
       )}
-    </button>
+    </div>
   );
 }
 
 export function CharacterProfile({ character, compact }: { character: Character; compact?: boolean }) {
   const { state } = useGame();
-  const { equip, unequip } = useEquipmentActions();
+  const {
+    stageEquip,
+    stageUnequip,
+    stageDiscard,
+    saveLoadout,
+    signing,
+    isDirty,
+    dirtySlots,
+  } = useEquipmentActions();
   const [showAllocate, setShowAllocate] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(null);
+
+  // Saving is blocked while combat is resolving (fight-lock DF on chain would
+  // abort the PTB anyway — this pre-empts the wallet popup). Wagered fights
+  // matter especially: the chain state during combat is the committed
+  // snapshot the server locked in at createFight.
+  const inFight = state.fight !== null;
+  const saveDisabled = signing || inFight || !isDirty;
+  const saveTooltip = inFight
+    ? "Locked — Save is disabled during an active fight"
+    : signing
+      ? "Saving…"
+      : !isDirty
+        ? "No unsaved changes"
+        : `Save ${dirtySlots.size} slot change(s) on-chain`;
 
   // Prefer server-tracked unallocatedPoints, fall back to on-chain
   const unallocatedPoints = character.unallocatedPoints || (state.onChainCharacter?.unallocatedPoints ?? 0);
   const characterObjectId = state.onChainCharacter?.objectId;
 
-  // Merge server equipment with locally-equipped on-chain items
-  const eq: EquipmentSlots = useMemo(() => {
-    const merged = { ...character.equipment };
-    for (const [slot, item] of Object.entries(state.onChainEquipped)) {
-      if (item) merged[slot as keyof EquipmentSlots] = item;
-    }
-    return merged;
-  }, [character.equipment, state.onChainEquipped]);
+  // Display pendingEquipment (what the user WANTS). Committed is the chain
+  // truth; combat uses committed (D4 — fight-room.ts re-reads DOFs). The
+  // doll slots show pending so staged changes are visible immediately
+  // without waiting for a Save Loadout tx.
+  const eq: EquipmentSlots = state.pendingEquipment;
 
   const selectedItem = selectedSlot ? eq[selectedSlot] : null;
 
-  // Items already equipped on-chain (anywhere) — excluded from the picker so
-  // the user can't try to re-equip an item that's already a DOF (which would
-  // hit Sui's "owned by object" input-validation error).
-  const equippedOnChainIds = useMemo(() => {
+  // Items already slotted in pending — hidden from the picker. Items only
+  // in committed (user staged an unequip but hasn't Saved yet) are still
+  // available because the save PTB will free them before re-equipping.
+  const equippedPendingIds = useMemo(() => {
     const set = new Set<string>();
-    for (const item of Object.values(state.onChainEquipped)) {
+    for (const item of Object.values(state.pendingEquipment)) {
       if (item) set.add(item.id);
     }
     return set;
-  }, [state.onChainEquipped]);
+  }, [state.pendingEquipment]);
 
   // Effective equip level = min(server.level, onChain.level).
   // Server level can be ahead of chain (pre-revert test-XP drift). Filtering by
@@ -102,24 +148,22 @@ export function CharacterProfile({ character, compact }: { character: Character;
     for (const item of state.onChainItems) byId.set(item.id, item);
     return Array.from(byId.values()).filter((item) =>
       !item.inKiosk &&
-      !equippedOnChainIds.has(item.id) &&
+      !equippedPendingIds.has(item.id) &&
       SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
       item.levelReq <= effectiveLevel
     );
-  }, [selectedSlot, state.inventory, state.onChainItems, equippedOnChainIds, effectiveLevel]);
+  }, [selectedSlot, state.inventory, state.onChainItems, equippedPendingIds, effectiveLevel]);
 
-  async function handleEquip(item: Item) {
+  function handleEquip(item: Item) {
     if (!selectedSlot) return;
     const currentItem = eq[selectedSlot] || null;
-    const ok = await equip(item, selectedSlot, currentItem);
-    // Close modal regardless — on failure the error toast already surfaced why.
+    stageEquip(item, selectedSlot, currentItem);
     setSelectedSlot(null);
-    void ok;
   }
 
-  async function handleUnequip() {
+  function handleUnequip() {
     if (!selectedSlot) return;
-    await unequip(selectedSlot);
+    stageUnequip(selectedSlot);
     setSelectedSlot(null);
   }
 
@@ -156,7 +200,37 @@ export function CharacterProfile({ character, compact }: { character: Character;
             <Badge variant="info">Lv.{character.level}</Badge>
             <span className={`text-xs font-semibold ${getArchetypeColor(archetype)}`}>{archetype}</span>
           </div>
-          <Badge variant="warning">{character.rating} ELO</Badge>
+          <div className="flex items-center gap-2">
+            {isDirty && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void saveLoadout();
+                  }}
+                  disabled={saveDisabled}
+                  title={saveTooltip}
+                  className={`px-3 py-1 text-xs font-bold rounded border transition-all ${
+                    saveDisabled
+                      ? "bg-zinc-800/60 text-zinc-500 border-zinc-700 cursor-not-allowed"
+                      : "bg-amber-500/20 text-amber-300 border-amber-500/60 hover:bg-amber-500/30 hover:border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.25)]"
+                  }`}
+                >
+                  {signing ? "Saving…" : `Save Loadout (${dirtySlots.size})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={stageDiscard}
+                  disabled={signing}
+                  title="Discard staged changes, revert to last saved"
+                  className="px-2.5 py-1 text-xs font-semibold rounded border bg-zinc-900/40 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Discard
+                </button>
+              </>
+            )}
+            <Badge variant="warning">{character.rating} ELO</Badge>
+          </div>
         </div>
 
         <div className="flex flex-col lg:flex-row">
@@ -167,11 +241,11 @@ export function CharacterProfile({ character, compact }: { character: Character;
               style={{ boxShadow: "inset 0 0 20px rgba(0,0,0,0.5)" }}>
               {/* Helmet - top center */}
               <div className="absolute top-1 left-1/2 -translate-x-1/2">
-                <EquipSlot slot="helmet" item={eq.helmet} onClick={() => setSelectedSlot("helmet")} />
+                <EquipSlot slot="helmet" item={eq.helmet} onClick={() => setSelectedSlot("helmet")} isDirty={dirtySlots.has("helmet")} />
               </div>
               {/* Weapon - left */}
               <div className="absolute top-12 left-1">
-                <EquipSlot slot="weapon" item={eq.weapon} onClick={() => setSelectedSlot("weapon")} />
+                <EquipSlot slot="weapon" item={eq.weapon} onClick={() => setSelectedSlot("weapon")} isDirty={dirtySlots.has("weapon")} />
               </div>
               {/* Character silhouette */}
               <div className="absolute top-10 left-1/2 -translate-x-1/2 flex items-center justify-center pointer-events-none">
@@ -184,27 +258,27 @@ export function CharacterProfile({ character, compact }: { character: Character;
               </div>
               {/* Offhand - right */}
               <div className="absolute top-12 right-1">
-                <EquipSlot slot="offhand" item={eq.offhand} onClick={() => setSelectedSlot("offhand")} />
+                <EquipSlot slot="offhand" item={eq.offhand} onClick={() => setSelectedSlot("offhand")} isDirty={dirtySlots.has("offhand")} />
               </div>
               {/* Chest - below silhouette */}
               <div className="absolute top-[88px] left-1/2 -translate-x-1/2">
-                <EquipSlot slot="chest" item={eq.chest} onClick={() => setSelectedSlot("chest")} />
+                <EquipSlot slot="chest" item={eq.chest} onClick={() => setSelectedSlot("chest")} isDirty={dirtySlots.has("chest")} />
               </div>
               {/* Gloves - bottom left */}
               <div className="absolute bottom-1 left-1">
-                <EquipSlot slot="gloves" item={eq.gloves} onClick={() => setSelectedSlot("gloves")} />
+                <EquipSlot slot="gloves" item={eq.gloves} onClick={() => setSelectedSlot("gloves")} isDirty={dirtySlots.has("gloves")} />
               </div>
               {/* Boots - bottom right */}
               <div className="absolute bottom-1 right-1">
-                <EquipSlot slot="boots" item={eq.boots} onClick={() => setSelectedSlot("boots")} />
+                <EquipSlot slot="boots" item={eq.boots} onClick={() => setSelectedSlot("boots")} isDirty={dirtySlots.has("boots")} />
               </div>
             </div>
             {/* Accessory row */}
             <div className="flex gap-1 mt-2">
-              <EquipSlot slot="belt" item={eq.belt} onClick={() => setSelectedSlot("belt")} />
-              <EquipSlot slot="ring1" item={eq.ring1} onClick={() => setSelectedSlot("ring1")} />
-              <EquipSlot slot="ring2" item={eq.ring2} onClick={() => setSelectedSlot("ring2")} />
-              <EquipSlot slot="necklace" item={eq.necklace} onClick={() => setSelectedSlot("necklace")} />
+              <EquipSlot slot="belt" item={eq.belt} onClick={() => setSelectedSlot("belt")} isDirty={dirtySlots.has("belt")} />
+              <EquipSlot slot="ring1" item={eq.ring1} onClick={() => setSelectedSlot("ring1")} isDirty={dirtySlots.has("ring1")} />
+              <EquipSlot slot="ring2" item={eq.ring2} onClick={() => setSelectedSlot("ring2")} isDirty={dirtySlots.has("ring2")} />
+              <EquipSlot slot="necklace" item={eq.necklace} onClick={() => setSelectedSlot("necklace")} isDirty={dirtySlots.has("necklace")} />
             </div>
           </div>
 

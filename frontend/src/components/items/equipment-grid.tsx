@@ -43,31 +43,30 @@ const SLOT_ICONS: Record<keyof EquipmentSlots, string> = {
 
 export function EquipmentGrid() {
   const { state } = useGame();
-  const { character, inventory, onChainItems, onChainEquipped } = state;
-  const { equip, unequip } = useEquipmentActions();
+  const { character, inventory, onChainItems, pendingEquipment } = state;
+  const { stageEquip, stageUnequip } = useEquipmentActions();
   const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(null);
 
   if (!character) return null;
 
-  // Merge server equipment with on-chain equipped items
-  const eq: EquipmentSlots = useMemo(() => {
-    const merged = { ...character.equipment };
-    for (const [slot, item] of Object.entries(onChainEquipped)) {
-      if (item) merged[slot as keyof EquipmentSlots] = item;
-    }
-    return merged;
-  }, [character.equipment, onChainEquipped]);
+  // Source of truth for what the player WANTS equipped (may not yet be on
+  // chain). The Save Loadout button in character-profile commits pending
+  // to chain via buildSaveLoadoutTx; the reducer then rebases committed.
+  // Display-wise we always render pending so staged changes are visible.
+  const eq: EquipmentSlots = pendingEquipment;
 
-  // Items already equipped anywhere on-chain — hidden from the picker so we
-  // never offer an already-attached DOF as an input (would hit Sui's PTB
-  // "object owned by object" rejection).
-  const equippedOnChainIds = useMemo(() => {
+  // Items already assigned to a slot in pending — hidden from the picker so
+  // the same item can't be staged into two slots at once. Items in committed
+  // but not pending (i.e. staged-unequipped) ARE available here because the
+  // save PTB will unequip them before the next equip, returning them to
+  // the wallet within the same atomic tx.
+  const equippedPendingIds = useMemo(() => {
     const set = new Set<string>();
-    for (const item of Object.values(onChainEquipped)) {
+    for (const item of Object.values(pendingEquipment)) {
       if (item) set.add(item.id);
     }
     return set;
-  }, [onChainEquipped]);
+  }, [pendingEquipment]);
 
   const selectedItem = selectedSlot ? eq[selectedSlot] : null;
 
@@ -85,21 +84,21 @@ export function EquipmentGrid() {
     for (const item of inventory) byId.set(item.id, item);
     for (const item of onChainItems) byId.set(item.id, item);
     return Array.from(byId.values()).filter((item) =>
-      !equippedOnChainIds.has(item.id) &&
+      !equippedPendingIds.has(item.id) &&
       SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
       item.levelReq <= effectiveLevel
     );
-  }, [selectedSlot, inventory, onChainItems, equippedOnChainIds, effectiveLevel]);
+  }, [selectedSlot, inventory, onChainItems, equippedPendingIds, effectiveLevel]);
 
-  async function handleEquip(item: Item) {
+  function handleEquip(item: Item) {
     if (!selectedSlot) return;
     const currentItem = eq[selectedSlot] || null;
-    await equip(item, selectedSlot, currentItem);
+    stageEquip(item, selectedSlot, currentItem);
     setSelectedSlot(null);
   }
 
-  async function handleUnequip(slot: keyof EquipmentSlots) {
-    await unequip(slot);
+  function handleUnequip(slot: keyof EquipmentSlots) {
+    stageUnequip(slot);
     setSelectedSlot(null);
   }
 

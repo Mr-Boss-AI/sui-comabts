@@ -1,4 +1,5 @@
 import type { EquipmentSlots, Item } from "@/types/game";
+import type { EquipSlotKey } from "@/lib/sui-contracts";
 
 // Canonical slot order. Also used by the PTB builder to produce a stable
 // moveCall sequence in save transactions (Step 4 will import this).
@@ -82,4 +83,13 @@ export function isLoadoutDirty(
  * re-deriving the rule per component. */
 export function isOnChainItem(item: Item | null | undefined): boolean {
   return !!item && typeof item.id === "string" && item.id.startsWith("0x") && item.id.length >= 42;
+}
+
+/** Frontend uses camelCase ring slots (`ring1`, `ring2`); the Move module
+ * keeps Rust-style snake_case (`ring_1`, `ring_2`). One mapping, two callers
+ * (the staging hook and the save PTB builder). */
+export function toChainSlot(slot: keyof EquipmentSlots): EquipSlotKey {
+  if (slot === "ring1") return "ring_1";
+  if (slot === "ring2") return "ring_2";
+  return slot as EquipSlotKey;
 }

@@ -26,18 +26,17 @@ export interface GameState {
   character: Character | null;
   inventory: Item[];
   onChainItems: Item[];
-  onChainEquipped: Partial<Record<keyof EquipmentSlots, Item>>;
   onChainCharacter: OnChainCharacter | null;
 
   // Loadout save flow (LOADOUT_DESIGN.md D1-D5). Two parallel slices:
   //   committedEquipment — snapshot of the last chain-saved loadout. Written
   //     on SET_CHARACTER (server hydrates from DOFs) and on COMMIT_SAVED
-  //     (after a saveLoadout PTB lands). This is what combat uses.
+  //     (after a saveLoadout PTB lands). This is what combat uses and what
+  //     fight-arena renders.
   //   pendingEquipment — mutable local copy the user fiddles with via
   //     STAGE_EQUIP / STAGE_UNEQUIP. `computeDirtySlots(committed, pending)`
-  //     produces the set of slots that changed.
-  // The `onChainEquipped` slice above will be removed in Step 5 once UI
-  // surfaces migrate to pendingEquipment.
+  //     produces the set of slots that changed. This is what the character
+  //     page doll + inventory hide-set render against.
   committedEquipment: EquipmentSlots;
   pendingEquipment: EquipmentSlots;
 
@@ -98,7 +97,6 @@ export const initialGameState: GameState = {
   character: null,
   inventory: [],
   onChainItems: [],
-  onChainEquipped: {},
   onChainCharacter: null,
   committedEquipment: EMPTY_EQUIPMENT,
   pendingEquipment: EMPTY_EQUIPMENT,
@@ -127,9 +125,7 @@ export type GameAction =
   | { type: "SET_INVENTORY"; items: Item[] }
   | { type: "SET_ONCHAIN_ITEMS"; items: Item[] }
   | { type: "SET_ONCHAIN_CHARACTER"; data: OnChainCharacter | null }
-  | { type: "EQUIP_ONCHAIN_ITEM"; item: Item; slot: keyof EquipmentSlots }
-  | { type: "UNEQUIP_ONCHAIN_ITEM"; slot: keyof EquipmentSlots }
-  // Loadout save flow (Step 2 plumbing; hook + UI come in Steps 3 and 5).
+  // Loadout save flow (LOADOUT_DESIGN.md D1-D5).
   | { type: "STAGE_EQUIP"; item: Item; slot: keyof EquipmentSlots }
   | { type: "STAGE_UNEQUIP"; slot: keyof EquipmentSlots }
   | { type: "STAGE_DISCARD" }
@@ -163,16 +159,25 @@ export type GameAction =
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case "SET_CHARACTER": {
-      // Snapshot committed = chain-truth from server. Only overwrite pending
-      // when the slots actually changed on chain (i.e., the server's committed
-      // differs from our current committed) — otherwise keep the user's
-      // in-progress fiddling intact. Without this guard every server character
-      // refresh would blow away staged changes.
+      // Snapshot committed = chain-truth from server. Rebase pending when
+      // either condition holds:
+      //   1. Chain state changed (new slot set on chain) — user's local
+      //      fiddling is now stale vs the chain, start over from chain truth.
+      //   2. Pending is effectively unhydrated (all nulls) — the very first
+      //      SET_CHARACTER of a session, or a refresh after an explicit
+      //      STAGE_DISCARD. Without this, pending stays EMPTY_EQUIPMENT even
+      //      after the server sends a populated character, which makes every
+      //      stageUnequip() see a null slot and fall through to the legacy
+      //      WS path — exactly the bug observed on 2026-04-21 with ring2.
+      // Otherwise preserve pending — the user may have staged changes the
+      // server doesn't know about yet.
       const nextCommitted = cloneEquipment(action.character.equipment);
       let nextPending = state.pendingEquipment;
       const committedChanged = (Object.keys(nextCommitted) as (keyof EquipmentSlots)[])
         .some((slot) => nextCommitted[slot]?.id !== state.committedEquipment[slot]?.id);
-      if (committedChanged) {
+      const pendingEmpty = Object.values(state.pendingEquipment).every((v) => v == null);
+      const incomingHasItems = Object.values(nextCommitted).some((v) => v != null);
+      if (committedChanged || (pendingEmpty && incomingHasItems)) {
         nextPending = cloneEquipment(nextCommitted);
       }
       return {
@@ -188,40 +193,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, onChainItems: action.items };
     case "SET_ONCHAIN_CHARACTER":
       return { ...state, onChainCharacter: action.data };
-    case "EQUIP_ONCHAIN_ITEM": {
-      const { item, slot } = action;
-      let newOnChainItems = state.onChainItems.filter((i) => i.id !== item.id);
-      const newEquipped = { ...state.onChainEquipped };
-      const sessionDisplaced = newEquipped[slot];
-      if (sessionDisplaced) newOnChainItems.push(sessionDisplaced);
-      newEquipped[slot] = item;
-
-      // Mirror write into character.equipment so server-hydrated (DOF) state
-      // stays in sync through live equips. A DOF item already in the slot
-      // goes back to the wallet list. Short-term patch — the committed/pending
-      // split in step 2 supersedes this.
-      let newCharacter = state.character;
-      if (newCharacter) {
-        const serverDisplaced = newCharacter.equipment?.[slot];
-        if (
-          serverDisplaced &&
-          serverDisplaced.id !== item.id &&
-          !newOnChainItems.some((i) => i.id === serverDisplaced.id)
-        ) {
-          newOnChainItems = [...newOnChainItems, serverDisplaced];
-        }
-        newCharacter = {
-          ...newCharacter,
-          equipment: { ...newCharacter.equipment, [slot]: item as typeof newCharacter.equipment[typeof slot] },
-        };
-      }
-
-      return { ...state, character: newCharacter, onChainItems: newOnChainItems, onChainEquipped: newEquipped };
-    }
-    // === Loadout save flow (Step 2 plumbing) ===
-    // These mutate ONLY pendingEquipment. No chain tx fires here; saveLoadout
-    // (Step 3) will diff committed→pending and emit a PTB. On success the
-    // COMMIT_SAVED action rebases committed = pending.
+    // === Loadout save flow (LOADOUT_DESIGN.md D1-D5) ===
+    // STAGE_* mutate ONLY pendingEquipment. No chain tx fires here; the
+    // saveLoadout hook diffs committed→pending and emits one atomic PTB.
+    // On success COMMIT_SAVED rebases committed := pending so isDirty → false.
     case "STAGE_EQUIP": {
       const { item, slot } = action;
       if (state.pendingEquipment[slot]?.id === item.id) return state;
@@ -252,35 +227,6 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         committedEquipment: next,
         pendingEquipment: cloneEquipment(next),
       };
-    }
-    case "UNEQUIP_ONCHAIN_ITEM": {
-      const { slot } = action;
-      const newEquipped = { ...state.onChainEquipped };
-      const sessionItem = newEquipped[slot] ?? null;
-      delete newEquipped[slot];
-
-      // Clear character.equipment[slot] — DOF-hydrated items live there and
-      // the old reducer left them stale, which made the slot still look
-      // "equipped" after unequip and caused second-click ESlotEmpty aborts.
-      let newCharacter = state.character;
-      const serverItem = state.character?.equipment?.[slot] ?? null;
-      if (newCharacter && serverItem) {
-        newCharacter = {
-          ...newCharacter,
-          equipment: { ...newCharacter.equipment, [slot]: null },
-        };
-      }
-
-      // Optimistic insert into wallet-owned list so UI updates before
-      // BUMP_ONCHAIN_REFRESH re-fetches. Source either: session cache (set
-      // during THIS session's equip) or the server-hydrated DOF item.
-      const returned = sessionItem ?? serverItem;
-      const newOnChainItems =
-        returned && !state.onChainItems.some((i) => i.id === returned.id)
-          ? [...state.onChainItems, returned]
-          : state.onChainItems;
-
-      return { ...state, character: newCharacter, onChainItems: newOnChainItems, onChainEquipped: newEquipped };
     }
     case "SET_FIGHT":
       return { ...state, fight: action.fight };

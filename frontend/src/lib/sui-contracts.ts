@@ -11,13 +11,15 @@ const PACKAGE_ID =
 // Upgraded package — all moveCall targets route here so new bytecode runs
 // (owner checks, fight locks, mint AdminCap gate, listing fee).
 // Fallback to PACKAGE_ID means pre-upgrade testnet builds still work.
-const CALL_PACKAGE =
+// Exported so the loadout PTB builder (lib/loadout-tx.ts) can emit moveCalls
+// against the same package without duplicating the env-var fallback chain.
+export const CALL_PACKAGE =
   process.env.NEXT_PUBLIC_SUI_UPGRADED_PACKAGE_ID ??
   "0x5f9011c8eb31f321fbd5b2ad5c811f34011a96a4c8a2ddfc6262727dee55c76b";
 
 const CHARACTER_TYPE = `${PACKAGE_ID}::character::Character`;
 const ITEM_TYPE = `${PACKAGE_ID}::item::Item`;
-const SUI_CLOCK = '0x6';
+export const SUI_CLOCK = '0x6';
 
 // Treasury wallet — receives listing fees and wager platform fees.
 // Passed as an argument to list_item_with_fee (config-driven, not hardcoded in contract).
