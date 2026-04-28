@@ -15,7 +15,13 @@ import type {
 
 // ===== CLIENT → SERVER =====
 export type ClientMessage =
-  | { type: "auth"; walletAddress: string }
+  // v5 signed-challenge auth handshake. Sequence:
+  //   client → auth_request (asking for a fresh challenge), OR
+  //   client → auth_token  (resuming an existing 24h JWT session)
+  //   client → auth_signature (after server emits auth_challenge)
+  | { type: "auth_request"; walletAddress: string }
+  | { type: "auth_signature"; signature: string }
+  | { type: "auth_token"; walletAddress: string; token: string }
   | {
       type: "create_character";
       name: string;
@@ -54,7 +60,21 @@ export type ClientMessage =
 
 // ===== SERVER → CLIENT =====
 export type ServerMessage =
-  | { type: "auth_ok"; walletAddress: string }
+  // Handshake: server sends `auth_challenge` after a fresh `auth_request`,
+  // emits `auth_required` when an `auth_token` is invalid/expired (telling
+  // the client to fall back to the signed flow), and replies with `auth_ok`
+  // on either successful path. `auth_ok` carries the (re)issued JWT and its
+  // expiry so the client can persist it.
+  | { type: "auth_challenge"; message: string; expiresAt: number }
+  | { type: "auth_required"; reason: string }
+  | {
+      type: "auth_ok";
+      walletAddress: string;
+      token: string;
+      tokenExpiresAt: number;
+      hasCharacter: boolean;
+      character: Character | null;
+    }
   | { type: "error"; message: string }
   | { type: "character_data"; character: Character }
   | { type: "character_created"; character: Character }

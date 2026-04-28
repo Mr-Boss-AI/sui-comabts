@@ -1,8 +1,13 @@
 "use client";
 
 import { useReducer, useEffect, useCallback, useRef } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
-import { useGameSocket } from "@/hooks/useGameSocket";
+import {
+  useCurrentAccount,
+  useCurrentClient,
+  useDAppKit,
+} from "@mysten/dapp-kit-react";
+import { CurrentAccountSigner, type DAppKit } from "@mysten/dapp-kit-core";
+import { useGameSocket, type SignChallengeFn } from "@/hooks/useGameSocket";
 import {
   GameContext,
   gameReducer,
@@ -23,7 +28,21 @@ export default function GameProvider({
   const account = useCurrentAccount();
   const walletAddress = account?.address ?? null;
   const client = useCurrentClient() as SuiGrpcClient | null;
-  const socket = useGameSocket(walletAddress);
+  const dAppKit = useDAppKit() as unknown as DAppKit;
+
+  // The signed-challenge handshake delegates the wallet popup to dapp-kit.
+  // The hook calls this when the server emits `auth_challenge`; we return the
+  // base64 signature for the server to verify with verifyPersonalMessageSignature.
+  const signChallenge: SignChallengeFn = useCallback(
+    async (messageBytes) => {
+      const signer = new CurrentAccountSigner(dAppKit);
+      const result = await signer.signPersonalMessage(messageBytes);
+      return result.signature;
+    },
+    [dAppKit],
+  );
+
+  const socket = useGameSocket(walletAddress, signChallenge);
   const [state, dispatch] = useReducer(gameReducer, {
     ...initialGameState,
     socket,

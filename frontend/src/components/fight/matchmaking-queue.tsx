@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
+import { useWalletBalance } from "@/hooks/useWalletBalance";
 import { useDAppKit } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
@@ -93,6 +94,12 @@ export function MatchmakingQueue() {
   const [selectedType, setSelectedType] = useState<FightType>("friendly");
   const [signing, setSigning] = useState(false);
   const dAppKit = useDAppKit();
+  const balance = useWalletBalance();
+  // Reserve a buffer for gas. 0.05 SUI is more than enough headroom for the
+  // create_wager tx (typical gas is <0.005 SUI) and prevents the user from
+  // staking literally everything and then bricking the next call.
+  const GAS_BUFFER_SUI = 0.05;
+  const insufficientFunds = wagerAmount + GAS_BUFFER_SUI > balance.sui;
 
   const level = character?.level ?? 1;
   const walletAddress = character?.walletAddress ?? "";
@@ -311,11 +318,24 @@ export function MatchmakingQueue() {
                   />
                 </div>
                 <p className="text-xs text-zinc-500">
+                  Wallet balance: <span className="text-amber-300 font-mono">{balance.sui.toFixed(3)} SUI</span>
+                  {balance.error ? <span className="text-red-400 ml-2">({balance.error})</span> : null}
+                </p>
+                <p className="text-xs text-zinc-500">
                   Your wallet will lock {wagerAmount} SUI in on-chain escrow.
                   Winner gets 95%. 5% platform fee.
                 </p>
-                <Button onClick={handleQueue} className="w-full" disabled={signing}>
-                  {signing ? "Signing transaction..." : "Create Wager & Lock SUI"}
+                {insufficientFunds && (
+                  <p className="text-xs text-red-400">
+                    Insufficient SUI. Need at least {(wagerAmount + GAS_BUFFER_SUI).toFixed(3)} (stake + ~{GAS_BUFFER_SUI} gas).
+                  </p>
+                )}
+                <Button onClick={handleQueue} className="w-full" disabled={signing || insufficientFunds}>
+                  {signing
+                    ? "Signing transaction..."
+                    : insufficientFunds
+                      ? "Insufficient SUI"
+                      : "Create Wager & Lock SUI"}
                 </Button>
               </div>
             )}

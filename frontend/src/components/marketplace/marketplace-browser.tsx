@@ -16,6 +16,14 @@ import {
   type Rarity,
 } from "@/types/game";
 
+// MARKETPLACE — v5.1 deferred wiring.
+// v5.0 ships the contracts (`marketplace.move`) end-to-end with the 2.5%
+// royalty rule attached to the TransferPolicy<Item>. The frontend builders
+// `buildCreateKioskTx`, `buildListItemTx`, `buildBuyItemTx`, `buildDelistItemTx`
+// all live in `lib/sui-contracts.ts` ready to wire. The full UI (cross-player
+// kiosk discovery, on-chain ItemListed event subscription, kiosk metadata
+// caching) ships in v5.1 alongside the meme-coin visual redesign per
+// DESIGN_BRIEF.md. For v5.0 QA, this view stays read-only with a banner.
 export function MarketplaceBrowser() {
   const { state } = useGame();
   const account = useCurrentAccount();
@@ -23,9 +31,6 @@ export function MarketplaceBrowser() {
   const [selectedListing, setSelectedListing] = useState<MarketplaceListing | null>(null);
   const [filterType, setFilterType] = useState<ItemType | "all">("all");
   const [filterRarity, setFilterRarity] = useState<Rarity | "all">("all");
-  const [showSellModal, setShowSellModal] = useState(false);
-  const [sellItemId, setSellItemId] = useState("");
-  const [sellPrice, setSellPrice] = useState(100);
   const [sortBy, setSortBy] = useState<"price_asc" | "price_desc" | "newest">("newest");
 
   useEffect(() => {
@@ -44,34 +49,18 @@ export function MarketplaceBrowser() {
       return b.listedAt - a.listedAt;
     });
 
-  const myListings = marketplaceListings.filter(
-    (l) => l.seller === account?.address
-  );
-
-  function handleBuy(listing: MarketplaceListing) {
-    state.socket.send({ type: "buy_listing", listingId: listing.id });
-    setSelectedListing(null);
-  }
-
-  function handleDelist(listingId: string) {
-    state.socket.send({ type: "delist_item", listingId });
-  }
-
-  function handleList() {
-    if (!sellItemId || sellPrice < 1) return;
-    state.socket.send({
-      type: "list_item",
-      itemId: sellItemId,
-      price: sellPrice,
-    });
-    setShowSellModal(false);
-    setSellItemId("");
-  }
-
   return (
     <>
       <div className="space-y-4">
-        {/* Controls */}
+        {/* v5.1 banner — UI wiring deferred but contracts are live */}
+        <div className="rounded-lg border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+          <span className="font-semibold">Marketplace launching v5.1.</span>{" "}
+          The on-chain Kiosk + 2.5% royalty rule is deployed and tested today.
+          Cross-player browse / buy / list UI wires up alongside the visual
+          redesign — contracts won&rsquo;t change.
+        </div>
+
+        {/* Controls (read-only preview) */}
         <div className="flex flex-wrap gap-2 items-center">
           <select
             value={filterType}
@@ -106,10 +95,6 @@ export function MarketplaceBrowser() {
             <option value="price_asc">Price: Low to High</option>
             <option value="price_desc">Price: High to Low</option>
           </select>
-          <div className="flex-1" />
-          <Button size="sm" variant="gold" onClick={() => setShowSellModal(true)}>
-            Sell Item
-          </Button>
         </div>
 
         {/* Listings */}
@@ -122,7 +107,7 @@ export function MarketplaceBrowser() {
           <CardBody>
             {filtered.length === 0 ? (
               <p className="text-zinc-500 text-sm text-center py-8">
-                No listings found
+                No listings yet. (Marketplace activates in v5.1.)
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -142,49 +127,13 @@ export function MarketplaceBrowser() {
             )}
           </CardBody>
         </Card>
-
-        {/* My Listings */}
-        {myListings.length > 0 && (
-          <Card>
-            <CardHeader>
-              <span className="font-semibold">My Listings</span>
-            </CardHeader>
-            <CardBody>
-              <div className="space-y-2">
-                {myListings.map((listing) => (
-                  <div
-                    key={listing.id}
-                    className="flex items-center justify-between bg-zinc-800/50 rounded-lg p-2"
-                  >
-                    <div>
-                      <span className={`text-sm ${RARITY_COLORS[listing.item.rarity]}`}>
-                        {listing.item.name}
-                      </span>
-                      <span className="text-xs text-amber-400 ml-2">
-                        {listing.price} SUI
-                      </span>
-                    </div>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => handleDelist(listing.id)}
-                    >
-                      Delist
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </CardBody>
-          </Card>
-        )}
       </div>
 
-      {/* Buy Modal */}
       {selectedListing && (
         <Modal
           open
           onClose={() => setSelectedListing(null)}
-          title="Buy Item"
+          title="Buy Item (preview)"
         >
           <div className="space-y-4">
             <ItemCard item={selectedListing.item} />
@@ -199,61 +148,10 @@ export function MarketplaceBrowser() {
               </span>
             </div>
             <p className="text-xs text-zinc-500">
-              2.5% royalty included in price
+              2.5% royalty added on top at checkout (paid as a separate Coin&lt;SUI&gt;).
             </p>
-            <Button
-              onClick={() => handleBuy(selectedListing)}
-              disabled={selectedListing.seller === account?.address}
-              className="w-full"
-            >
-              {selectedListing.seller === account?.address
-                ? "This is your listing"
-                : "Buy Now"}
-            </Button>
-          </div>
-        </Modal>
-      )}
-
-      {/* Sell Modal */}
-      {showSellModal && (
-        <Modal
-          open
-          onClose={() => setShowSellModal(false)}
-          title="Sell Item"
-          wide
-        >
-          <div className="space-y-4">
-            <p className="text-sm text-zinc-400">
-              Select an item from your inventory to list on the marketplace.
-            </p>
-            <div className="max-h-[300px] overflow-y-auto space-y-2">
-              {inventory.map((item) => (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  selected={sellItemId === item.id}
-                  onClick={() => setSellItemId(item.id)}
-                />
-              ))}
-            </div>
-            {sellItemId && (
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-zinc-400">Price (SUI):</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={sellPrice}
-                  onChange={(e) => setSellPrice(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-32 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100"
-                />
-              </div>
-            )}
-            <Button
-              onClick={handleList}
-              disabled={!sellItemId || sellPrice < 1}
-              className="w-full"
-            >
-              List for Sale
+            <Button disabled className="w-full">
+              Marketplace v5.1 — coming soon
             </Button>
           </div>
         </Modal>

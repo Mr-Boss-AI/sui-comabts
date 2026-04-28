@@ -11,13 +11,22 @@ import { FightResultModal } from "./fight-result-modal";
 import { ITEM_TYPES, RARITY_COLORS, type Zone, type EquipmentSlots, type Item } from "@/types/game";
 
 function FighterDisplay({ name, level, equipment }: { name: string; level: number; equipment: EquipmentSlots }) {
-  const slots: { key: keyof EquipmentSlots; icon: string; pos: string }[] = [
+  // Doll layout: silhouette in the center, 6 slots around it (helmet/weapon/offhand
+  // /chest/gloves/boots). The remaining 4 slots — belt, ring_1, ring_2, necklace
+  // — render as a small accessory row below so all 10 are visible during fights.
+  const dollSlots: { key: keyof EquipmentSlots; icon: string; pos: string }[] = [
     { key: "helmet", icon: "\u26D1", pos: "top-0 left-1/2 -translate-x-1/2" },
     { key: "weapon", icon: "\u2694", pos: "top-8 left-0" },
     { key: "offhand", icon: "\uD83D\uDEE1", pos: "top-8 right-0" },
     { key: "chest", icon: "\uD83C\uDFBD", pos: "top-[72px] left-1/2 -translate-x-1/2" },
     { key: "gloves", icon: "\uD83E\uDDE4", pos: "bottom-4 left-0" },
     { key: "boots", icon: "\uD83D\uDC62", pos: "bottom-4 right-0" },
+  ];
+  const accessorySlots: { key: keyof EquipmentSlots; icon: string }[] = [
+    { key: "belt", icon: "\u26AA" },
+    { key: "ring1", icon: "\uD83D\uDC8D" },
+    { key: "ring2", icon: "\uD83D\uDC8D" },
+    { key: "necklace", icon: "\uD83D\uDCFF" },
   ];
 
   return (
@@ -31,8 +40,7 @@ function FighterDisplay({ name, level, equipment }: { name: string; level: numbe
             <path d="M15 32 Q15 28 30 28 Q45 28 45 32 L48 60 Q48 65 40 68 L38 85 Q38 88 32 88 L28 88 Q22 88 22 85 L20 68 Q12 65 12 60 Z" fill="currentColor"/>
           </svg>
         </div>
-        {/* Equipment slots */}
-        {slots.map(({ key, icon, pos }) => {
+        {dollSlots.map(({ key, icon, pos }) => {
           const item = equipment[key];
           const imageUrl = item?.imageUrl;
           return (
@@ -49,6 +57,30 @@ function FighterDisplay({ name, level, equipment }: { name: string; level: numbe
                 <img src={imageUrl} alt={item.name} className="w-full h-full object-cover" />
               ) : (
                 <span className="text-sm">{icon}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {/* Accessory row — belt, both rings, necklace — under the doll */}
+      <div className="mt-2 flex items-center gap-1">
+        {accessorySlots.map(({ key, icon }) => {
+          const item = equipment[key];
+          const imageUrl = item?.imageUrl;
+          return (
+            <div
+              key={key}
+              className={`w-7 h-7 rounded border flex items-center justify-center overflow-hidden ${
+                item
+                  ? `border-zinc-600 bg-zinc-800/90 ${RARITY_COLORS[item.rarity]}`
+                  : "border-zinc-800/50 bg-zinc-900/30 text-zinc-800"
+              }`}
+              title={item?.name || key}
+            >
+              {item && imageUrl ? (
+                <img src={imageUrl} alt={item.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xs">{icon}</span>
               )}
             </div>
           );
