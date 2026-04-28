@@ -27,5 +27,8 @@ Thumbs.db
 # Build output
 dist/
 
+# Sui Move build artifacts (Move.toml + Move.lock are committed; build/ is auto-generated)
+contracts/build/
+
 # Supabase local state
 supabase/.temp/
