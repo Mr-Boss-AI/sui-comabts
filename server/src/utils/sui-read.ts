@@ -1,13 +1,13 @@
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
 import { CONFIG } from '../config';
 import type { EquipmentSlots, Item, ItemType, Rarity } from '../types';
 
-const RPC_URL = CONFIG.SUI_NETWORK === 'mainnet'
-  ? 'https://fullnode.mainnet.sui.io:443'
-  : 'https://fullnode.testnet.sui.io:443';
+const network = (CONFIG.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as 'mainnet' | 'testnet';
+const client = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl(network), network });
 
-// On-chain equipment slot name → server EquipmentSlots key. The Move module
-// uses snake_case for rings (ring_1 / ring_2); the server type drops the
-// underscore (ring1 / ring2). Everything else matches 1:1.
+// Chain stores slot names as utf8 String keys on dynamic_object_field. The
+// canonical chain names use snake_case for rings (ring_1, ring_2); the server
+// type drops the underscore. Map both directions.
 const CHAIN_TO_SERVER_SLOT: Record<string, keyof EquipmentSlots> = {
   weapon: 'weapon',
   offhand: 'offhand',
@@ -21,41 +21,12 @@ const CHAIN_TO_SERVER_SLOT: Record<string, keyof EquipmentSlots> = {
   necklace: 'necklace',
 };
 
-async function rpc<T = unknown>(method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const json = (await res.json()) as { result?: T; error?: { message: string } };
-  if (json.error) throw new Error(`[sui-read] ${method}: ${json.error.message}`);
-  return json.result as T;
-}
-
-// Character.weapon etc. are Move `Option<ID>` fields. The current Sui
-// JSON-RPC flattens Some(id) to a bare "0x..." string and None to null.
-// Older / alternate SDK shapes use { vec: ["0x..."] } or
-// { fields: { vec: ["0x..."] } }. Accept all three so this doesn't silently
-// break again if the RPC representation shifts.
-function extractOptionId(raw: unknown): string | null {
-  if (raw == null) return null;
-  if (typeof raw === 'string') return raw.startsWith('0x') ? raw : null;
-  if (typeof raw !== 'object') return null;
-  const obj = raw as Record<string, unknown>;
-  const direct = obj.vec;
-  const nested = (obj.fields as Record<string, unknown> | undefined)?.vec;
-  const vec = (direct ?? nested) as unknown[] | undefined;
-  if (!Array.isArray(vec) || vec.length === 0) return null;
-  return String(vec[0]);
-}
+const CHAIN_SLOT_NAMES = Object.keys(CHAIN_TO_SERVER_SLOT);
 
 function parseItemFromContent(
   id: string,
   fields: Record<string, unknown>,
 ): Item {
-  // `imageUrl` and `classReq` aren't declared on the server `Item` type, but
-  // the runtime object can carry them and sanitizeCharacter forwards them
-  // to the frontend (which does declare them). Cast-add so TS stays quiet.
   const item = {
     id,
     name: String(fields.name ?? ''),
@@ -83,64 +54,68 @@ function parseItemFromContent(
 
 export type DOFEquipment = Record<keyof EquipmentSlots, Item | null>;
 
+const EMPTY: DOFEquipment = {
+  weapon: null, offhand: null, helmet: null, chest: null, gloves: null,
+  boots: null, belt: null, ring1: null, ring2: null, necklace: null,
+};
+
 /**
- * Read the Character on-chain and return the full 10-slot equipment map as
- * it appears on chain. A slot is `null` when the character has nothing
- * equipped there. Returns `null` if the character cannot be read at all
- * (RPC failure, object not found) — callers should treat that as "chain
- * read unavailable" and fall back to in-memory state.
+ * Read a Character's 10-slot equipment by enumerating its dynamic-object-fields.
+ * Returns a slot-keyed map with `null` for empty slots, or `null` overall if
+ * the Character object can't be read.
  *
- * Implementation: one `sui_getObject` to read the Character's Option<ID>
- * slot fields, followed by one `sui_multiGetObjects` to batch-hydrate the
- * populated Item NFTs. Two RPCs regardless of how many slots are filled.
+ * Implementation: one `getDynamicFields` page (Character has at most ~11 DFs:
+ * 10 equipment slots + 1 fight_lock_expires_at), then `multiGetObjects` to
+ * batch-hydrate the Items.
  */
 export async function fetchEquippedFromDOFs(
   characterObjectId: string,
 ): Promise<DOFEquipment | null> {
-  let charFields: Record<string, unknown> | undefined;
+  let page;
   try {
-    const charResult = await rpc<{
-      data?: { content?: { fields?: Record<string, unknown> } };
-    }>('sui_getObject', [characterObjectId, { showContent: true }]);
-    charFields = charResult?.data?.content?.fields;
-  } catch (err: any) {
-    console.error('[sui-read] Failed to fetch Character:', err?.message || err);
-    return null;
-  }
-  if (!charFields) return null;
-
-  const empty: DOFEquipment = {
-    weapon: null, offhand: null, helmet: null, chest: null, gloves: null,
-    boots: null, belt: null, ring1: null, ring2: null, necklace: null,
-  };
-
-  const populated: Array<{ slot: keyof EquipmentSlots; id: string }> = [];
-  for (const [chainKey, serverKey] of Object.entries(CHAIN_TO_SERVER_SLOT)) {
-    const id = extractOptionId(charFields[chainKey]);
-    if (id) populated.push({ slot: serverKey, id });
-  }
-
-  if (populated.length === 0) return empty;
-
-  let objects: Array<{
-    data?: { content?: { fields?: Record<string, unknown> } };
-  }>;
-  try {
-    objects = await rpc('sui_multiGetObjects', [
-      populated.map((p) => p.id),
-      { showContent: true },
-    ]);
-  } catch (err: any) {
-    console.error('[sui-read] Failed to multiGetObjects equipped items:', err?.message || err);
+    page = await client.getDynamicFields({
+      parentId: characterObjectId,
+      limit: 50,
+    });
+  } catch (err) {
+    console.error('[sui-read] getDynamicFields failed:', (err as Error)?.message || err);
     return null;
   }
 
-  const out: DOFEquipment = { ...empty };
-  for (let i = 0; i < populated.length; i++) {
-    const itemFields = objects[i]?.data?.content?.fields;
-    if (!itemFields) continue;
-    out[populated[i].slot] = parseItemFromContent(populated[i].id, itemFields);
+  // Each entry has shape: { name: { type, value }, objectId, objectType, type: 'DynamicObject', ... }
+  const slotEntries: Array<{ chainName: string; serverSlot: keyof EquipmentSlots; objectId: string }> = [];
+  for (const f of page.data) {
+    // Filter to slot-named String DFs (skip fight_lock_expires_at which has vector<u8> name)
+    const nameType = f.name?.type;
+    const nameValue = f.name?.value;
+    if (nameType !== '0x1::string::String' || typeof nameValue !== 'string') continue;
+    if (!CHAIN_SLOT_NAMES.includes(nameValue)) continue;
+    const serverSlot = CHAIN_TO_SERVER_SLOT[nameValue];
+    slotEntries.push({ chainName: nameValue, serverSlot, objectId: f.objectId });
   }
+
+  if (slotEntries.length === 0) return { ...EMPTY };
+
+  // For DOFs, the listed objectId is the wrapper that holds the actual Item.
+  // Use getDynamicFieldObject on each slot to retrieve the wrapped Item.
+  const out: DOFEquipment = { ...EMPTY };
+  await Promise.all(
+    slotEntries.map(async (entry) => {
+      try {
+        const obj = await client.getDynamicFieldObject({
+          parentId: characterObjectId,
+          name: { type: '0x1::string::String', value: entry.chainName },
+        });
+        const fields = (obj.data?.content as { fields?: Record<string, unknown> } | undefined)?.fields;
+        if (!fields) return;
+        const objectId = obj.data?.objectId ?? entry.objectId;
+        out[entry.serverSlot] = parseItemFromContent(objectId, fields);
+      } catch (err) {
+        console.warn(`[sui-read] DOF ${entry.chainName} fetch failed:`, (err as Error)?.message || err);
+      }
+    }),
+  );
+
   return out;
 }
 
@@ -149,16 +124,14 @@ function isOnChainItemId(id: string | undefined): boolean {
 }
 
 /**
- * Overwrite a character's in-memory equipment with chain truth, preserving
- * off-chain NPC items the chain cannot see.
+ * Overwrite a character's in-memory equipment with chain truth.
  *
- * Rules applied per slot:
+ * Rules per slot:
  *   - chain has item  → write chain item (overrides server state)
- *   - chain is empty, server has on-chain item → clear (it was unequipped on chain)
- *   - chain is empty, server has NPC item or null → leave as-is
+ *   - chain empty + server has on-chain item → clear (it was unequipped on-chain)
+ *   - chain empty + server has off-chain item or null → leave as-is
  *
- * Mutates `equipment` in place. Returns the slot names whose contents changed
- * so callers can log.
+ * Mutates `equipment` in place. Returns the slot names that changed.
  */
 export function applyDOFEquipment(
   equipment: EquipmentSlots,
@@ -175,7 +148,6 @@ export function applyDOFEquipment(
       }
       continue;
     }
-    // chainItem === null
     if (current && isOnChainItemId(current.id)) {
       equipment[slot] = null;
       changed.push(slot);

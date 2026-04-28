@@ -1,65 +1,39 @@
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
 import { CONFIG } from '../config';
 
-const RPC_URL = CONFIG.SUI_NETWORK === 'mainnet'
-  ? 'https://fullnode.mainnet.sui.io:443'
-  : 'https://fullnode.testnet.sui.io:443';
-
-interface OwnedObjectResponse {
-  data: Array<{ data?: { objectId: string } }>;
-  hasNextPage: boolean;
-  nextCursor?: string | null;
-}
+const network = (CONFIG.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as 'mainnet' | 'testnet';
+const client = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl(network), network });
 
 /**
- * Get all Item NFT object IDs owned by a wallet address via JSON-RPC.
+ * Get all Item NFT object IDs owned by a wallet, paginated.
  */
 export async function getOwnedItemIds(walletAddress: string): Promise<Set<string>> {
   const ids = new Set<string>();
   let cursor: string | null | undefined = undefined;
-  let hasNext = true;
 
-  while (hasNext) {
-    const body: Record<string, unknown> = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'suix_getOwnedObjects',
-      params: [
-        walletAddress,
-        {
-          filter: { StructType: `${process.env.SUI_PACKAGE_ID}::item::Item` },
-          options: { showContent: false },
-        },
-        cursor,
-        50, // limit
-      ],
-    };
-
-    const res = await fetch(RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+  while (true) {
+    const page = await client.getOwnedObjects({
+      owner: walletAddress,
+      filter: { StructType: `${CONFIG.SUI_PACKAGE_ID}::item::Item` },
+      options: { showContent: false },
+      cursor,
+      limit: 50,
     });
 
-    const json = await res.json() as { result: OwnedObjectResponse };
-    const result = json.result;
-
-    for (const obj of result.data) {
-      if (obj.data?.objectId) {
-        ids.add(obj.data.objectId);
-      }
+    for (const obj of page.data) {
+      if (obj.data?.objectId) ids.add(obj.data.objectId);
     }
 
-    hasNext = result.hasNextPage;
-    cursor = result.nextCursor;
+    if (!page.hasNextPage || !page.nextCursor) break;
+    cursor = page.nextCursor;
   }
 
   return ids;
 }
 
 /**
- * Verify equipped items are still owned by the wallet.
- * Removes any equipped items that the wallet no longer owns.
- * Returns the list of removed slot names (for logging).
+ * Drop equipment slots whose on-chain Item is no longer in the wallet.
+ * Returns the slot names cleared.
  */
 export async function verifyEquipmentOwnership(
   walletAddress: string,
@@ -71,7 +45,6 @@ export async function verifyEquipmentOwnership(
 
     for (const [slot, item] of Object.entries(equipment)) {
       if (!item) continue;
-      // On-chain items have hex object IDs starting with 0x
       if (item.id && item.id.startsWith('0x') && !ownedIds.has(item.id)) {
         equipment[slot] = null;
         removedSlots.push(slot);
@@ -81,6 +54,6 @@ export async function verifyEquipmentOwnership(
     return removedSlots;
   } catch (err) {
     console.error('[Sui] Failed to verify equipment ownership:', err);
-    return []; // Don't remove items on RPC failure
+    return [];
   }
 }

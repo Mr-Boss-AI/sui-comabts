@@ -1,4 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
+import { randomBytes } from 'crypto';
+import jwt from 'jsonwebtoken';
+import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
 import type WebSocket from 'ws';
 import type {
   ClientMessage,
@@ -143,10 +146,66 @@ function handleDisconnect(client: ConnectedClient): void {
 // payload) show up immediately. Disable on testnet with DEBUG_WS=0.
 const DEBUG_WS = process.env.DEBUG_WS !== '0' && CONFIG.SUI_NETWORK !== 'mainnet';
 
+// === Auth handshake helpers ===
+
+// In-flight challenges keyed by client.id. Each entry expires after
+// CONFIG.AUTH_CHALLENGE_TTL_MS — older challenges are reaped during
+// the periodic cleanup tick or rejected on use.
+interface PendingChallenge {
+  walletAddress: string;
+  message: string;
+  expiresAt: number;
+}
+const pendingChallenges = new Map<string, PendingChallenge>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [clientId, entry] of pendingChallenges) {
+    if (entry.expiresAt < now) pendingChallenges.delete(clientId);
+  }
+}, 60_000).unref();
+
+function buildChallengeMessage(walletAddress: string): string {
+  // Multi-line message renders cleanly in wallet popups (Slush, Suiet, etc.).
+  // Nonce makes each challenge unique so a captured signature can't be replayed.
+  // ISO timestamp helps the user see why they're signing.
+  const nonce = randomBytes(16).toString('hex');
+  const issued = new Date().toISOString();
+  return `SUI Combats v5 login\nWallet: ${walletAddress}\nNonce: ${nonce}\nIssued: ${issued}`;
+}
+
+function issueJwt(walletAddress: string): string {
+  return jwt.sign({ walletAddress }, CONFIG.JWT_SECRET, {
+    expiresIn: CONFIG.JWT_TTL_SECONDS,
+  });
+}
+
+function verifyJwtToken(token: string): { walletAddress: string } | null {
+  try {
+    const decoded = jwt.verify(token, CONFIG.JWT_SECRET) as { walletAddress?: unknown };
+    if (typeof decoded.walletAddress !== 'string') return null;
+    return { walletAddress: decoded.walletAddress };
+  } catch {
+    return null;
+  }
+}
+
+function isValidWalletAddress(addr: unknown): addr is string {
+  return typeof addr === 'string' && addr.startsWith('0x') && addr.length >= 3;
+}
+
 function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
-  // Auth must be first
-  if (msg.type !== 'auth' && !client.authenticated) {
-    sendError(client, 'Not authenticated. Send auth message first.');
+  // Pre-auth message types the router accepts before client.authenticated.
+  // The legacy bare `auth { walletAddress }` no longer authenticates — it now
+  // returns an instructive error that points the client at auth_request.
+  const preAuthTypes = new Set([
+    'auth_request',
+    'auth_signature',
+    'auth_token',
+    'auth', // legacy; rejected with guidance
+  ]);
+  if (!preAuthTypes.has(msg.type) && !client.authenticated) {
+    sendError(client, 'Not authenticated. Send auth_request first.');
     return;
   }
 
@@ -160,8 +219,20 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
   }
 
   switch (msg.type) {
+    case 'auth_request':
+      handleAuthRequest(client, msg);
+      break;
+    case 'auth_signature':
+      handleAuthSignature(client, msg);
+      break;
+    case 'auth_token':
+      handleAuthToken(client, msg);
+      break;
     case 'auth':
-      handleAuth(client, msg);
+      sendError(
+        client,
+        'Bare auth is no longer supported. Send `auth_request` to begin a signed handshake or `auth_token` to resume an existing 24h session.',
+      );
       break;
     case 'create_character':
       handleCreateCharacter(client, msg);
@@ -238,23 +309,111 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
   }
 }
 
-// === Auth ===
+// === Auth (signed-challenge → 24h JWT session) ===
 
-async function handleAuth(client: ConnectedClient, msg: ClientMessage): Promise<void> {
-  const walletAddress = msg.walletAddress as string | undefined;
+/**
+ * Step 1: client requests a sign-in challenge for `walletAddress`.
+ * Server emits `auth_challenge` containing a unique multi-line message.
+ * The same client.id can only hold one outstanding challenge at a time;
+ * a fresh request replaces any previous one.
+ */
+function handleAuthRequest(client: ConnectedClient, msg: ClientMessage): void {
+  const walletAddress = msg.walletAddress;
+  if (!isValidWalletAddress(walletAddress)) {
+    sendError(client, 'auth_request requires a walletAddress (0x…).');
+    return;
+  }
+  const message = buildChallengeMessage(walletAddress);
+  const expiresAt = Date.now() + CONFIG.AUTH_CHALLENGE_TTL_MS;
+  pendingChallenges.set(client.id, { walletAddress, message, expiresAt });
+  send(client, {
+    type: 'auth_challenge',
+    message,
+    expiresAt,
+  } as ServerMessage);
+}
 
-  if (!walletAddress || typeof walletAddress !== 'string' || walletAddress.length < 3) {
-    send(client, { type: 'error', message: 'Invalid wallet address' });
+/**
+ * Step 2: client returns the signed challenge.
+ * Server verifies signature against the challenge message and the claimed
+ * wallet, then issues a 24h JWT.
+ */
+async function handleAuthSignature(client: ConnectedClient, msg: ClientMessage): Promise<void> {
+  const challenge = pendingChallenges.get(client.id);
+  if (!challenge) {
+    sendError(client, 'No pending challenge. Send auth_request first.');
+    return;
+  }
+  if (Date.now() > challenge.expiresAt) {
+    pendingChallenges.delete(client.id);
+    sendError(client, 'Challenge expired. Request a new auth_request.');
     return;
   }
 
-  // Check if wallet is already connected
-  let isReconnect = false;
+  const signature = msg.signature;
+  if (typeof signature !== 'string' || signature.length === 0) {
+    sendError(client, 'auth_signature requires a base64 signature string.');
+    return;
+  }
+
+  try {
+    const messageBytes = new TextEncoder().encode(challenge.message);
+    await verifyPersonalMessageSignature(messageBytes, signature, {
+      address: challenge.walletAddress,
+    });
+  } catch (err: any) {
+    sendError(client, `Signature verification failed: ${err?.message || 'invalid'}`);
+    return;
+  }
+
+  const token = issueJwt(challenge.walletAddress);
+  pendingChallenges.delete(client.id);
+  await acceptAuthenticatedSession(client, challenge.walletAddress, token);
+}
+
+/**
+ * Step 2 (alt): client resumes an existing 24h session by presenting a JWT.
+ * No fresh signature needed.
+ */
+async function handleAuthToken(client: ConnectedClient, msg: ClientMessage): Promise<void> {
+  const walletAddress = msg.walletAddress;
+  const token = msg.token;
+  if (!isValidWalletAddress(walletAddress)) {
+    sendError(client, 'auth_token requires a walletAddress.');
+    return;
+  }
+  if (typeof token !== 'string' || token.length === 0) {
+    sendError(client, 'auth_token requires a JWT string.');
+    return;
+  }
+  const decoded = verifyJwtToken(token);
+  if (!decoded || decoded.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+    send(client, {
+      type: 'auth_required',
+      reason: 'Invalid or expired token. Send auth_request to sign a fresh challenge.',
+    } as ServerMessage);
+    return;
+  }
+  // Token is valid — re-issue (extends 24h window starting now) so a long-lived
+  // session that's still actively connecting auto-renews.
+  const fresh = issueJwt(walletAddress);
+  await acceptAuthenticatedSession(client, walletAddress, fresh);
+}
+
+/**
+ * Common path once the client has proven control of `walletAddress` (either
+ * by signing a fresh challenge or by presenting a still-valid JWT).
+ * Replaces any prior session for the same wallet, hydrates the character,
+ * and emits `auth_ok` with the (re-)issued token.
+ */
+async function acceptAuthenticatedSession(
+  client: ConnectedClient,
+  walletAddress: string,
+  token: string,
+): Promise<void> {
+  // Replace any existing session for the same wallet.
   for (const [, existing] of connectedClients) {
     if (existing.walletAddress === walletAddress && existing.id !== client.id) {
-      // Disconnect old session (handleDisconnect will skip teardown since we delete first)
-      // Close code 4001 signals "replaced by newer session" — client must not auto-reconnect
-      isReconnect = true;
       connectedClients.delete(existing.id);
       existing.socket.close(4001, 'replaced');
       break;
@@ -310,13 +469,19 @@ async function handleAuth(client: ConnectedClient, msg: ClientMessage): Promise<
   send(client, {
     type: 'auth_ok',
     walletAddress,
+    token,
+    tokenExpiresAt: Date.now() + CONFIG.JWT_TTL_SECONDS * 1000,
     hasCharacter: !!character,
     character: character ? sanitizeCharacter(character) : null,
   });
 
-  if (!isReconnect) {
-    broadcastSystemMessage(`${walletAddress.slice(0, 8)}... has joined.`);
-  }
+  // The "joined" broadcast was previously gated on isReconnect (a flag set in
+  // the legacy handleAuth). In the new flow the same wallet may auth via
+  // either signature or token without that flag, so we always broadcast — the
+  // chat dedupe in handleDisconnect already prevents thrashing on rapid
+  // reconnects (it skips teardown for sessions that have already been
+  // replaced).
+  broadcastSystemMessage(`${walletAddress.slice(0, 8)}... has joined.`);
 }
 
 // === Create Character ===

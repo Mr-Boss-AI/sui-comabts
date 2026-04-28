@@ -492,34 +492,79 @@ function finishFight(
     persistItems(winnerChar);
     persistItems(loserChar);
 
-    // Update on-chain Character NFTs + release fight-lock (fire-and-forget)
-    (async () => {
-      try {
-        const [winnerObjId, loserObjId] = await Promise.all([
-          findCharacterObjectId(winnerChar.walletAddress),
-          findCharacterObjectId(loserChar.walletAddress),
-        ]);
-        if (winnerObjId) {
-          await updateCharacterOnChain(winnerObjId, true, winnerXp, winnerChar.rating);
+    // Update on-chain Character NFTs + release fight-lock.
+    // Each updateCharacterOnChain has built-in 3-attempt exponential-backoff
+    // retry. On success, the returned FightResultEffects (parsed from on-chain
+    // events) is the SOURCE OF TRUTH for the post-fight character state — we
+    // overwrite the server's optimistic in-memory cache with chain values so
+    // server and chain never diverge on `unallocated_points`. On exhausted
+    // retry, we send a sticky error to the affected player so they know the
+    // chain state is stale.
+    const winnerCharRef = winnerChar;
+    const loserCharRef = loserChar;
+    void (async () => {
+      const [winnerObjId, loserObjId] = await Promise.all([
+        findCharacterObjectId(winnerCharRef.walletAddress).catch(() => null),
+        findCharacterObjectId(loserCharRef.walletAddress).catch(() => null),
+      ]);
+
+      if (winnerObjId) {
+        try {
+          const effects = await updateCharacterOnChain(
+            winnerObjId, true, winnerXp, winnerCharRef.rating,
+          );
+          // Mirror chain truth into server cache
+          winnerCharRef.xp = effects.newXp;
+          winnerCharRef.rating = effects.newRating;
+          winnerCharRef.wins = effects.newWins;
+          winnerCharRef.losses = effects.newLosses;
+          if (effects.leveledUp) {
+            winnerCharRef.level = effects.newLevel;
+            winnerCharRef.unallocatedPoints = effects.newUnallocatedPoints;
+          }
+          updateCharacter(winnerCharRef);
+          sendToWallet(winnerCharRef.walletAddress, { type: 'character_updated_onchain' });
+        } catch (err: any) {
+          console.error('[Character] Winner on-chain update failed after retries:', err?.message || err);
+          sendToWallet(winnerCharRef.walletAddress, {
+            type: 'error',
+            message: 'On-chain character update failed after retries. Stats may be temporarily out of sync — please refresh.',
+          });
         }
-        if (loserObjId) {
-          await updateCharacterOnChain(loserObjId, false, loserXp, loserChar.rating);
+      }
+
+      if (loserObjId) {
+        try {
+          const effects = await updateCharacterOnChain(
+            loserObjId, false, loserXp, loserCharRef.rating,
+          );
+          loserCharRef.xp = effects.newXp;
+          loserCharRef.rating = effects.newRating;
+          loserCharRef.wins = effects.newWins;
+          loserCharRef.losses = effects.newLosses;
+          if (effects.leveledUp) {
+            loserCharRef.level = effects.newLevel;
+            loserCharRef.unallocatedPoints = effects.newUnallocatedPoints;
+          }
+          updateCharacter(loserCharRef);
+          sendToWallet(loserCharRef.walletAddress, { type: 'character_updated_onchain' });
+        } catch (err: any) {
+          console.error('[Character] Loser on-chain update failed after retries:', err?.message || err);
+          sendToWallet(loserCharRef.walletAddress, {
+            type: 'error',
+            message: 'On-chain character update failed after retries. Stats may be temporarily out of sync — please refresh.',
+          });
         }
-        // Release on-chain fight-lock so players can equip/unequip again immediately.
-        // If these fail, the 10-minute auto-expiry from createFight is the safety net.
-        if (winnerObjId) {
-          setFightLockOnChain(winnerObjId, 0).catch((err) =>
-            console.error('[FightLock] Release (winner) failed:', err?.message || err));
-        }
-        if (loserObjId) {
-          setFightLockOnChain(loserObjId, 0).catch((err) =>
-            console.error('[FightLock] Release (loser) failed:', err?.message || err));
-        }
-        // Notify clients that on-chain character data has been updated
-        sendToWallet(winnerChar.walletAddress, { type: 'character_updated_onchain' });
-        sendToWallet(loserChar.walletAddress, { type: 'character_updated_onchain' });
-      } catch (err: any) {
-        console.error('[Character] On-chain update after fight failed:', err.message);
+      }
+
+      // Release fight-locks (fire-and-forget — auto-expiry from createFight is the safety net).
+      if (winnerObjId) {
+        setFightLockOnChain(winnerObjId, 0).catch((err) =>
+          console.error('[FightLock] Release (winner) failed:', err?.message || err));
+      }
+      if (loserObjId) {
+        setFightLockOnChain(loserObjId, 0).catch((err) =>
+          console.error('[FightLock] Release (loser) failed:', err?.message || err));
       }
     })();
   } else if (draw) {
