@@ -253,7 +253,56 @@ export async function fetchOwnedItems(
   return items;
 }
 
-/** Fetch items locked inside the player's Kiosk(s). */
+/**
+ * Decode a Sui Kiosk `Listing { id: address, is_exclusive: bool }` key from
+ * its BCS bytes. The id field is 32 bytes; we don't need the bool. Returns
+ * the listed Item NFT object ID as a 0x-prefixed hex string.
+ *
+ * The gRPC SDK serializes name BCS as either a Uint8Array or as a numeric-key
+ * object depending on transport — we coerce both cleanly.
+ */
+function decodeListingKeyItemId(bcs: unknown): string | null {
+  let bytes: Uint8Array | null = null;
+  if (bcs instanceof Uint8Array) bytes = bcs;
+  else if (Array.isArray(bcs)) bytes = new Uint8Array(bcs);
+  else if (bcs && typeof bcs === "object") {
+    const obj = bcs as Record<string, unknown>;
+    const len = Object.keys(obj).length;
+    if (len < 32) return null;
+    const out = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) out[i] = Number(obj[String(i)] ?? 0);
+    bytes = out;
+  } else if (typeof bcs === "string") {
+    // base64 (SDK default for unknown transports)
+    try {
+      const raw = atob(bcs);
+      const out = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+      bytes = out;
+    } catch {
+      return null;
+    }
+  }
+  if (!bytes || bytes.length < 32) return null;
+  let hex = "0x";
+  for (let i = 0; i < 32; i++) hex += bytes[i].toString(16).padStart(2, "0");
+  return hex;
+}
+
+/**
+ * Fetch every Item NFT physically inside the connected user's Kiosk(s),
+ * stamped with chain-truth `inKiosk: true` and `kioskListed` (true iff the
+ * item has a live Sui Kiosk Listing DOF for it).
+ *
+ * We pass through the dynamic-field list once, classifying each entry:
+ *   - DynamicObject + valueType `::item::Item` → an Item child of the kiosk
+ *   - name.type `0x2::kiosk::Listing` → the item with id encoded in the
+ *     listing key is currently listed
+ *
+ * Item NFTs are then hydrated (one `getObject` call each) and joined against
+ * the listing set. This keeps `kioskListed` chain-authoritative — there's no
+ * race with the server's gRPC listing index.
+ */
 export async function fetchKioskItems(
   client: SuiGrpcClient,
   owner: string,
@@ -272,6 +321,8 @@ export async function fetchKioskItems(
     const kioskId = String(capJson.for ?? "");
     if (!kioskId) continue;
 
+    const itemFields: { childId: string }[] = [];
+    const listedItemIds = new Set<string>();
     let dfCursor: string | undefined = undefined;
     let hasNextPage = true;
 
@@ -284,15 +335,33 @@ export async function fetchKioskItems(
         });
 
       for (const field of res.dynamicFields) {
-        if (field.$kind !== "DynamicObject" || !field.valueType?.includes("::item::Item")) continue;
+        // 1) Item DOF — collect for hydration
+        if (field.$kind === "DynamicObject" && field.valueType?.includes("::item::Item")) {
+          itemFields.push({ childId: field.childId });
+          continue;
+        }
+        // 2) Listing DF — extract the listed item ID from the key BCS
+        if (field.name?.type?.includes("::kiosk::Listing")) {
+          const itemId = decodeListingKeyItemId((field.name as { bcs?: unknown }).bcs);
+          if (itemId) listedItemIds.add(itemId);
+        }
+      }
 
+      hasNextPage = res.hasNextPage;
+      dfCursor = res.cursor ?? undefined;
+    }
+
+    // Hydrate the item objects in parallel — testnet typical kiosk has <50
+    // items so this is bounded.
+    await Promise.all(
+      itemFields.map(async ({ childId }) => {
         try {
           const { object: obj } = await client.getObject({
-            objectId: field.childId,
+            objectId: childId,
             include: { json: true },
           });
           const json = obj.json as Record<string, unknown> | null;
-          if (!json) continue;
+          if (!json) return;
 
           items.push({
             id: obj.objectId,
@@ -320,15 +389,13 @@ export async function fetchKioskItems(
             minDamage: Number(json.min_damage ?? 0),
             maxDamage: Number(json.max_damage ?? 0),
             inKiosk: true,
+            kioskListed: listedItemIds.has(obj.objectId),
           });
         } catch {
           // Skip items that fail to fetch
         }
-      }
-
-      hasNextPage = res.hasNextPage;
-      dfCursor = res.cursor ?? undefined;
-    }
+      }),
+    );
   }
 
   return items;
@@ -474,12 +541,32 @@ export function buildListItemTx(
   return tx;
 }
 
+/**
+ * Atomic delist + take + transfer.
+ *
+ * `marketplace::delist_item` only clears the Sui Kiosk's `Listing` DOF — the
+ * `Item` DOF stays put, so the NFT is still owned by the kiosk after a
+ * vanilla delist. Most users expect "delist" to mean "I want my item back",
+ * so this PTB chains the three moves any seller wants in one wallet popup:
+ *
+ *   1. `${PACKAGE_ID}::marketplace::delist_item`  → removes Listing DOF
+ *   2. `0x2::kiosk::take<Item>`                    → removes Item DOF, returns Item
+ *   3. `tx.transferObjects([item], recipient)`     → sends Item to wallet
+ *
+ * `kiosk::take` aborts if the item is still listed, so step 1 must succeed
+ * first (atomic per PTB semantics — the whole tx aborts if any step does).
+ *
+ * `recipient` is normally `currentAccount.address` — passed in because the
+ * sender isn't known at PTB build time.
+ */
 export function buildDelistItemTx(
   kioskId: string,
   kioskCapId: string,
   itemObjectId: string,
+  recipient: string,
 ): Transaction {
   const tx = new Transaction();
+
   tx.moveCall({
     target: `${PACKAGE_ID}::marketplace::delist_item`,
     arguments: [
@@ -488,6 +575,50 @@ export function buildDelistItemTx(
       tx.pure.id(itemObjectId),
     ],
   });
+
+  const item = tx.moveCall({
+    target: `0x2::kiosk::take`,
+    typeArguments: [`${PACKAGE_ID}::item::Item`],
+    arguments: [
+      tx.object(kioskId),
+      tx.object(kioskCapId),
+      tx.pure.id(itemObjectId),
+    ],
+  });
+
+  tx.transferObjects([item], tx.pure.address(recipient));
+
+  return tx;
+}
+
+/**
+ * Take an unlisted item out of the seller's Kiosk (skip the delist step).
+ *
+ * Migration / recovery path for any item that's stuck inside a Kiosk because
+ * a previous version of the client called the old vanilla delist (which left
+ * the Item DOF in place). Aborts if the item is currently listed — sellers
+ * must use `buildDelistItemTx` for that case.
+ */
+export function buildTakeFromKioskTx(
+  kioskId: string,
+  kioskCapId: string,
+  itemObjectId: string,
+  recipient: string,
+): Transaction {
+  const tx = new Transaction();
+
+  const item = tx.moveCall({
+    target: `0x2::kiosk::take`,
+    typeArguments: [`${PACKAGE_ID}::item::Item`],
+    arguments: [
+      tx.object(kioskId),
+      tx.object(kioskCapId),
+      tx.pure.id(itemObjectId),
+    ],
+  });
+
+  tx.transferObjects([item], tx.pure.address(recipient));
+
   return tx;
 }
 
@@ -518,5 +649,33 @@ export function buildBuyItemTx(
       tx.object(transferPolicyId),
     ],
   });
+  return tx;
+}
+
+/**
+ * Withdraw SUI profits from a Kiosk into the seller's wallet. Uses the Sui
+ * stdlib `0x2::kiosk::withdraw` directly — `marketplace.move` doesn't wrap
+ * this since it doesn't add anything beyond the base Kiosk semantics.
+ *
+ * Pass `amountMist = null` to withdraw everything; otherwise pulls exactly
+ * `amountMist` MIST. The returned Coin<SUI> is transferred to the
+ * `recipient` address (in practice, always the kiosk owner / tx sender).
+ */
+export function buildWithdrawKioskProfitsTx(
+  kioskId: string,
+  kioskCapId: string,
+  recipient: string,
+  amountMist: bigint | null = null,
+): Transaction {
+  const tx = new Transaction();
+  const profits = tx.moveCall({
+    target: `0x2::kiosk::withdraw`,
+    arguments: [
+      tx.object(kioskId),
+      tx.object(kioskCapId),
+      tx.pure.option('u64', amountMist === null ? null : amountMist),
+    ],
+  });
+  tx.transferObjects([profits], tx.pure.address(recipient));
   return tx;
 }

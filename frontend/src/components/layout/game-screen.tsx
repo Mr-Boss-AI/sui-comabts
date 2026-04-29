@@ -11,13 +11,13 @@ import { FightArena } from "@/components/fight/fight-arena";
 import { MatchmakingQueue } from "@/components/fight/matchmaking-queue";
 import { SpectateView } from "@/components/fight/spectate-view";
 import { Inventory } from "@/components/items/inventory";
-import { NpcShop } from "@/components/items/npc-shop";
 import { ChatPanel } from "@/components/social/chat-panel";
 import { PlayerList } from "@/components/social/player-list";
 import { ChallengePopup } from "@/components/social/challenge-popup";
 import { Leaderboard } from "@/components/social/leaderboard";
 import { FightHistory } from "@/components/social/fight-history";
 import { MarketplaceBrowser } from "@/components/marketplace/marketplace-browser";
+import { MyKioskPanel } from "@/components/marketplace/my-kiosk-panel";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorToast } from "@/components/ui/error-toast";
 import { Modal } from "@/components/ui/modal";
@@ -145,7 +145,7 @@ function AreaContent() {
             <MarketplaceBrowser />
           </div>
           <div className="space-y-4">
-            <NpcShop />
+            <MyKioskPanel />
             <Inventory />
           </div>
         </div>

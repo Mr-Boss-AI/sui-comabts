@@ -59,17 +59,21 @@ export function ItemCard({ item, onClick, selected, compact, showPrice }: ItemCa
     (s) => item.statBonuses[s.key] > 0
   );
 
-  return (
-    <button
-      onClick={onClick}
-      className={`text-left rounded-sm border border-zinc-800/40 border-l-2 ${RARITY_LEFT_BORDER[item.rarity]} p-2.5 transition-all w-full ${
-        RARITY_GLOW[item.rarity]
-      } ${
-        selected
-          ? "ring-1 ring-emerald-500 bg-zinc-900/80"
-          : "bg-[#0e0e12] hover:bg-zinc-900/60"
-      } ${onClick ? "cursor-pointer" : "cursor-default"}`}
-    >
+  // Render a <button> only when this card is the click target. When ItemCard
+  // is presentational (no onClick) or nested inside another clickable parent
+  // (e.g. the marketplace-browser cell wraps each listing in its own
+  // <button>), render a <div> instead — nested <button>s are invalid HTML
+  // and React 19 logs a hydration error for them.
+  const className = `text-left rounded-sm border border-zinc-800/40 border-l-2 ${RARITY_LEFT_BORDER[item.rarity]} p-2.5 transition-all w-full ${
+    RARITY_GLOW[item.rarity]
+  } ${
+    selected
+      ? "ring-1 ring-emerald-500 bg-zinc-900/80"
+      : "bg-[#0e0e12] hover:bg-zinc-900/60"
+  } ${onClick ? "cursor-pointer" : "cursor-default"}`;
+
+  const inner = (
+    <>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2 min-w-0">
           {item.imageUrl ? (
@@ -92,9 +96,18 @@ export function ItemCard({ item, onClick, selected, compact, showPrice }: ItemCa
           </div>
         </div>
         {item.inKiosk && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 border border-amber-700/30 shrink-0">
-            Listed
-          </span>
+          item.kioskListed ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 border border-amber-700/30 shrink-0">
+              Listed
+            </span>
+          ) : (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-400 border border-zinc-700/40 shrink-0"
+              title="Sitting unlisted in your Kiosk — click to retrieve"
+            >
+              In Kiosk
+            </span>
+          )
         )}
         {showPrice && item.price !== undefined && (
           <div className="text-xs text-amber-400 font-bold shrink-0">
@@ -121,6 +134,15 @@ export function ItemCard({ item, onClick, selected, compact, showPrice }: ItemCa
           )}
         </>
       )}
-    </button>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button onClick={onClick} className={className}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={className}>{inner}</div>;
 }

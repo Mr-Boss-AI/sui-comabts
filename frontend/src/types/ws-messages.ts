@@ -30,6 +30,20 @@ export type ClientMessage =
       intuition: number;
       endurance: number;
     }
+  | {
+      type: "restore_character";
+      name: string;
+      strength: number;
+      dexterity: number;
+      intuition: number;
+      endurance: number;
+      level: number;
+      xp: number;
+      unallocatedPoints: number;
+      wins: number;
+      losses: number;
+      rating: number;
+    }
   | { type: "get_character" }
   | { type: "delete_character" }
   | { type: "allocate_points"; strength: number; dexterity: number; intuition: number; endurance: number }
@@ -41,8 +55,6 @@ export type ClientMessage =
   | { type: "get_online_players" }
   | { type: "equip_item"; itemId: string; slot: string }
   | { type: "unequip_item"; slot: string }
-  | { type: "buy_shop_item"; itemId: string }
-  | { type: "get_shop" }
   | { type: "get_inventory" }
   | { type: "get_leaderboard" }
   | { type: "get_fight_history" }
@@ -93,15 +105,31 @@ export type ServerMessage =
   | { type: "inventory"; items: Item[] }
   | { type: "item_equipped"; character: Character }
   | { type: "item_unequipped"; character: Character; item: Item }
-  | { type: "shop_data"; items: (Item & { price: number })[] }
   | { type: "item_purchased"; item: Item; character: Character }
   | { type: "leaderboard"; entries: LeaderboardEntry[] }
   | { type: "fight_history"; fights: FightHistoryEntry[] }
   | { type: "spectate_update"; fight: FightState }
   | { type: "marketplace_data"; listings: MarketplaceListing[] }
   | { type: "item_listed"; listing: MarketplaceListing }
-  | { type: "item_delisted"; listingId: string }
-  | { type: "item_bought"; listing: MarketplaceListing }
+  | {
+      type: "item_delisted";
+      listingId: string;
+      /** Kiosk owner who controlled this listing — used by the seller's
+       *  client to react locally (e.g. refresh kiosk metadata). */
+      seller: string;
+      kioskId: string;
+    }
+  | {
+      type: "item_bought";
+      /** Bare reference — the listing is already gone from the index. */
+      listing: { id: string };
+      buyer: string;
+      /** Seller (kiosk owner). Drives the seller-side reactive refresh in
+       *  `useKiosk` so profits + listing counts update without a manual
+       *  page reload after a buy. */
+      seller: string;
+      kioskId: string;
+    }
   | { type: "challenge_received"; challengeId: string; from: string; fromName: string; fightType: FightType }
   | { type: "challenge_accepted"; challengeId: string; fight: FightState }
   | { type: "challenge_declined"; challengeId: string }

@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { computeDerivedStats, getArchetype, getArchetypeColor } from "@/lib/combat";
-import { getXpForNextLevel, getXpProgress } from "@/types/game";
+import { MAX_LEVEL, getXpInCurrentLevel, getXpProgress, getXpSpanForLevel } from "@/types/game";
 import type { Character, EquipmentSlots, Item } from "@/types/game";
 import { StatAllocateModal } from "./stat-allocate-modal";
 import { RARITY_COLORS, SLOT_TO_ITEM_TYPE, EQUIPMENT_SLOT_LABELS } from "@/types/game";
@@ -172,8 +172,12 @@ export function CharacterProfile({ character, compact }: { character: Character;
     [character.stats, eq, character.level]
   );
   const archetype = getArchetype(character.stats);
-  const xpNext = getXpForNextLevel(character.level);
+  // XP is cumulative on chain — display partial-within-level for the bar.
+  // At MAX_LEVEL, getXpSpanForLevel returns 0 → hide the denominator.
+  const xpInLevel = getXpInCurrentLevel(character.level, character.xp);
+  const xpSpan = getXpSpanForLevel(character.level);
   const xpProgress = getXpProgress(character.level, character.xp);
+  const isMaxLevel = character.level >= MAX_LEVEL;
   const winRate = character.wins + character.losses > 0
     ? Math.round((character.wins / (character.wins + character.losses)) * 100) : 0;
 
@@ -335,11 +339,11 @@ export function CharacterProfile({ character, compact }: { character: Character;
               </div>
             </div>
 
-            {/* XP bar */}
+            {/* XP bar — chain stores cumulative XP; we render the in-level slice. */}
             <div>
               <div className="flex justify-between text-[10px] text-zinc-600 mb-1">
-                <span>Level {character.level}{character.level < 8 ? ` \u2192 ${character.level + 1}` : " MAX"}</span>
-                <span>{character.xp} / {xpNext ?? "MAX"} XP</span>
+                <span>Level {character.level}{isMaxLevel ? " MAX" : ` \u2192 ${character.level + 1}`}</span>
+                <span>{isMaxLevel ? `${character.xp.toLocaleString()} XP` : `${xpInLevel.toLocaleString()} / ${xpSpan.toLocaleString()} XP`}</span>
               </div>
               <div className="h-1.5 bg-black/40 rounded-full overflow-hidden border border-zinc-800/20">
                 <div className="h-full bg-blue-600/80 rounded-full transition-all" style={{ width: `${(xpProgress * 100)}%` }} />

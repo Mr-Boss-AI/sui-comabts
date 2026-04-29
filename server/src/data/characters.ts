@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import { GAME_CONSTANTS } from '../config';
-import { xpToNextLevel } from '../game/combat';
 import { dbSaveCharacter, dbLoadCharacter, dbDeleteCharacter, dbSaveItems, dbLoadItems } from './db';
 import type { Character, CharacterStats, EquipmentSlots, FightHistoryEntry, Item, ItemType } from '../types';
 
@@ -50,7 +49,6 @@ export async function restoreCharacterFromDb(walletAddress: string): Promise<Cha
     name: row.name,
     level: row.level,
     xp: row.xp,
-    xpToNextLevel: xpToNextLevel(row.level),
     walletAddress,
     stats: {
       strength: row.strength,
@@ -118,14 +116,7 @@ export function createCharacter(
     return { character: null, error: 'Name must be between 2 and 20 characters' };
   }
 
-  // Check name uniqueness
-  for (const [, char] of characters) {
-    if (char.name.toLowerCase() === name.toLowerCase()) {
-      return { character: null, error: 'Name already taken' };
-    }
-  }
-
-  // Validate stat allocation
+  // Validate stat allocation (only for fresh creates — not restoration)
   const totalStats = stats.strength + stats.dexterity + stats.intuition + stats.endurance;
   if (totalStats !== GAME_CONSTANTS.STARTING_STAT_POINTS) {
     return {
@@ -150,7 +141,6 @@ export function createCharacter(
     name,
     level: 1,
     xp: 0,
-    xpToNextLevel: xpToNextLevel(1),
     walletAddress,
     stats,
     equipment: emptyEquipment,
@@ -171,6 +161,62 @@ export function createCharacter(
   // Persist to Supabase (fire-and-forget)
   dbSaveCharacter(character).catch(() => {});
 
+  return { character };
+}
+
+/**
+ * Restore a server-side character record from authoritative on-chain data.
+ * Skips stat-sum validation (chain may have allocated points above the L1 budget).
+ * Returns the existing character if the wallet is already registered.
+ */
+export function restoreCharacterFromChain(
+  walletAddress: string,
+  name: string,
+  stats: CharacterStats,
+  level: number,
+  xp: number,
+  unallocatedPoints: number,
+  wins: number,
+  losses: number,
+  rating: number,
+): { character: Character | null; error?: string } {
+  // Idempotent: return existing server record if already registered
+  if (walletToCharacter.has(walletAddress)) {
+    const existing = characters.get(walletToCharacter.get(walletAddress)!);
+    return existing ? { character: existing } : { character: null, error: 'Stale wallet index' };
+  }
+
+  const emptyEquipment: EquipmentSlots = {
+    weapon: null, offhand: null, helmet: null, chest: null,
+    gloves: null, boots: null, belt: null, ring1: null, ring2: null, necklace: null,
+  };
+
+  const id = uuidv4();
+  const character: Character = {
+    id,
+    name,
+    level,
+    xp,
+    walletAddress,
+    stats,
+    equipment: emptyEquipment,
+    inventory: [],
+    gold: GAME_CONSTANTS.STARTING_GOLD,
+    wins,
+    losses,
+    rating,
+    unallocatedPoints,
+    fightHistory: [],
+    createdAt: Date.now(),
+  };
+
+  characters.set(id, character);
+  walletToCharacter.set(walletAddress, id);
+  fightHistories.set(id, []);
+
+  dbSaveCharacter(character).catch(() => {});
+
+  console.log(`[Character] Restored from chain: "${character.name}" lvl ${level} for ${walletAddress.slice(0, 10)}...`);
   return { character };
 }
 

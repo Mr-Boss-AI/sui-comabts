@@ -15,6 +15,7 @@ import type {
 } from '../types';
 import {
   createCharacter,
+  restoreCharacterFromChain,
   getCharacterByWallet,
   restoreCharacterFromDb,
   equipItem,
@@ -24,7 +25,6 @@ import {
   updateCharacter,
   deleteCharacter,
 } from '../data/characters';
-import { getShopCatalog, getShopItemById, getShopItemPrice, purchaseShopItem } from '../data/items';
 import { getLeaderboard } from '../data/leaderboard';
 import { getMatchmaking } from '../game/matchmaking';
 import {
@@ -45,6 +45,7 @@ import {
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId } from '../utils/sui-settle';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
+import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
   createFight,
 } from './fight-room';
@@ -237,6 +238,9 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
     case 'create_character':
       handleCreateCharacter(client, msg);
       break;
+    case 'restore_character':
+      handleRestoreCharacter(client, msg);
+      break;
     case 'delete_character':
       handleDeleteCharacter(client);
       break;
@@ -264,12 +268,6 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
     case 'unequip_item':
       handleUnequipItem(client, msg);
       break;
-    case 'buy_shop_item':
-      handleBuyShopItem(client, msg);
-      break;
-    case 'get_shop':
-      handleGetShop(client);
-      break;
     case 'get_inventory':
       handleGetInventory(client);
       break;
@@ -291,11 +289,16 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
     case 'cancel_wager_lobby':
       handleCancelWagerLobby(client, msg);
       break;
-    // Marketplace, challenges, etc. — not yet implemented; silently ignore
     case 'get_marketplace':
+      handleGetMarketplace(client);
+      break;
+    // list_item / delist_item / buy_listing now happen wallet-side (PTBs against
+    // marketplace.move). The server's listing index updates reactively from
+    // chain events — there's nothing for the WS handler to do besides observe.
     case 'list_item':
     case 'delist_item':
     case 'buy_listing':
+      break;
     case 'allocate_points':
       handleAllocatePoints(client, msg);
       break;
@@ -516,6 +519,50 @@ function handleCreateCharacter(client: ConnectedClient, msg: ClientMessage): voi
     type: 'character_created',
     character: sanitizeCharacter(result.character),
   });
+}
+
+// === Restore Character from Chain ===
+
+function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessage): void {
+  if (!client.walletAddress) {
+    sendError(client, 'Not authenticated');
+    return;
+  }
+
+  // If server already has the character in memory, just return it
+  const existing = getCharacterByWallet(client.walletAddress);
+  if (existing) {
+    client.characterId = existing.id;
+    send(client, { type: 'character_created', character: sanitizeCharacter(existing) });
+    return;
+  }
+
+  const name = String(msg.name || '');
+  const strength = Number(msg.strength) || 5;
+  const dexterity = Number(msg.dexterity) || 5;
+  const intuition = Number(msg.intuition) || 5;
+  const endurance = Number(msg.endurance) || 5;
+  const level = Number(msg.level) || 1;
+  const xp = Number(msg.xp) || 0;
+  const unallocatedPoints = Number(msg.unallocatedPoints) || 0;
+  const wins = Number(msg.wins) || 0;
+  const losses = Number(msg.losses) || 0;
+  const rating = Number(msg.rating) || 1000;
+
+  const result = restoreCharacterFromChain(
+    client.walletAddress,
+    name,
+    { strength, dexterity, intuition, endurance },
+    level, xp, unallocatedPoints, wins, losses, rating,
+  );
+
+  if (!result.character) {
+    sendError(client, result.error || 'Failed to restore character');
+    return;
+  }
+
+  client.characterId = result.character.id;
+  send(client, { type: 'character_created', character: sanitizeCharacter(result.character) });
 }
 
 // === Delete Character ===
@@ -849,79 +896,6 @@ function handleUnequipItem(client: ConnectedClient, msg: ClientMessage): void {
     type: 'item_unequipped',
     character: character ? sanitizeCharacter(character) : null,
     item: unequippedItem,
-  });
-}
-
-// === Buy Shop Item ===
-
-function handleBuyShopItem(client: ConnectedClient, msg: ClientMessage): void {
-  if (!client.characterId) {
-    sendError(client, 'No character');
-    return;
-  }
-
-  const itemId = msg.itemId as string;
-  if (!itemId) {
-    sendError(client, 'Missing itemId');
-    return;
-  }
-
-  const character = getCharacterByWallet(client.walletAddress!);
-  if (!character) {
-    sendError(client, 'Character not found');
-    return;
-  }
-
-  const price = getShopItemPrice(itemId);
-  if (price <= 0) {
-    sendError(client, 'Item not available for purchase');
-    return;
-  }
-
-  if (character.gold < price) {
-    sendError(client, `Not enough gold. Need ${price}, have ${character.gold}`);
-    return;
-  }
-
-  const shopItem = getShopItemById(itemId);
-  if (!shopItem) {
-    sendError(client, 'Item not found');
-    return;
-  }
-
-  if (shopItem.levelReq > character.level) {
-    sendError(client, `Requires level ${shopItem.levelReq}`);
-    return;
-  }
-
-  const result = purchaseShopItem(itemId);
-  if (!result.item) {
-    sendError(client, result.error || 'Purchase failed');
-    return;
-  }
-
-  character.gold -= price;
-  character.inventory.push(result.item);
-
-  send(client, {
-    type: 'item_purchased',
-    item: result.item,
-    character: sanitizeCharacter(character),
-  });
-}
-
-// === Get Shop ===
-
-function handleGetShop(client: ConnectedClient): void {
-  const catalog = getShopCatalog();
-  // Ensure each item has a price field directly
-  const items = catalog.map((item) => ({
-    ...item,
-    price: item.price || 0,
-  }));
-  send(client, {
-    type: 'shop_data',
-    items,
   });
 }
 
@@ -1340,4 +1314,20 @@ export function getOnlineCount(): number {
     if (c.authenticated) count++;
   }
   return count;
+}
+
+/**
+ * Push a server message to every authenticated client. Used by the marketplace
+ * event index so on-chain list/delist/buy events fan out without the caller
+ * having to know how the connected-client map is shaped.
+ */
+export function broadcastToAuthenticated(msg: ServerMessage): void {
+  broadcastAll(msg);
+}
+
+// === Marketplace ===
+
+function handleGetMarketplace(client: ConnectedClient): void {
+  const listings = getMarketplaceListings().map(listingToWire);
+  send(client, { type: 'marketplace_data', listings });
 }

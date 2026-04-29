@@ -50,7 +50,6 @@ export interface GameState {
   onlinePlayers: OnlinePlayer[];
 
   // Data
-  shopItems: (Item & { price: number })[];
   leaderboard: LeaderboardEntry[];
   fightHistory: FightHistoryEntry[];
   marketplaceListings: MarketplaceListing[];
@@ -105,7 +104,6 @@ export const initialGameState: GameState = {
   lootResult: null,
   chatMessages: [],
   onlinePlayers: [],
-  shopItems: [],
   leaderboard: [],
   fightHistory: [],
   marketplaceListings: [],
@@ -138,7 +136,6 @@ export type GameAction =
   | { type: "ADD_ONLINE_PLAYER"; player: OnlinePlayer }
   | { type: "REMOVE_ONLINE_PLAYER"; walletAddress: string }
   | { type: "UPDATE_PLAYER_STATUS"; walletAddress: string; status: OnlinePlayer["status"] }
-  | { type: "SET_SHOP_ITEMS"; items: (Item & { price: number })[] }
   | { type: "SET_LEADERBOARD"; entries: LeaderboardEntry[] }
   | { type: "SET_FIGHT_HISTORY"; fights: FightHistoryEntry[] }
   | { type: "SET_MARKETPLACE_LISTINGS"; listings: MarketplaceListing[] }
@@ -268,8 +265,6 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         ),
       };
     }
-    case "SET_SHOP_ITEMS":
-      return { ...state, shopItems: action.items };
     case "SET_LEADERBOARD":
       return { ...state, leaderboard: action.entries };
     case "SET_FIGHT_HISTORY":

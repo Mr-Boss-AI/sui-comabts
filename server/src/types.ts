@@ -100,8 +100,8 @@ export interface Character {
   id: string;
   name: string;
   level: number;
+  /** CUMULATIVE total XP earned (matches chain `Character.xp`). Never resets on level-up. */
   xp: number;
-  xpToNextLevel: number;
   walletAddress: string;
   stats: CharacterStats;
   equipment: EquipmentSlots;

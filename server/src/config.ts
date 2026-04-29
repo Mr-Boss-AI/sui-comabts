@@ -147,38 +147,53 @@ export const GAME_CONSTANTS = {
     ['belt', 'legs'],
     ['legs', 'head'],
   ] as readonly (readonly string[])[],
-  // XP-to-next-level table mirrors chain `xp_for_level` deltas. Server uses
-  // partial XP, chain stores cumulative — but levels happen at the same
-  // accumulated XP totals.
-  // Index = current_level. Value = XP needed to reach (level+1).
-  // chain L2=100 (delta 100), L3=300 (delta 200), L4=700 (delta 400), L5=1500 (delta 800), …
-  LEVEL_XP: [
-    0,
-    100,    // L1 → L2
-    200,    // L2 → L3
-    400,    // L3 → L4
-    800,    // L4 → L5
-    1500,   // L5 → L6
-    3000,   // L6 → L7
-    6000,   // L7 → L8
-    13000,  // L8 → L9
-    25000,  // L9 → L10
-    30000,  // L10 → L11
-    40000,  // L11 → L12
-    50000,  // L12 → L13
-    80000,  // L13 → L14
-    100000, // L14 → L15
-    80000,  // L15 → L16
-    120000, // L16 → L17
-    150000, // L17 → L18
-    150000, // L18 → L19
-    150000, // L19 → L20
-    0,      // L20 (max)
+  // Cumulative XP threshold to BE at each level. Mirrors `character.move::xp_for_level`
+  // exactly — chain is the source of truth. Index = level. Value = total XP a
+  // character must have accumulated to be that level. Per GDD §9.1.
+  //   L1 = 0    (default)
+  //   L2 = 100, L3 = 300, L4 = 700, L5 = 1500, L6 = 3000, L7 = 6000, L8 = 12_000,
+  //   L9 = 25_000, L10 = 50_000, L11 = 80_000, L12 = 120_000, L13 = 170_000,
+  //   L14 = 250_000, L15 = 350_000, L16 = 430_000, L17 = 550_000, L18 = 700_000,
+  //   L19 = 850_000, L20 = 1_000_000
+  // Server-side XP is now CUMULATIVE (matches chain). Do not subtract on level-up.
+  LEVEL_XP_CUMULATIVE: [
+    0,        // L1
+    100,      // L2
+    300,      // L3
+    700,      // L4
+    1_500,    // L5
+    3_000,    // L6
+    6_000,    // L7
+    12_000,   // L8
+    25_000,  // L9
+    50_000,  // L10
+    80_000,  // L11
+    120_000, // L12
+    170_000, // L13
+    250_000, // L14
+    350_000, // L15
+    430_000, // L16
+    550_000, // L17
+    700_000, // L18
+    850_000, // L19
+    1_000_000, // L20
   ] as readonly number[],
-  XP_WIN_MIN: 25,
-  XP_WIN_MAX: 200,
-  XP_LOSS_MIN: 5,
-  XP_LOSS_MAX: 30,
+  // Hard ceiling — must match chain `MAX_XP_PER_FIGHT`. Server XP rewards are
+  // also clamped here so we never bump into chain abort EXpTooHigh.
+  MAX_XP_PER_FIGHT: 1000,
+  // GDD §9.2 reward bands. See server/src/utils/elo.ts for the formulas.
+  XP_RANKED_WIN_BASE: 50,
+  XP_RANKED_WIN_MIN: 50,
+  XP_RANKED_WIN_MAX: 200,
+  XP_RANKED_WIN_RATING_DIVISOR: 10,
+  XP_RANKED_LOSS_MIN: 10,
+  XP_RANKED_LOSS_MAX: 30,
+  XP_WAGER_WIN_BASE: 100,
+  XP_WAGER_WIN_MIN: 100,
+  XP_WAGER_WIN_MAX: 400,
+  XP_WAGER_WIN_RATING_DIVISOR: 5,
+  XP_WAGER_LOSS_MIN: 20,
+  XP_WAGER_LOSS_MAX: 50,
   MATCHMAKING_INITIAL_RANGE: 200,
   MATCHMAKING_EXPAND_AMOUNT: 50,
   MATCHMAKING_EXPAND_INTERVAL_MS: 10_000,

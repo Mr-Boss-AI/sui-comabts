@@ -180,9 +180,6 @@ export default function GameProvider({
             status: msg.status,
           });
           break;
-        case "shop_data":
-          dispatch({ type: "SET_SHOP_ITEMS", items: msg.items });
-          break;
         case "leaderboard":
           dispatch({ type: "SET_LEADERBOARD", entries: msg.entries });
           break;
@@ -206,12 +203,30 @@ export default function GameProvider({
             type: "REMOVE_MARKETPLACE_LISTING",
             listingId: msg.listingId,
           });
+          // Seller-side reactive refresh: if I own the kiosk this listing
+          // was in, my listing count + on-chain item set just changed even
+          // though I might not be the tab that signed the delist (e.g. a
+          // second tab open on the same wallet). BUMP triggers
+          // `fetchOwnedItems`, `fetchKioskItems`, and `useKiosk`.
+          if (msg.seller && walletAddress &&
+              msg.seller.toLowerCase() === walletAddress.toLowerCase()) {
+            dispatch({ type: "BUMP_ONCHAIN_REFRESH" });
+          }
           break;
         case "item_bought":
           dispatch({
             type: "REMOVE_MARKETPLACE_LISTING",
             listingId: msg.listing.id,
           });
+          // Seller-side reactive refresh: I didn't sign the buy tx (the
+          // BUYER did), so without this the seller's profits + item_count
+          // would lag chain until the next manual refresh. With this, the
+          // seller sees their profits jump within the gRPC delivery
+          // latency of the ItemPurchased event.
+          if (msg.seller && walletAddress &&
+              msg.seller.toLowerCase() === walletAddress.toLowerCase()) {
+            dispatch({ type: "BUMP_ONCHAIN_REFRESH" });
+          }
           break;
         case "spectate_update":
           dispatch({ type: "SET_SPECTATING", fight: msg.fight });
@@ -272,14 +287,22 @@ export default function GameProvider({
       try {
         const nft = await fetchCharacterNFT(client, walletAddress);
         if (nft) {
-          // Restore character on server from on-chain data
+          // Restore character on server from on-chain data.
+          // Use restore_character (not create_character) — on-chain stats may
+          // sum to more than 20 if the player leveled up and allocated points.
           socket.send({
-            type: "create_character",
+            type: "restore_character",
             name: nft.name,
             strength: nft.strength,
             dexterity: nft.dexterity,
             intuition: nft.intuition,
             endurance: nft.endurance,
+            level: nft.level,
+            xp: nft.xp,
+            unallocatedPoints: nft.unallocatedPoints,
+            wins: nft.wins,
+            losses: nft.losses,
+            rating: nft.rating,
           });
         }
       } catch {

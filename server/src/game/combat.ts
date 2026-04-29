@@ -425,23 +425,71 @@ export function checkFightEnd(playerA: FighterState, playerB: FighterState): {
   return { finished: false };
 }
 
-// === XP and Leveling (Fibonacci-brutal) ===
+// === XP and Leveling (cumulative — matches chain character.move::xp_for_level) ===
 
-export function xpToNextLevel(level: number): number {
-  return GAME_CONSTANTS.LEVEL_XP[level] || 9999;
+/**
+ * Cumulative XP threshold to reach the given level. `level` is 1..MAX_LEVEL.
+ * Returns Infinity for levels beyond the table so an out-of-range query can
+ * never spuriously level a character up.
+ */
+export function xpForLevel(level: number): number {
+  if (level <= 1) return 0;
+  if (level > GAME_CONSTANTS.MAX_LEVEL) return Number.POSITIVE_INFINITY;
+  const v = GAME_CONSTANTS.LEVEL_XP_CUMULATIVE[level - 1];
+  return v ?? Number.POSITIVE_INFINITY;
 }
 
-export function applyXp(character: Character, xpGained: number): { leveledUp: boolean; newLevel: number } {
+/**
+ * Cumulative XP threshold for the level a character is currently at. Used as
+ * the lower bound of the in-level XP bar.
+ */
+export function xpForCurrentLevel(level: number): number {
+  return xpForLevel(level);
+}
+
+/**
+ * Cumulative XP threshold for the next level. Returns Infinity at MAX_LEVEL
+ * so callers can render a "MAX" pill without divide-by-zero.
+ */
+export function xpForNextLevel(level: number): number {
+  if (level >= GAME_CONSTANTS.MAX_LEVEL) return Number.POSITIVE_INFINITY;
+  return xpForLevel(level + 1);
+}
+
+/**
+ * Legacy alias — kept so any external import continues to resolve. Returns
+ * the cumulative threshold for `level + 1` (i.e. the bar denominator at
+ * `level`). Prefer `xpForNextLevel` in new code.
+ */
+export function xpToNextLevel(level: number): number {
+  return xpForNextLevel(level);
+}
+
+/**
+ * Add fight-earned XP (cumulative) and level the character up while thresholds
+ * are crossed. Mirrors `character.move::update_after_fight`'s loop semantics:
+ *   - XP is cumulative; never decremented on level-up.
+ *   - Each level grants +STAT_POINTS_PER_LEVEL unallocated points.
+ *   - Capped at MAX_LEVEL.
+ */
+export function applyXp(character: Character, xpGained: number): { leveledUp: boolean; newLevel: number; levelsGained: number } {
+  if (xpGained < 0) xpGained = 0;
   character.xp += xpGained;
   let leveledUp = false;
+  let levelsGained = 0;
 
-  while (character.xp >= character.xpToNextLevel && character.level < GAME_CONSTANTS.MAX_LEVEL) {
-    character.xp -= character.xpToNextLevel;
-    character.level++;
-    character.xpToNextLevel = xpToNextLevel(character.level);
-    character.unallocatedPoints += GAME_CONSTANTS.STAT_POINTS_PER_LEVEL;
-    leveledUp = true;
+  while (character.level < GAME_CONSTANTS.MAX_LEVEL) {
+    const nextLevel = character.level + 1;
+    const required = xpForLevel(nextLevel);
+    if (character.xp >= required) {
+      character.level = nextLevel;
+      character.unallocatedPoints += GAME_CONSTANTS.STAT_POINTS_PER_LEVEL;
+      leveledUp = true;
+      levelsGained++;
+    } else {
+      break;
+    }
   }
 
-  return { leveledUp, newLevel: character.level };
+  return { leveledUp, newLevel: character.level, levelsGained };
 }

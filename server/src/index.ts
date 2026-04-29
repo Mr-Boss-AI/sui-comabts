@@ -8,12 +8,12 @@ import { initMatchmaking, shutdownMatchmaking } from './game/matchmaking';
 import { createFight } from './ws/fight-room';
 import { getCharacterById, getCharacterByWallet, restoreCharacterFromDb, updateCharacter } from './data/characters';
 import { getLeaderboard } from './data/leaderboard';
-import { getShopCatalog } from './data/items';
 import { getSupabase } from './data/supabase';
 import { getFight } from './ws/fight-room';
-import { applyXp } from './game/combat';
+import { applyXp, xpForNextLevel } from './game/combat';
 import { findCharacterObjectId, updateCharacterOnChain } from './utils/sui-settle';
-import { getConnectedClients, adoptWagerIntoLobby } from './ws/handler';
+import { getConnectedClients, adoptWagerIntoLobby, broadcastToAuthenticated } from './ws/handler';
+import { startMarketplaceIndex, shutdownMarketplaceIndex, subscribeMarketplace, listingToWire } from './data/marketplace';
 import type { QueueEntry, WagerLobbyEntry } from './types';
 
 // === Express App ===
@@ -38,12 +38,6 @@ app.get('/api/leaderboard', (_req, res) => {
   res.json({ entries });
 });
 
-// --- Shop Catalog ---
-app.get('/api/shop', (_req, res) => {
-  const items = getShopCatalog();
-  res.json({ items });
-});
-
 // --- Character Data ---
 app.get('/api/character/:walletAddress', (req, res) => {
   const { walletAddress } = req.params;
@@ -58,7 +52,7 @@ app.get('/api/character/:walletAddress', (req, res) => {
       name: character.name,
       level: character.level,
       xp: character.xp,
-      xpToNextLevel: character.xpToNextLevel,
+      xpToNextLevel: xpForNextLevel(character.level),
       walletAddress: character.walletAddress,
       stats: character.stats,
       equipment: character.equipment,
@@ -313,6 +307,49 @@ initMatchmaking(onMatchFound);
 
 getSupabase();
 
+// === Initialize Marketplace event index ===
+//
+// Cold-syncs from chain, then opens a WSS subscription to the public Sui
+// fullnode. Every list/delist/buy/kiosk-create updates the in-memory listing
+// index reactively and broadcasts the delta to all authenticated clients.
+startMarketplaceIndex().catch((err) => {
+  console.error('[Marketplace] startMarketplaceIndex failed:', err?.message || err);
+});
+
+subscribeMarketplace((event) => {
+  // Translate the server-shape into the wire-shape and broadcast to all
+  // authenticated clients. Each event maps 1:1 to a frontend WS message.
+  if (event.type === 'item_listed') {
+    broadcastToAuthenticated({ type: 'item_listed', listing: listingToWire(event.listing) });
+    return;
+  }
+  if (event.type === 'item_delisted') {
+    broadcastToAuthenticated({
+      type: 'item_delisted',
+      listingId: event.listingId,
+      // Forward seller + kioskId — the seller's UI uses them to know
+      // whether to refresh their own kiosk panel.
+      seller: event.seller,
+      kioskId: event.kioskId,
+    });
+    return;
+  }
+  if (event.type === 'item_bought') {
+    // The listing has already been removed from the server index, so the
+    // wire shape carries the bare ID + counterparties. The seller's tab
+    // pivots on `seller` to auto-refresh their profits + listing count
+    // without having to have signed the buy tx themselves.
+    broadcastToAuthenticated({
+      type: 'item_bought',
+      listing: { id: event.listingId },
+      buyer: event.buyer,
+      seller: event.seller,
+      kioskId: event.kioskId,
+    });
+    return;
+  }
+});
+
 // === Start Server ===
 
 server.listen(CONFIG.PORT, () => {
@@ -327,7 +364,6 @@ server.listen(CONFIG.PORT, () => {
   Endpoints:
     GET /health
     GET /api/leaderboard
-    GET /api/shop
     GET /api/character/:walletAddress
     GET /api/fights/:fightId
     WS  /  (WebSocket)
@@ -341,6 +377,7 @@ function gracefulShutdown(signal: string): void {
   console.log(`\n[Server] ${signal} received. Shutting down gracefully...`);
 
   shutdownMatchmaking();
+  shutdownMarketplaceIndex();
 
   wss.clients.forEach((client) => {
     client.close(1001, 'Server shutting down');
