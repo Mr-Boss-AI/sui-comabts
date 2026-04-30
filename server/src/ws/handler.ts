@@ -36,6 +36,7 @@ import {
   getFight,
   setClientsRef,
   handlePlayerDisconnect,
+  handlePlayerReconnect,
 } from './fight-room';
 import {
   registerChatClient,
@@ -490,6 +491,12 @@ async function acceptAuthenticatedSession(
     hasCharacter: !!character,
     character: character ? sanitizeCharacter(character) : null,
   });
+
+  // Block C1 (2026-04-30) — if this wallet had a pending forfeit because of
+  // an earlier socket drop, cancel it now and push the current fight state
+  // back to the rejoining client. Idempotent for wallets that aren't
+  // mid-fight: the helper returns early when no timer is pending.
+  handlePlayerReconnect(walletAddress);
 
   // The "joined" broadcast was previously gated on isReconnect (a flag set in
   // the legacy handleAuth). In the new flow the same wallet may auth via

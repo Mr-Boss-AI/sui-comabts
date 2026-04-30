@@ -131,6 +131,30 @@ export default function GameProvider({
             else if (hit.damage > 0) playSoundIf("hit");
           }
           break;
+        case "opponent_disconnected": {
+          // Block C1 (2026-04-30) — opponent's socket dropped mid-fight. The
+          // server is holding a forfeit timer for `graceMs`. Surface a non-
+          // sticky toast so the player knows why nothing is happening; if
+          // the opponent reconnects we'll get an `opponent_reconnected`
+          // message; otherwise the fight ends with their forfeit when the
+          // timer expires.
+          const seconds = Math.round(msg.graceMs / 1000);
+          dispatch({
+            type: "SET_ERROR",
+            message: `Opponent disconnected. Waiting up to ${seconds}s for them to reconnect…`,
+          });
+          break;
+        }
+        case "opponent_reconnected":
+          // Clear the disconnect notice (no-op if it auto-faded already).
+          dispatch({ type: "SET_ERROR", message: null });
+          break;
+        case "fight_resumed":
+          // We were the one who reconnected. Rehydrate the fight state so
+          // the UI lines back up with the server's view (turn count, HP,
+          // log).
+          dispatch({ type: "SET_FIGHT", fight: msg.fight });
+          break;
         case "fight_end":
           dispatch({
             type: "SET_FIGHT",

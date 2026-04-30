@@ -24,6 +24,7 @@ import {
   findListingByItemId,
   subscribeMarketplace,
   listingToWire,
+  GAP_FILL_BACKOFF_MS,
   type MarketplaceEvent,
   type ServerMarketplaceListing,
 } from '../server/src/data/marketplace';
@@ -468,6 +469,37 @@ console.log('\n[7] decodeListingKeyItemId — Listing { id: address, is_exclusiv
   for (let i = 0; i < 32; i++) recovered += fullKey[i].toString(16).padStart(2, '0');
   eq(recovered, ITEM_TX, 'first 32 BCS bytes = item ID (chain-truth source for kioskListed)');
   eq(fullKey.length, 33, 'Listing key total = 33 bytes (id 32 + bool 1)');
+}
+
+// =============================================================================
+// 12 — Block C2/C3 retry budgets (Gemini re-audit 2026-04-30)
+//
+// Pre-fix, runSubscription's gap-fill catch swallowed errors and opened the
+// gRPC stream at "now" — every event in the gap window was permanently lost
+// from the index. Block C2 wraps catchUpFromCursor in a 5-attempt retry
+// loop; if it still fails, runSubscription scheduleReconnects instead of
+// streaming with a stale index. Block C3 wraps coldSync's queryEvents
+// pages in withChainRetry (3 attempts default) so a transient RPC blip
+// at boot doesn't leave the marketplace empty for the rest of uptime.
+//
+// We pin the BUDGET ARRAY here. The withChainRetry behaviour itself is
+// covered by qa-treasury-queue.ts (custom backoffMs → N+1 attempts).
+// =============================================================================
+console.log('\n[12] Block C2 — gap-fill retry budget = 5 attempts');
+{
+  eq(GAP_FILL_BACKOFF_MS.length, 4, 'GAP_FILL_BACKOFF_MS has 4 sleeps (= 5 total attempts)');
+  eq(GAP_FILL_BACKOFF_MS[0], 1000, 'first delay = 1s');
+  eq(GAP_FILL_BACKOFF_MS[1], 3000, 'second delay = 3s');
+  eq(GAP_FILL_BACKOFF_MS[2], 9000, 'third delay = 9s');
+  eq(GAP_FILL_BACKOFF_MS[3], 27_000, 'fourth delay = 27s — matches Gemini spec');
+  // Sequence pin: each delay should be 3× the previous (per the spec).
+  for (let i = 1; i < GAP_FILL_BACKOFF_MS.length; i++) {
+    eq(
+      GAP_FILL_BACKOFF_MS[i],
+      GAP_FILL_BACKOFF_MS[i - 1] * 3,
+      `delay[${i}] = 3 × delay[${i - 1}] (exponential)`,
+    );
+  }
 }
 
 // =============================================================================

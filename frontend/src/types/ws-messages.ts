@@ -151,7 +151,14 @@ export type ServerMessage =
   | { type: "wager_lobby_added"; entry: WagerLobbyEntry }
   | { type: "wager_lobby_removed"; wagerMatchId: string }
   | { type: "character_updated_onchain" }
-  | { type: "character_deleted" };
+  | { type: "character_deleted" }
+  // Reconnect grace window (Block C1, 2026-04-30). Server emits these when
+  // the opponent's WebSocket drops mid-fight; the forfeit only fires after
+  // `graceMs` if the opponent doesn't reconnect. `fight_resumed` is sent to
+  // the rejoining client so its UI rehydrates the live fight state.
+  | { type: "opponent_disconnected"; fightId: string; expiresAt: number; graceMs: number }
+  | { type: "opponent_reconnected"; fightId: string }
+  | { type: "fight_resumed"; fight: FightState };
 
 export interface FightHistoryEntry {
   id: string;

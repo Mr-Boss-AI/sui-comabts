@@ -41,16 +41,27 @@ const CLOCK = '0x6';
 // =============================================================================
 
 /**
- * 3-attempt exponential backoff (1s, 3s, 9s). Used for both transient RPC
- * blips and on-chain retryable aborts (gas-coin lock, mempool pressure).
+ * Exponential-backoff retry. `backoffMs` is the array of delays BETWEEN
+ * attempts, so total attempts = `backoffMs.length + 1`. Default
+ * `[1000, 3000]` = 3 attempts with sleeps of 1s + 3s (preserving the
+ * production retry budget used since v5 redeploy).
  *
- * Re-exported as `withChainRetry` so other modules (e.g. /api/admin/adopt-wager)
- * can inherit the same retry contract without re-implementing it.
+ * Used for transient RPC blips and on-chain retryable aborts (gas-coin
+ * lock, mempool pressure). Re-exported as `withChainRetry` so other
+ * modules inherit the same contract without re-implementing it.
+ *
+ * Specific call sites widen the retry budget via the parameter — e.g. the
+ * marketplace gap-fill loop (Block C2) uses `[1000, 3000, 9000, 27000]`
+ * for 5 total attempts.
  */
-async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  const backoffMs = [1000, 3000, 9000];
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  backoffMs: readonly number[] = [1000, 3000],
+): Promise<T> {
+  const totalAttempts = backoffMs.length + 1;
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
     try {
       const result = await fn();
       if (attempt > 0) console.log(`[${label}] retry attempt ${attempt + 1} succeeded`);
@@ -58,13 +69,13 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
     } catch (err) {
       lastErr = err;
       const msg = (err as Error)?.message || String(err);
-      console.warn(`[${label}] attempt ${attempt + 1} failed: ${msg}`);
-      if (attempt < backoffMs.length - 1) {
+      console.warn(`[${label}] attempt ${attempt + 1}/${totalAttempts} failed: ${msg}`);
+      if (attempt < backoffMs.length) {
         await new Promise((resolve) => setTimeout(resolve, backoffMs[attempt]));
       }
     }
   }
-  console.error(`[${label}] retry exhausted after ${backoffMs.length} attempts`);
+  console.error(`[${label}] retry exhausted after ${totalAttempts} attempts`);
   throw lastErr;
 }
 

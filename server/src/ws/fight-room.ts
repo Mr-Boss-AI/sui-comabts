@@ -21,6 +21,10 @@ import {
   persistItems,
 } from '../data/characters';
 import { dbSaveFight, dbDeleteWagerInFlight } from '../data/db';
+import {
+  markDisconnect as graceMarkDisconnect,
+  markReconnect as graceMarkReconnect,
+} from './reconnect-grace';
 import type {
   Character,
   ConnectedClient,
@@ -761,15 +765,103 @@ export function getPlayerActiveFight(walletAddress: string): FightState | undefi
 }
 
 /**
- * Clean up a fight if a player disconnects.
+ * Schedule a forfeit for `walletAddress` after the reconnect grace window
+ * expires. Closes Block C1 of the 2026-04-30 Gemini re-audit: the pre-fix
+ * implementation forfeited INSTANTLY on socket close, costing players real
+ * SUI to a 2-second wifi blip.
+ *
+ * Idempotent: duplicate close events on one socket don't reset the grace
+ * clock. The opponent is notified once via `opponent_disconnected`. If the
+ * same wallet re-authenticates in time, `handlePlayerReconnect` cancels
+ * the timer and emits `opponent_reconnected` + a fresh `fight_resumed`
+ * payload.
  */
 export function handlePlayerDisconnect(walletAddress: string): void {
   const fight = getPlayerActiveFight(walletAddress);
   if (!fight) return;
 
-  // The disconnecting player forfeits
-  const isPlayerA = fight.playerA.walletAddress === walletAddress;
-  const winnerId = isPlayerA ? fight.playerB.characterId : fight.playerA.characterId;
+  const opponentWallet =
+    fight.playerA.walletAddress === walletAddress
+      ? fight.playerB.walletAddress
+      : fight.playerA.walletAddress;
+  const fightId = fight.id;
 
-  finishFight(fight, winnerId, false, 'disconnect');
+  const info = graceMarkDisconnect(walletAddress, fightId, () => {
+    // Re-resolve the fight at timeout time — it may have ended via
+    // another path (chain settle, draw, etc.) during the grace window.
+    const stillActive = activeFights.get(fightId);
+    if (!stillActive) {
+      console.log(
+        `[Fight] ${walletAddress.slice(0, 10)} forfeit timeout fired but fight ${fightId} ` +
+        `is no longer active — skipping (already finished by another path).`,
+      );
+      return;
+    }
+
+    const isPlayerA = stillActive.playerA.walletAddress === walletAddress;
+    const winnerId = isPlayerA
+      ? stillActive.playerB.characterId
+      : stillActive.playerA.characterId;
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} did not reconnect within grace — forfeit fight ${fightId}`,
+    );
+    finishFight(stillActive, winnerId, false, 'disconnect');
+  });
+
+  if (!info) return; // duplicate close on one socket — opponent already notified
+
+  console.log(
+    `[Fight] ${walletAddress.slice(0, 10)} disconnected from fight ${fightId} — granting ` +
+    `${Math.round(info.graceMs / 1000)}s reconnect grace (expires ${new Date(info.expiresAt).toISOString()})`,
+  );
+
+  // Tell the opponent so they don't think the game has frozen.
+  sendToWallet(opponentWallet, {
+    type: 'opponent_disconnected',
+    fightId,
+    expiresAt: info.expiresAt,
+    graceMs: info.graceMs,
+  } as ServerMessage);
+}
+
+/**
+ * Cancel a pending forfeit for `walletAddress` if one exists. Called from
+ * `acceptAuthenticatedSession` (handler.ts) every time a wallet
+ * re-authenticates.
+ */
+export function handlePlayerReconnect(walletAddress: string): void {
+  const fightId = graceMarkReconnect(walletAddress);
+  if (!fightId) return;
+
+  const fight = activeFights.get(fightId);
+  if (!fight) {
+    // Fight ended on another path during the grace window. Nothing more
+    // to do — the rejoining client will receive its own auth_ok with no
+    // fight in flight.
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} reconnected but fight ${fightId} is no longer active — ` +
+      `nothing to resume.`,
+    );
+    return;
+  }
+
+  console.log(
+    `[Fight] ${walletAddress.slice(0, 10)} reconnected to fight ${fightId} within grace — forfeit cancelled.`,
+  );
+
+  const opponentWallet =
+    fight.playerA.walletAddress === walletAddress
+      ? fight.playerB.walletAddress
+      : fight.playerA.walletAddress;
+  sendToWallet(opponentWallet, {
+    type: 'opponent_reconnected',
+    fightId,
+  } as ServerMessage);
+
+  // Push the current fight state to the rejoining client so its UI
+  // re-hydrates immediately (turn count, HP, log).
+  sendToWallet(walletAddress, {
+    type: 'fight_resumed',
+    fight: buildFightStatePayload(fight),
+  } as ServerMessage);
 }

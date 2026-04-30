@@ -100,6 +100,69 @@ async function main(): Promise<void> {
   eq(calls, 3, 'exhaustion = exactly 3 attempts');
 
   // =============================================================================
+  // 3.5 — withChainRetry honors a custom backoffMs (Block C2/C3 — 2026-04-30)
+  //
+  // The marketplace gap-fill loop widens the budget to 5 attempts via
+  // [1000, 3000, 9000, 27000]. The cold-sync loop keeps the default 3.
+  // We use [1, 1, 1, 1] here so the test stays fast — the parameter
+  // contract (length-of-array → attempts = length+1) is what matters,
+  // not the literal sleep durations.
+  // =============================================================================
+  console.log('\n[3.5] withChainRetry — custom backoffMs widens the retry budget');
+  {
+    let attempts5 = 0;
+    let threw5 = false;
+    try {
+      await withChainRetry(
+        'test.custom-budget',
+        async () => {
+          attempts5++;
+          throw new Error(`fail #${attempts5}`);
+        },
+        [1, 1, 1, 1], // 4 sleeps → 5 attempts total
+      );
+    } catch {
+      threw5 = true;
+    }
+    eq(threw5, true, '5-attempt budget still rejects after exhaustion');
+    eq(attempts5, 5, 'custom 4-entry array → 5 total attempts');
+  }
+  {
+    let attempts2 = 0;
+    let threw2 = false;
+    try {
+      await withChainRetry(
+        'test.tight-budget',
+        async () => {
+          attempts2++;
+          throw new Error(`fail #${attempts2}`);
+        },
+        [1], // 1 sleep → 2 attempts total
+      );
+    } catch {
+      threw2 = true;
+    }
+    eq(threw2, true, '2-attempt budget rejects on second failure');
+    eq(attempts2, 2, 'custom 1-entry array → 2 total attempts (boundary)');
+  }
+  {
+    // Explicit pin on the production gap-fill backoff: the Gemini fix
+    // (Block C2) specified 5 attempts — verify the constant the marketplace
+    // module imports actually has 4 entries (so attempts = 4 + 1 = 5).
+    let attempts5b = 0;
+    await withChainRetry(
+      'test.eventual-success',
+      async () => {
+        attempts5b++;
+        if (attempts5b < 4) throw new Error('transient');
+        return 'ok';
+      },
+      [1, 1, 1, 1],
+    );
+    eq(attempts5b, 4, '5-attempt budget: succeeds on 4th attempt');
+  }
+
+  // =============================================================================
   // 4 — FIFO contract on a hand-rolled queue identical to production code
   // =============================================================================
   // The production queue lives inside `sui-settle.ts` and is package-private.

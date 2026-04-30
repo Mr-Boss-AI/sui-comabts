@@ -39,7 +39,18 @@ import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { CONFIG } from '../config';
 import { getCharacterByWallet } from './characters';
+import { withChainRetry } from '../utils/sui-settle';
 import type { Item, ItemType, Rarity } from '../types';
+
+// Block C2 backoff (Gemini re-audit 2026-04-30) — 5 attempts for the
+// reconnect-time gap-fill loop (1s, 3s, 9s, 27s sleeps between attempts).
+// If all 5 fail we abort the current runSubscription cycle and let
+// scheduleReconnect retry the whole boot sequence later. The previous
+// implementation swallowed the failure and opened the gRPC stream at
+// "now" — events during the gap were permanently lost from the index.
+//
+// Exported so the qa gauntlet can pin the array length (= attempts - 1).
+export const GAP_FILL_BACKOFF_MS = [1000, 3000, 9000, 27_000] as const;
 
 // Node's default undici Agent has aggressive keepalive timeouts (~5s) and a
 // non-zero bodyTimeout. Both kill HTTP/2 server-streaming responses after a
@@ -187,15 +198,26 @@ export function shutdownMarketplaceIndex(): void {
 
 // ===== Cold sync (JSON-RPC) =====
 
+/**
+ * Block C3 (Gemini re-audit 2026-04-30) — every page fetch is wrapped in
+ * `withChainRetry` so a transient RPC blip during cold-sync doesn't leave
+ * the marketplace empty for the rest of the server's uptime. 3 attempts
+ * with 1s/3s sleeps between them (the production default). If all attempts
+ * still fail the error propagates out of `coldSync` and the caller
+ * (startMarketplaceIndex) lets it bubble — index.ts's outer try/catch
+ * logs and the boot continues with whatever was hydrated up to that point.
+ */
 async function coldSync(): Promise<void> {
   let cursor: { txDigest: string; eventSeq: string } | null = null;
   while (true) {
-    const page = await httpClient.queryEvents({
-      query: { MoveEventModule: { package: CONFIG.SUI_PACKAGE_ID, module: 'marketplace' } },
-      cursor: cursor ?? undefined,
-      limit: 50,
-      order: 'ascending',
-    });
+    const page = await withChainRetry('marketplace.coldSync', () =>
+      httpClient.queryEvents({
+        query: { MoveEventModule: { package: CONFIG.SUI_PACKAGE_ID, module: 'marketplace' } },
+        cursor: cursor ?? undefined,
+        limit: 50,
+        order: 'ascending',
+      }),
+    );
     for (const event of page.data) {
       await handleParsedEvent({
         type: event.type,
@@ -220,16 +242,29 @@ async function coldSync(): Promise<void> {
 
 // ===== Gap-fill on reconnect (JSON-RPC) =====
 
+/**
+ * Block C2 (Gemini re-audit 2026-04-30) — every page fetch retries with
+ * the wider 5-attempt backoff (1s/3s/9s/27s) defined in
+ * GAP_FILL_BACKOFF_MS. The outer `runSubscription` catches a final failure
+ * and reroutes through `scheduleReconnect` instead of opening the gRPC
+ * stream at "now" — that's what shipped events from the gap into the
+ * void.
+ */
 async function catchUpFromCursor(): Promise<void> {
   if (!lastEventCursor) return;
   let cursor: { txDigest: string; eventSeq: string } = lastEventCursor;
   while (true) {
-    const page = await httpClient.queryEvents({
-      query: { MoveEventModule: { package: CONFIG.SUI_PACKAGE_ID, module: 'marketplace' } },
-      cursor,
-      limit: 50,
-      order: 'ascending',
-    });
+    const page = await withChainRetry(
+      'marketplace.gapFill',
+      () =>
+        httpClient.queryEvents({
+          query: { MoveEventModule: { package: CONFIG.SUI_PACKAGE_ID, module: 'marketplace' } },
+          cursor,
+          limit: 50,
+          order: 'ascending',
+        }),
+      GAP_FILL_BACKOFF_MS,
+    );
     for (const event of page.data) {
       await handleParsedEvent({
         type: event.type,
@@ -253,12 +288,24 @@ async function catchUpFromCursor(): Promise<void> {
 async function runSubscription(): Promise<void> {
   if (shuttingDown) return;
 
-  // Catch up gap before re-subscribing — guarantees no event drop
+  // Catch up gap before re-subscribing — guarantees no event drop. Block C2
+  // (Gemini re-audit 2026-04-30): if gap-fill fails after the retry loop in
+  // `catchUpFromCursor` exhausts (5 attempts, 1s/3s/9s/27s), abort and
+  // reroute through `scheduleReconnect` instead of opening the gRPC stream
+  // with a known-incomplete index. Pre-fix this catch swallowed the error
+  // and continued to the gRPC subscribe — every event from the gap window
+  // was permanently lost.
   if (lastEventCursor) {
     try {
       await catchUpFromCursor();
     } catch (err: any) {
-      console.error('[Marketplace] Gap-fill failed:', err?.message || err);
+      console.error(
+        '[Marketplace] Gap-fill exhausted retries:',
+        err?.message || err,
+        '— scheduling full reconnect instead of opening stream with stale index.',
+      );
+      scheduleReconnect();
+      return;
     }
   }
 
