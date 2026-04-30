@@ -186,6 +186,20 @@ export interface FightState {
   spectators: Set<string>;
   turnActions: Map<string, TurnAction>;
   turnTimer?: ReturnType<typeof setTimeout>;
+  /** Absolute Date.now() ms when the current turn expires. Sent to clients
+   *  via `turn_start` so they can compute the countdown locally. Updated
+   *  on `timer_resumed` so the client UI re-syncs after a pause. */
+  turnDeadline?: number;
+  /** True while the turn timer is paused due to one or both players being
+   *  in the reconnect-grace window. While paused, the server-side
+   *  setTimeout is cleared and `turnPausedRemainingMs` is the duration
+   *  the timer will resume with. */
+  turnPaused?: boolean;
+  turnPausedRemainingMs?: number;
+  /** Wallets currently disconnected and inside the reconnect-grace
+   *  window. The Set is the primary source of truth for "should the turn
+   *  timer be paused" — non-empty means paused. */
+  disconnectedWallets: Set<string>;
   startedAt: number;
   finishedAt?: number;
 }

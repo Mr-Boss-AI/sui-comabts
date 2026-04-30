@@ -152,13 +152,32 @@ export type ServerMessage =
   | { type: "wager_lobby_removed"; wagerMatchId: string }
   | { type: "character_updated_onchain" }
   | { type: "character_deleted" }
-  // Reconnect grace window (Block C1, 2026-04-30). Server emits these when
-  // the opponent's WebSocket drops mid-fight; the forfeit only fires after
-  // `graceMs` if the opponent doesn't reconnect. `fight_resumed` is sent to
-  // the rejoining client so its UI rehydrates the live fight state.
-  | { type: "opponent_disconnected"; fightId: string; expiresAt: number; graceMs: number }
-  | { type: "opponent_reconnected"; fightId: string }
-  | { type: "fight_resumed"; fight: FightState };
+  // Reconnect grace window (Block C1, 2026-04-30 + hotfix). Server emits
+  // these when a player's WebSocket drops mid-fight; the forfeit only
+  // fires after `graceMs` if they don't reconnect. While at least one
+  // player is in the grace window, the turn timer is paused server-side
+  // (`timer_paused`); on full reconnection it resumes (`timer_resumed`)
+  // with a fresh deadline. `fight_resumed` rehydrates the rejoining
+  // client's view; `walletAddress` on disconnect/reconnect identifies
+  // WHICH side dropped (used for the banner copy when there are
+  // spectators).
+  | {
+      type: "opponent_disconnected";
+      fightId: string;
+      walletAddress: string;
+      expiresAt: number;
+      graceMs: number;
+    }
+  | { type: "opponent_reconnected"; fightId: string; walletAddress: string }
+  | { type: "fight_resumed"; fight: FightState }
+  | { type: "timer_paused"; fightId: string; turn: number; remainingMs: number }
+  | {
+      type: "timer_resumed";
+      fightId: string;
+      turn: number;
+      deadline: number;
+      remainingMs: number;
+    };
 
 export interface FightHistoryEntry {
   id: string;

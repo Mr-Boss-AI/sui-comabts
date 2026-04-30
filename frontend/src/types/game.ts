@@ -235,6 +235,11 @@ export interface FightState {
   winner?: string;
   wagerAmount?: number;
   turnDeadline?: number;
+  /** True while the server has paused the turn timer (one or more
+   *  players in the reconnect-grace window). The client mirrors this
+   *  flag into the TurnTimer's `paused` prop. */
+  turnPaused?: boolean;
+  turnPausedRemainingMs?: number | null;
 }
 
 // ===== CHAT =====

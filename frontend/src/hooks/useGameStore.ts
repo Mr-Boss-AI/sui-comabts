@@ -92,6 +92,18 @@ export interface GameState {
   // with chain truth (especially important: equipped items become DOFs and should
   // disappear from the wallet-owned list).
   onChainRefreshTrigger: number;
+
+  // Block C1 reconnect-grace UI state (hotfix 2026-04-30 part 2). When a
+  // player drops mid-fight the server emits opponent_disconnected; the
+  // banner shown by <OpponentDisconnectedBanner /> reads this slice and
+  // ticks down to expiresAt. Cleared on opponent_reconnected /
+  // fight_resumed / fight_end.
+  opponentDisconnect: {
+    fightId: string;
+    walletAddress: string;
+    expiresAt: number;
+    graceMs: number;
+  } | null;
 }
 
 export const initialGameState: GameState = {
@@ -120,6 +132,7 @@ export const initialGameState: GameState = {
   errorTimestamp: null,
   errorSticky: false,
   onChainRefreshTrigger: 0,
+  opponentDisconnect: null,
 };
 
 export type GameAction =
@@ -154,6 +167,8 @@ export type GameAction =
   | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
   | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
   | { type: "SET_AUTH_PHASE"; phase: AuthPhase }
+  | { type: "SET_OPPONENT_DISCONNECT"; payload: GameState["opponentDisconnect"] }
+  | { type: "SET_TURN_PAUSE"; paused: boolean; remainingMs: number | null; deadline: number | null }
   | { type: "BUMP_ONCHAIN_REFRESH" }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
   | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
@@ -242,8 +257,17 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         pendingEquipment: cloneEquipment(next),
       };
     }
-    case "SET_FIGHT":
-      return { ...state, fight: action.fight };
+    case "SET_FIGHT": {
+      // When a fight ends or is cleared, also wipe the disconnect banner
+      // — the player has no fight to be disconnected FROM. fight_resumed
+      // re-sends a populated FightState (with potentially turnPaused
+      // mid-flight), so we trust the server's payload over local state.
+      const next = { ...state, fight: action.fight };
+      if (!action.fight || action.fight.status === "finished") {
+        next.opponentDisconnect = null;
+      }
+      return next;
+    }
     case "SET_FIGHT_QUEUE":
       return { ...state, fightQueue: action.fightType };
     case "SET_LOOT_RESULT":
@@ -330,6 +354,26 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case "SET_AUTH_PHASE":
       if (state.authPhase === action.phase) return state;
       return { ...state, authPhase: action.phase };
+    case "SET_OPPONENT_DISCONNECT":
+      return { ...state, opponentDisconnect: action.payload };
+    case "SET_TURN_PAUSE": {
+      // Mirror the server-side timer state into fight.turnPaused /
+      // turnDeadline so <TurnTimer paused={...} /> freezes correctly
+      // and resumes with a fresh countdown.
+      if (!state.fight) return state;
+      const nextFight = {
+        ...state.fight,
+        turnPaused: action.paused,
+        turnPausedRemainingMs: action.remainingMs,
+        // Only overwrite the deadline when the server gives us a new
+        // one (resume). Pause keeps the old deadline so the UI can
+        // freeze the countdown at the captured point if it wants to
+        // (the TurnTimer freezes by simply not advancing — same
+        // outcome).
+        turnDeadline: action.deadline ?? state.fight.turnDeadline,
+      };
+      return { ...state, fight: nextFight };
+    }
     case "BUMP_ONCHAIN_REFRESH":
       return { ...state, onChainRefreshTrigger: state.onChainRefreshTrigger + 1 };
     default:

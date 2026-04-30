@@ -25,6 +25,7 @@ import {
   markDisconnect as graceMarkDisconnect,
   markReconnect as graceMarkReconnect,
 } from './reconnect-grace';
+import { pauseFightTimer, resumeFightTimer } from './fight-pause';
 import type {
   Character,
   ConnectedClient,
@@ -115,6 +116,12 @@ function buildFightStatePayload(fight: FightState): Record<string, any> {
     turn: fight.turn,
     log: fight.turnResults,
     wagerAmount: fight.wagerAmount,
+    // Timer state — populated so a `fight_resumed` payload rehydrates
+    // the client UI exactly where it was: countdown deadline, pause
+    // flag, and frozen remaining ms (when paused).
+    turnDeadline: fight.turnDeadline ?? null,
+    turnPaused: fight.turnPaused === true,
+    turnPausedRemainingMs: fight.turnPausedRemainingMs ?? null,
   };
 }
 
@@ -172,6 +179,7 @@ export async function createFight(
     wagerAmount,
     spectators: new Set(),
     turnActions: new Map(),
+    disconnectedWallets: new Set(),
     startedAt: Date.now(),
   };
 
@@ -221,16 +229,36 @@ function startNextTurn(fight: FightState): void {
   fight.turnActions.clear();
 
   const deadline = Date.now() + GAME_CONSTANTS.TURN_TIMER_MS;
+  fight.turnDeadline = deadline;
 
   const turnStartMsg: ServerMessage = {
     type: 'turn_start',
     turn: fight.turn,
     deadline,
   };
-
   broadcastToFight(fight, turnStartMsg);
 
-  // Set turn timer
+  // Block C1.b — if a player is currently in the reconnect-grace window
+  // we MUST start the new turn paused; otherwise the timer would tick
+  // down for a player who can't possibly act and the spec ("connected
+  // player can't run out the clock without consequence") breaks.
+  // pauseFightTimer is idempotent — it captures the full TURN_TIMER_MS
+  // since the timer hasn't been started yet.
+  if (fight.disconnectedWallets.size > 0) {
+    fight.turnPaused = true;
+    fight.turnPausedRemainingMs = GAME_CONSTANTS.TURN_TIMER_MS;
+    fight.turnTimer = undefined;
+    broadcastToFight(fight, {
+      type: 'timer_paused',
+      fightId: fight.id,
+      turn: fight.turn,
+      remainingMs: GAME_CONSTANTS.TURN_TIMER_MS,
+    } as ServerMessage);
+    return;
+  }
+
+  fight.turnPaused = false;
+  fight.turnPausedRemainingMs = undefined;
   fight.turnTimer = setTimeout(() => {
     handleTurnTimeout(fight);
   }, GAME_CONSTANTS.TURN_TIMER_MS);
@@ -304,6 +332,9 @@ export function submitTurnAction(
       clearTimeout(fight.turnTimer);
       fight.turnTimer = undefined;
     }
+    fight.turnDeadline = undefined;
+    fight.turnPaused = false;
+    fight.turnPausedRemainingMs = undefined;
     resolveFightTurn(fight);
   }
 
@@ -392,6 +423,9 @@ function finishFight(
     clearTimeout(fight.turnTimer);
     fight.turnTimer = undefined;
   }
+  fight.turnDeadline = undefined;
+  fight.turnPaused = false;
+  fight.turnPausedRemainingMs = undefined;
 
   let winnerWallet: string | undefined;
   let loserWallet: string | undefined;
@@ -766,15 +800,19 @@ export function getPlayerActiveFight(walletAddress: string): FightState | undefi
 
 /**
  * Schedule a forfeit for `walletAddress` after the reconnect grace window
- * expires. Closes Block C1 of the 2026-04-30 Gemini re-audit: the pre-fix
- * implementation forfeited INSTANTLY on socket close, costing players real
- * SUI to a 2-second wifi blip.
+ * expires AND pause the turn timer so the opponent can't run out the
+ * clock against a player who is provably absent.
+ *
+ * Closes Block C1 of the 2026-04-30 Gemini re-audit and the three live-test
+ * follow-ups (C1.a banner, C1.b timer pause, C1.c choice acceptance).
+ *
+ * Pre-fix this called `finishFight('disconnect')` instantly. The first
+ * pass added the grace window. This pass adds the timer pause + the
+ * persistent participant-state preservation so the rejoining player can
+ * actually act when they come back.
  *
  * Idempotent: duplicate close events on one socket don't reset the grace
- * clock. The opponent is notified once via `opponent_disconnected`. If the
- * same wallet re-authenticates in time, `handlePlayerReconnect` cancels
- * the timer and emits `opponent_reconnected` + a fresh `fight_resumed`
- * payload.
+ * clock or re-pause an already-paused timer.
  */
 export function handlePlayerDisconnect(walletAddress: string): void {
   const fight = getPlayerActiveFight(walletAddress);
@@ -810,24 +848,49 @@ export function handlePlayerDisconnect(walletAddress: string): void {
 
   if (!info) return; // duplicate close on one socket — opponent already notified
 
+  // Block C1.b — pause the turn timer NOW. If both players are
+  // disconnected this is idempotent (second call returns paused=false
+  // but preserves the captured remainingMs). Resume only fires when
+  // EVERY disconnected wallet has reconnected, so the timer stays
+  // frozen for as long as anyone is in grace.
+  fight.disconnectedWallets.add(walletAddress);
+  const pause = pauseFightTimer(fight);
+  if (pause.paused) {
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} disconnected — paused turn timer ` +
+      `with ${Math.round(pause.remainingMs / 1000)}s remaining (turn ${fight.turn}, fight ${fightId})`,
+    );
+    broadcastToFight(fight, {
+      type: 'timer_paused',
+      fightId,
+      turn: fight.turn,
+      remainingMs: pause.remainingMs,
+    } as ServerMessage);
+  }
+
   console.log(
-    `[Fight] ${walletAddress.slice(0, 10)} disconnected from fight ${fightId} — granting ` +
-    `${Math.round(info.graceMs / 1000)}s reconnect grace (expires ${new Date(info.expiresAt).toISOString()})`,
+    `[Fight] ${walletAddress.slice(0, 10)} entered reconnect grace — ` +
+    `${Math.round(info.graceMs / 1000)}s window (expires ${new Date(info.expiresAt).toISOString()})`,
   );
 
   // Tell the opponent so they don't think the game has frozen.
   sendToWallet(opponentWallet, {
     type: 'opponent_disconnected',
     fightId,
+    walletAddress,
     expiresAt: info.expiresAt,
     graceMs: info.graceMs,
   } as ServerMessage);
 }
 
 /**
- * Cancel a pending forfeit for `walletAddress` if one exists. Called from
- * `acceptAuthenticatedSession` (handler.ts) every time a wallet
- * re-authenticates.
+ * Cancel a pending forfeit for `walletAddress` if one exists, restore the
+ * client's seat in the fight (so `fight_action` is accepted again — the
+ * C1.c bug), and resume the turn timer if all disconnected players have
+ * now returned.
+ *
+ * Called from `acceptAuthenticatedSession` (handler.ts) every time a
+ * wallet re-authenticates. Idempotent for wallets that aren't mid-fight.
  */
 export function handlePlayerReconnect(walletAddress: string): void {
   const fightId = graceMarkReconnect(walletAddress);
@@ -845,6 +908,50 @@ export function handlePlayerReconnect(walletAddress: string): void {
     return;
   }
 
+  // Block C1.c — restore the participant slot on the NEW socket. The
+  // previous WS session's client object was removed from connectedClients
+  // by handler.ts::handleDisconnect, so the new socket has a fresh
+  // `client` with `currentFightId === undefined`. Without this fix,
+  // `handleFightAction` rejects every `fight_action` with
+  // "Not in a fight" — the bug the user reproduced live tonight.
+  const newClient = getClientByWallet(walletAddress);
+  if (newClient) {
+    newClient.currentFightId = fight.id;
+    // Also restore characterId in case the new client hasn't hydrated
+    // it yet (acceptAuthenticatedSession does this, but defence-in-depth).
+    const isPlayerA = fight.playerA.walletAddress === walletAddress;
+    newClient.characterId = isPlayerA
+      ? fight.playerA.characterId
+      : fight.playerB.characterId;
+  }
+
+  // Block C1.b — only resume the turn timer once EVERY disconnected
+  // wallet has come back. If both players had dropped, the first
+  // reconnect just clears their forfeit; the timer waits for the
+  // second.
+  fight.disconnectedWallets.delete(walletAddress);
+  if (fight.disconnectedWallets.size === 0) {
+    const resume = resumeFightTimer(fight, () => handleTurnTimeout(fight));
+    if (resume.resumed) {
+      console.log(
+        `[Fight] ${walletAddress.slice(0, 10)} reconnected — resumed turn timer with ` +
+        `${Math.round(resume.remainingMs / 1000)}s (deadline ${new Date(resume.deadline).toISOString()})`,
+      );
+      broadcastToFight(fight, {
+        type: 'timer_resumed',
+        fightId: fight.id,
+        turn: fight.turn,
+        deadline: resume.deadline,
+        remainingMs: resume.remainingMs,
+      } as ServerMessage);
+    }
+  } else {
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} reconnected but ${fight.disconnectedWallets.size} ` +
+      `other player(s) still in grace — timer stays paused.`,
+    );
+  }
+
   console.log(
     `[Fight] ${walletAddress.slice(0, 10)} reconnected to fight ${fightId} within grace — forfeit cancelled.`,
   );
@@ -856,10 +963,13 @@ export function handlePlayerReconnect(walletAddress: string): void {
   sendToWallet(opponentWallet, {
     type: 'opponent_reconnected',
     fightId,
+    walletAddress,
   } as ServerMessage);
 
   // Push the current fight state to the rejoining client so its UI
-  // re-hydrates immediately (turn count, HP, log).
+  // re-hydrates immediately (turn count, HP, log, timer state). The
+  // payload includes turnPaused / turnDeadline / turnPausedRemainingMs
+  // so the rejoiner's countdown UI lines up with the server.
   sendToWallet(walletAddress, {
     type: 'fight_resumed',
     fight: buildFightStatePayload(fight),

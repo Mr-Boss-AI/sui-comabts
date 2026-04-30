@@ -131,29 +131,52 @@ export default function GameProvider({
             else if (hit.damage > 0) playSoundIf("hit");
           }
           break;
-        case "opponent_disconnected": {
-          // Block C1 (2026-04-30) — opponent's socket dropped mid-fight. The
-          // server is holding a forfeit timer for `graceMs`. Surface a non-
-          // sticky toast so the player knows why nothing is happening; if
-          // the opponent reconnects we'll get an `opponent_reconnected`
-          // message; otherwise the fight ends with their forfeit when the
-          // timer expires.
-          const seconds = Math.round(msg.graceMs / 1000);
+        case "opponent_disconnected":
+          // Block C1.a (hotfix) — drive the persistent banner. The
+          // toast-based version flashed and disappeared, leaving the
+          // connected player no signal that the game was waiting on a
+          // reconnect. The banner ticks down to expiresAt and clears
+          // only on opponent_reconnected / fight_resumed / fight_end.
           dispatch({
-            type: "SET_ERROR",
-            message: `Opponent disconnected. Waiting up to ${seconds}s for them to reconnect…`,
+            type: "SET_OPPONENT_DISCONNECT",
+            payload: {
+              fightId: msg.fightId,
+              walletAddress: msg.walletAddress,
+              expiresAt: msg.expiresAt,
+              graceMs: msg.graceMs,
+            },
           });
           break;
-        }
         case "opponent_reconnected":
-          // Clear the disconnect notice (no-op if it auto-faded already).
-          dispatch({ type: "SET_ERROR", message: null });
+          // Clear the banner. The TurnTimer will resume on the
+          // separate timer_resumed message.
+          dispatch({ type: "SET_OPPONENT_DISCONNECT", payload: null });
+          break;
+        case "timer_paused":
+          // Block C1.b — server paused the turn timer. Mirror into
+          // fight.turnPaused so the TurnTimer freezes its countdown.
+          dispatch({
+            type: "SET_TURN_PAUSE",
+            paused: true,
+            remainingMs: msg.remainingMs,
+            deadline: null,
+          });
+          break;
+        case "timer_resumed":
+          dispatch({
+            type: "SET_TURN_PAUSE",
+            paused: false,
+            remainingMs: msg.remainingMs,
+            deadline: msg.deadline,
+          });
           break;
         case "fight_resumed":
-          // We were the one who reconnected. Rehydrate the fight state so
-          // the UI lines back up with the server's view (turn count, HP,
-          // log).
+          // Block C1.c — we were the one who reconnected. The payload
+          // carries the live timer state (turnDeadline / turnPaused /
+          // turnPausedRemainingMs) and the last-saved equipment. Set
+          // the fight state and clear the banner if it was our drop.
           dispatch({ type: "SET_FIGHT", fight: msg.fight });
+          dispatch({ type: "SET_OPPONENT_DISCONNECT", payload: null });
           break;
         case "fight_end":
           dispatch({

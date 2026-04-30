@@ -7,6 +7,7 @@ import { ZoneSelector } from "./zone-selector";
 import { HpBar } from "./hp-bar";
 import { DamageLog } from "./damage-log";
 import { TurnTimer } from "./turn-timer";
+import { OpponentDisconnectedBanner } from "./opponent-disconnected-banner";
 import { FightResultModal } from "./fight-result-modal";
 import { ITEM_TYPES, RARITY_COLORS, type Zone, type EquipmentSlots, type Item } from "@/types/game";
 
@@ -155,11 +156,23 @@ export function FightArena() {
 
   return (
     <div className="flex flex-col max-w-5xl mx-auto w-full p-4 gap-3 flex-1">
+      {/* Block C1.a (hotfix) — persistent banner while a player is in
+       *   the reconnect-grace window. Renders only when
+       *   state.opponentDisconnect is non-null; cannot be dismissed
+       *   manually; ticks down to expiresAt. */}
+      {!isFinished && <OpponentDisconnectedBanner />}
+
       {/* Top: HP bars + timer */}
       <div className="flex items-start justify-between gap-4">
         <HpBar name={me.name} current={me.currentHp} max={me.maxHp} isLeft level={me.level} />
         <div className="flex flex-col items-center shrink-0">
-          {fight.turnDeadline && !isFinished && <TurnTimer deadline={fight.turnDeadline} />}
+          {fight.turnDeadline && !isFinished && (
+            <TurnTimer
+              deadline={fight.turnDeadline}
+              paused={fight.turnPaused === true}
+              pausedRemainingMs={fight.turnPausedRemainingMs ?? null}
+            />
+          )}
           <div className="text-xs text-zinc-600 mt-1 font-bold">TURN {fight.turn}</div>
           {fight.wagerAmount && fight.wagerAmount > 0 && (
             <div className="text-xs text-amber-400 mt-0.5">{fight.wagerAmount} SUI</div>
