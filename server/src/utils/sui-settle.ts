@@ -373,6 +373,64 @@ export async function setFightLockOnChain(
 // =============================================================================
 
 /**
+ * Decide whether a `create_character` WS message should be rejected because
+ * the wallet already has one or more Characters on chain. Threshold: > 1.
+ * Length === 1 is the just-minted Character for this attempt — the WS
+ * message arrives AFTER `signAndExecuteTransaction` resolves on the
+ * frontend, so the new event is on chain by the time we read it. Length > 1
+ * means a pre-existing Character was already on chain when the user clicked
+ * Create — exactly the auth-flicker scenario (STATUS_v5.md 2026-04-30).
+ *
+ * Pure function so `qa-character-mint.ts` can pin the contract.
+ */
+export function shouldRejectDuplicateMint(
+  onChainIds: readonly string[],
+): { reject: boolean; original?: string; count: number } {
+  if (onChainIds.length > 1) {
+    return { reject: true, original: onChainIds[0], count: onChainIds.length };
+  }
+  return { reject: false, count: onChainIds.length };
+}
+
+/**
+ * Return EVERY Character object id this wallet has minted on chain, ordered
+ * oldest-first. Used by `handleCreateCharacter` (layer 2 of the duplicate-mint
+ * fix from STATUS_v5.md 2026-04-30): if the wallet already has one or more
+ * pre-existing Characters AND a fresh `create_character` WS message arrives,
+ * that's a UI bypass — the frontend's auth-phase state machine should have
+ * routed the user through `restore_character` instead. Reject the WS message
+ * before the server records a duplicate.
+ *
+ * Returns `[]` on RPC failure so the caller can choose a fail-open or
+ * fail-closed policy (we fail open in handleCreateCharacter to avoid blocking
+ * legitimate first-time mints during a transient RPC blip — layer 1 closes
+ * the bug regardless).
+ */
+export async function findAllCharacterIdsForWallet(walletAddress: string): Promise<string[]> {
+  try {
+    // Ascending order so the oldest event lands first — handleCreateCharacter
+    // surfaces that id in its rejection message so the user can recover by
+    // refreshing instead of re-minting.
+    const events = await client.queryEvents({
+      query: { MoveEventType: `${PKG()}::character::CharacterCreated` },
+      limit: 100,
+      order: 'ascending',
+    });
+    const ids: string[] = [];
+    for (const event of events.data) {
+      const parsed = event.parsedJson as Record<string, unknown> | undefined;
+      if (parsed?.owner === walletAddress && typeof parsed.character_id === 'string') {
+        ids.push(String(parsed.character_id));
+      }
+    }
+    return ids;
+  } catch (err) {
+    console.error('[findAllCharacterIdsForWallet] RPC error:', (err as Error)?.message || err);
+    return [];
+  }
+}
+
+/**
  * Find a Character object ID owned by `walletAddress` via CharacterCreated events.
  */
 export async function findCharacterObjectId(walletAddress: string): Promise<string | null> {

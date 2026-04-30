@@ -17,6 +17,8 @@ import type {
 import type { OnChainCharacter } from "@/lib/sui-contracts";
 import type { FightHistoryEntry } from "@/types/ws-messages";
 import { EMPTY_EQUIPMENT, cloneEquipment } from "@/lib/loadout";
+import type { AuthPhase } from "@/lib/auth-phase";
+export type { AuthPhase } from "@/lib/auth-phase";
 
 export interface GameState {
   // Connection
@@ -77,6 +79,7 @@ export interface GameState {
 
   // UI
   currentArea: "character" | "arena" | "marketplace" | "tavern" | "hall_of_fame";
+  authPhase: AuthPhase;
   errorMessage: string | null;
   errorTimestamp: number | null;
   // Sticky errors bypass the 5s auto-fade and require user dismissal.
@@ -112,6 +115,7 @@ export const initialGameState: GameState = {
   pendingChallenge: null,
   pendingWagerAccept: null,
   currentArea: "character",
+  authPhase: "auth_pending",
   errorMessage: null,
   errorTimestamp: null,
   errorSticky: false,
@@ -149,6 +153,7 @@ export type GameAction =
   | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
   | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
   | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
+  | { type: "SET_AUTH_PHASE"; phase: AuthPhase }
   | { type: "BUMP_ONCHAIN_REFRESH" }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
   | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
@@ -156,6 +161,18 @@ export type GameAction =
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case "SET_CHARACTER": {
+      // Null means the character was deleted server-side (delete_character WS).
+      // Drop committed/pending equipment and roll the auth phase back so the
+      // create-character flow renders again on next mount.
+      if (!action.character) {
+        return {
+          ...state,
+          character: null,
+          committedEquipment: EMPTY_EQUIPMENT,
+          pendingEquipment: EMPTY_EQUIPMENT,
+          authPhase: "no_character",
+        };
+      }
       // Snapshot committed = chain-truth from server. Rebase pending when
       // either condition holds:
       //   1. Chain state changed (new slot set on chain) — user's local
@@ -310,6 +327,9 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         errorTimestamp: action.message ? Date.now() : null,
         errorSticky: !!(action.message && action.sticky),
       };
+    case "SET_AUTH_PHASE":
+      if (state.authPhase === action.phase) return state;
+      return { ...state, authPhase: action.phase };
     case "BUMP_ONCHAIN_REFRESH":
       return { ...state, onChainRefreshTrigger: state.onChainRefreshTrigger + 1 };
     default:

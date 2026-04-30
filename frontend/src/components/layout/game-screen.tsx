@@ -6,6 +6,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { Navbar } from "./navbar";
 import { TownNav } from "./town-hub";
 import { CharacterCreation } from "@/components/character/character-creation";
+import type { AuthPhase } from "@/hooks/useGameStore";
 import { CharacterProfile } from "@/components/character/character-profile";
 import { FightArena } from "@/components/fight/fight-arena";
 import { MatchmakingQueue } from "@/components/fight/matchmaking-queue";
@@ -22,6 +23,62 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorToast } from "@/components/ui/error-toast";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+
+/**
+ * Pre-character gating UI. Render only when `state.character` is null — once
+ * the server confirms a character, the game UI takes over. Closes layer 1 of
+ * the 2026-04-30 duplicate-mint bug: <CharacterCreation /> is never rendered
+ * as a fallback during the auth-flicker window; it shows up only after the
+ * chain check has DEFINITIVELY returned no character.
+ */
+function PreCharacterGate({
+  phase,
+  onRetry,
+}: {
+  phase: AuthPhase;
+  onRetry: () => void;
+}) {
+  if (phase === "no_character") {
+    return <CharacterCreation />;
+  }
+  if (phase === "chain_check_failed") {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 p-6 text-center gap-4">
+        <div className="text-3xl">⚠️</div>
+        <h2 className="text-xl font-bold text-zinc-100">Couldn&apos;t reach the Sui network</h2>
+        <p className="text-sm text-zinc-400 max-w-md">
+          We need to check whether this wallet already has a fighter on chain
+          before we can show you the create screen. The RPC node didn&apos;t
+          answer.
+        </p>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
+        </Button>
+        <p className="text-xs text-zinc-600 max-w-md">
+          If this keeps happening, your network blocks Sui&apos;s public
+          fullnode or the testnet RPC is degraded. Check
+          <code className="mx-1 px-1 py-0.5 bg-zinc-800 rounded text-zinc-400">
+            fullnode.testnet.sui.io
+          </code>
+          and refresh.
+        </p>
+      </div>
+    );
+  }
+  // "auth_pending" or "chain_check_pending" — both render the same neutral
+  // loading screen. Distinguishing them in copy doesn't help the user; what
+  // matters is that the create form is not rendered.
+  const message =
+    phase === "auth_pending"
+      ? "Signing you in…"
+      : "Checking the chain for your fighter…";
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 p-6 gap-4">
+      <div className="h-10 w-10 rounded-full border-2 border-zinc-700 border-t-emerald-400 animate-spin" />
+      <p className="text-sm text-zinc-400">{message}</p>
+    </div>
+  );
+}
 
 function HowToPlayButton() {
   const [open, setOpen] = useState(false);
@@ -191,8 +248,8 @@ function AreaContent() {
 
 export function GameScreen() {
   const account = useCurrentAccount();
-  const { state } = useGame();
-  const { character, fight, spectatingFight } = state;
+  const { state, dispatch } = useGame();
+  const { character, fight, spectatingFight, authPhase } = state;
 
   // Not connected
   if (!account) {
@@ -252,13 +309,21 @@ export function GameScreen() {
     );
   }
 
-  // No character yet
+  // No character yet — gate via the explicit auth-phase state machine.
+  // CharacterCreation is reachable only when authPhase === "no_character",
+  // i.e. the chain check has DEFINITIVELY confirmed the wallet has no
+  // existing Character NFT. See game-provider.tsx for the transitions.
   if (!character) {
     return (
       <div className="flex flex-col flex-1">
         <Navbar />
         <ErrorToast />
-        <CharacterCreation />
+        <PreCharacterGate
+          phase={authPhase}
+          onRetry={() =>
+            dispatch({ type: "SET_AUTH_PHASE", phase: "chain_check_pending" })
+          }
+        />
       </div>
     );
   }

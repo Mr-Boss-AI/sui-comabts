@@ -47,7 +47,11 @@ export default function GameProvider({
     ...initialGameState,
     socket,
   });
-  const onChainCheckDone = useRef(false);
+  // True while a fetchCharacterNFT scan is in flight. Prevents the chain-check
+  // effect from double-firing if React re-renders mid-scan (StrictMode in dev,
+  // or a state update from an unrelated message). Reset on auth flip and on
+  // explicit retry.
+  const chainCheckInFlight = useRef(false);
   const toastedFightIdRef = useRef<string | null>(null);
 
   // Keep socket ref in sync
@@ -268,37 +272,77 @@ export default function GameProvider({
     return socket.addHandler(handleMessage);
   }, [socket, handleMessage]);
 
-  // Auto-fetch character on auth
+  // Auto-fetch character on auth, and prime the auth-phase state machine.
   useEffect(() => {
     if (socket.authenticated) {
       socket.send({ type: "get_character" });
       socket.send({ type: "get_online_players" });
       socket.send({ type: "get_inventory" });
       socket.send({ type: "get_wager_lobby" });
+    } else {
+      // Wallet disconnected / token expired / fresh page load — roll the gate
+      // back to "auth_pending" so the LoadingScreen renders during the
+      // signed-challenge handshake instead of leaking the create-character
+      // form. Layer 1 of the duplicate-mint fix.
+      dispatch({ type: "SET_AUTH_PHASE", phase: "auth_pending" });
     }
-    // Reset on-chain check when auth state changes
-    onChainCheckDone.current = false;
+    chainCheckInFlight.current = false;
   }, [socket, socket.authenticated]);
 
-  // If server has no character after auth, check on-chain for existing Character NFT
+  // Auth-phase state machine
+  // ──────────────────────────────────────────────────────────────────────
+  // The previous build rendered <CharacterCreation /> as the default fallback
+  // any time `state.character` was null — including the 1.5s window between
+  // wallet connect and the on-chain `fetchCharacterNFT` resolving. A user who
+  // clicked Create during that window could mint a SECOND Character NFT on a
+  // wallet that already had one. Reproduced live 2026-04-30 (mr_boss minted
+  // "mee" on top of Mr_Boss_v5.1). See STATUS_v5.md.
+  //
+  // Layer 1 of the fix: explicit phases. The create-character form ONLY
+  // renders when `authPhase === "no_character"` — which we transition to only
+  // after a definitive null response from the chain. RPC failures land in
+  // "chain_check_failed" and surface a retry button instead of falling
+  // through to the form.
+  // ──────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!socket.authenticated || !walletAddress || !client || onChainCheckDone.current) return;
-    if (state.character) return; // Server already has the character
+    // Without auth or RPC infra we can't run the check. The auth-flip effect
+    // above is responsible for resetting to "auth_pending" in that branch,
+    // so we just bail.
+    if (!socket.authenticated || !walletAddress || !client) return;
 
-    // Small delay to let server respond with character_data first
-    const timer = setTimeout(async () => {
-      if (state.character || onChainCheckDone.current) return;
-      onChainCheckDone.current = true;
+    // Server already returned a character (auth_ok included it, or get_character
+    // landed first). The gate UI is bypassed entirely; phase is irrelevant.
+    if (state.character) return;
 
+    // Prime the chain check on the first authenticated tick. The actual scan
+    // runs in a separate branch below — this just records intent so the
+    // gate UI can render the LoadingScreen immediately.
+    if (state.authPhase === "auth_pending") {
+      dispatch({ type: "SET_AUTH_PHASE", phase: "chain_check_pending" });
+      return;
+    }
+
+    // Only the "chain_check_pending" phase performs the network scan. The
+    // explicit retry path also drops us back into this phase, so a single
+    // branch handles both first-load and post-failure retries.
+    if (state.authPhase !== "chain_check_pending") return;
+    if (chainCheckInFlight.current) return;
+
+    chainCheckInFlight.current = true;
+    let cancelled = false;
+    (async () => {
       try {
         const nft = await fetchCharacterNFT(client, walletAddress);
+        if (cancelled) return;
         if (nft) {
-          // Restore character on server from on-chain data.
-          // Use restore_character (not create_character) — on-chain stats may
-          // sum to more than 20 if the player leveled up and allocated points.
-          // Pass objectId so the server pins THIS NFT (not whichever
-          // CharacterCreated event happens to be newest for the wallet —
-          // important when a wallet has more than one Character).
+          // Existing on-chain character — sync server state via
+          // restore_character (NOT create_character). On-chain stats may sum
+          // > 20 from leveling, which would fail create_character validation.
+          // Passing objectId pins THIS NFT server-side so later admin calls
+          // (update_after_fight, set_fight_lock, DOF reads) target the
+          // correct Character even when the wallet has multiple. The reply
+          // arrives as `character_created` → SET_CHARACTER, which makes the
+          // gate UI step aside automatically.
           socket.send({
             type: "restore_character",
             name: nft.name,
@@ -314,14 +358,38 @@ export default function GameProvider({
             losses: nft.losses,
             rating: nft.rating,
           });
+          // Phase stays "chain_check_pending" — LoadingScreen continues
+          // showing until SET_CHARACTER lands. Worst case (server doesn't
+          // reply), the user can refresh; we never fall through to the
+          // create form here.
+        } else {
+          // Definitive null — chain has no Character for this wallet. NOW
+          // it's safe to render <CharacterCreation />.
+          dispatch({ type: "SET_AUTH_PHASE", phase: "no_character" });
         }
-      } catch {
-        // On-chain query failed — player can still create manually
+      } catch (err) {
+        if (cancelled) return;
+        console.warn("[ChainCheck] fetchCharacterNFT threw:", err);
+        // Chain RPC error. Show error+retry, NOT the create form. The
+        // alternative — silently dropping into "no_character" — is what
+        // caused the 2026-04-30 duplicate-mint incident.
+        dispatch({ type: "SET_AUTH_PHASE", phase: "chain_check_failed" });
+      } finally {
+        chainCheckInFlight.current = false;
       }
-    }, 1500);
+    })();
 
-    return () => clearTimeout(timer);
-  }, [socket, socket.authenticated, walletAddress, client, state.character]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    socket,
+    socket.authenticated,
+    walletAddress,
+    client,
+    state.character,
+    state.authPhase,
+  ]);
 
   // Fetch on-chain Character NFT (for unallocated_points, level, xp)
   // Re-runs when onChainRefreshTrigger bumps (after successful equip/unequip).

@@ -45,7 +45,7 @@ import {
   getChatClients,
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
-import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId } from '../utils/sui-settle';
+import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint } from '../utils/sui-settle';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
@@ -502,7 +502,7 @@ async function acceptAuthenticatedSession(
 
 // === Create Character ===
 
-function handleCreateCharacter(client: ConnectedClient, msg: ClientMessage): void {
+async function handleCreateCharacter(client: ConnectedClient, msg: ClientMessage): Promise<void> {
   const name = msg.name as string;
   const strength = Number(msg.strength) || 0;
   const dexterity = Number(msg.dexterity) || 0;
@@ -511,6 +511,39 @@ function handleCreateCharacter(client: ConnectedClient, msg: ClientMessage): voi
 
   if (!name) {
     sendError(client, 'Missing name or stats');
+    return;
+  }
+
+  // Layer 2 of the duplicate-mint fix (STATUS_v5.md 2026-04-30). A
+  // create_character WS message arriving for a wallet that already holds one
+  // or more on-chain Characters is a UI-bypass — the frontend's auth-phase
+  // state machine should have routed the user through `restore_character`
+  // instead. We reject before recording a duplicate server-side.
+  //
+  // Threshold: > 1. The just-minted CharacterCreated event for THIS create
+  // attempt is on chain by the time the WS message arrives (the frontend
+  // awaits signAndExecuteTransaction before sending), so length === 1 is the
+  // legitimate first mint. length > 1 means a pre-existing Character was
+  // already on chain when the user clicked Create — exactly the auth-flicker
+  // scenario that shipped the "mee" dupe to mr_boss's wallet on 2026-04-30.
+  //
+  // Fail-open on RPC error (helper returns []): layer 1 (frontend state
+  // machine) is the primary defense, so we don't want a transient RPC blip
+  // to block legitimate first-time mints.
+  const onChainIds = await findAllCharacterIdsForWallet(client.walletAddress!);
+  const decision = shouldRejectDuplicateMint(onChainIds);
+  if (decision.reject) {
+    console.warn(
+      `[CreateCharacter] Rejecting duplicate mint for ${client.walletAddress!.slice(0, 10)} ` +
+      `— chain has ${decision.count} Character(s): ` +
+      `${onChainIds.map((id) => id.slice(0, 12) + '…').join(', ')}`,
+    );
+    sendError(
+      client,
+      `Wallet already has a Character on chain (${decision.original!.slice(0, 14)}…). ` +
+      `This looks like a duplicate mint. Refresh the page — your existing ` +
+      `character will load.`,
+    );
     return;
   }
 
@@ -527,6 +560,15 @@ function handleCreateCharacter(client: ConnectedClient, msg: ClientMessage): voi
   }
 
   client.characterId = result.character.id;
+
+  // Pin the freshly-minted on-chain id NOW so subsequent admin calls
+  // (update_after_fight, set_fight_lock, DOF reads) target this NFT instead
+  // of running the descending event scan on every call. If onChainIds.length
+  // is 1 here, that single id is the just-minted Character.
+  if (onChainIds.length === 1) {
+    setOnChainObjectId(client.walletAddress!, onChainIds[0]);
+    result.character.onChainObjectId = onChainIds[0];
+  }
 
   send(client, {
     type: 'character_created',
