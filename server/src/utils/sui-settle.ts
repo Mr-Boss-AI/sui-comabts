@@ -40,6 +40,13 @@ const CLOCK = '0x6';
 // RETRY HELPER
 // =============================================================================
 
+/**
+ * 3-attempt exponential backoff (1s, 3s, 9s). Used for both transient RPC
+ * blips and on-chain retryable aborts (gas-coin lock, mempool pressure).
+ *
+ * Re-exported as `withChainRetry` so other modules (e.g. /api/admin/adopt-wager)
+ * can inherit the same retry contract without re-implementing it.
+ */
 async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const backoffMs = [1000, 3000, 9000];
   let lastErr: unknown = null;
@@ -59,6 +66,102 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   }
   console.error(`[${label}] retry exhausted after ${backoffMs.length} attempts`);
   throw lastErr;
+}
+
+export const withChainRetry = withRetry;
+
+// =============================================================================
+// TREASURY TRANSACTION QUEUE
+// =============================================================================
+//
+// All admin operations (settle_wager, admin_cancel_wager, update_after_fight,
+// set_fight_lock) sign with the same TREASURY keypair and therefore compete
+// for the same gas coin. With no serialization, two concurrent calls pick the
+// same gas coin off the wallet, the second tx hits EX_OBJECT_LOCKED on chain,
+// and `withRetry` may not save it because the coin stays locked until the
+// first tx finalises. Under tournament load (multiple fights ending within
+// seconds) this corrupts settlement.
+//
+// The fix is a FIFO queue with bounded concurrency. Default = 1 (true serial,
+// guaranteed lock-free). Set TREASURY_QUEUE_CONCURRENCY env to scale to N when
+// we eventually pre-split the treasury into a sponsor coin pool — but until
+// then, sequential is the safe default.
+//
+// Implementation: hand-rolled, no dependency. ~30 LOC. The queue holds tasks
+// (label + thunk + deferred resolve/reject). A drain loop pops + runs them
+// up to `concurrency` at a time. Observability: depth + last drain latency
+// exposed via `getTreasuryQueueStats()` for /health.
+
+interface TreasuryTask<T = unknown> {
+  label: string;
+  thunk: () => Promise<T>;
+  resolve: (value: T) => void;
+  reject: (err: unknown) => void;
+  enqueuedAt: number;
+}
+
+const TREASURY_QUEUE_CONCURRENCY = (() => {
+  const raw = Number(process.env.TREASURY_QUEUE_CONCURRENCY ?? '1');
+  if (!Number.isFinite(raw) || raw < 1) return 1;
+  return Math.floor(raw);
+})();
+
+const taskQueue: TreasuryTask[] = [];
+let inFlight = 0;
+let totalCompleted = 0;
+let lastDrainMs = 0;
+let maxObservedDepth = 0;
+
+function pumpTreasuryQueue(): void {
+  while (inFlight < TREASURY_QUEUE_CONCURRENCY && taskQueue.length > 0) {
+    const task = taskQueue.shift()!;
+    inFlight++;
+    const startedAt = Date.now();
+    void task.thunk()
+      .then((value) => task.resolve(value))
+      .catch((err) => task.reject(err))
+      .finally(() => {
+        lastDrainMs = Date.now() - startedAt;
+        totalCompleted++;
+        inFlight--;
+        pumpTreasuryQueue();
+      });
+  }
+}
+
+function enqueueTreasury<T>(label: string, thunk: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const task: TreasuryTask<T> = {
+      label,
+      thunk,
+      resolve,
+      reject,
+      enqueuedAt: Date.now(),
+    };
+    taskQueue.push(task as TreasuryTask);
+    if (taskQueue.length + inFlight > maxObservedDepth) {
+      maxObservedDepth = taskQueue.length + inFlight;
+    }
+    pumpTreasuryQueue();
+  });
+}
+
+export function getTreasuryQueueStats(): {
+  concurrency: number;
+  inFlight: number;
+  queued: number;
+  totalCompleted: number;
+  lastDrainMs: number;
+  maxObservedDepth: number;
+} {
+  return {
+    concurrency: TREASURY_QUEUE_CONCURRENCY,
+    inFlight,
+    queued: taskQueue.length,
+    totalCompleted,
+    lastDrainMs,
+    maxObservedDepth,
+  };
 }
 
 // =============================================================================
@@ -130,27 +233,33 @@ async function execAsTreasury(
   buildTx: (tx: Transaction) => void,
   gasBudget: number = 50_000_000,
 ): Promise<{ digest: string; events: SuiEvent[] }> {
-  return withRetry(label, async () => {
-    const tx = new Transaction();
-    buildTx(tx);
-    tx.setGasBudget(gasBudget);
+  // Route every admin tx through the FIFO queue so two callers never race
+  // for the same gas coin. `withRetry` runs INSIDE the queued slot — a
+  // failing attempt holds its slot until exhaustion, which is what we want
+  // (drain failures before the next tx, no overlapping retries).
+  return enqueueTreasury(label, () =>
+    withRetry(label, async () => {
+      const tx = new Transaction();
+      buildTx(tx);
+      tx.setGasBudget(gasBudget);
 
-    const result = await client.signAndExecuteTransaction({
-      signer: treasury(),
-      transaction: tx,
-      options: { showEffects: true, showEvents: true },
-    });
+      const result = await client.signAndExecuteTransaction({
+        signer: treasury(),
+        transaction: tx,
+        options: { showEffects: true, showEvents: true },
+      });
 
-    if (result.effects?.status?.status !== 'success') {
-      const err = result.effects?.status?.error || 'unknown failure';
-      throw new Error(`Tx ${result.digest} failed: ${err}`);
-    }
+      if (result.effects?.status?.status !== 'success') {
+        const err = result.effects?.status?.error || 'unknown failure';
+        throw new Error(`Tx ${result.digest} failed: ${err}`);
+      }
 
-    return {
-      digest: result.digest,
-      events: (result.events ?? []) as SuiEvent[],
-    };
-  });
+      return {
+        digest: result.digest,
+        events: (result.events ?? []) as SuiEvent[],
+      };
+    }),
+  );
 }
 
 // =============================================================================
@@ -302,4 +411,25 @@ export async function getWagerStatus(wagerMatchId: string): Promise<number | nul
     console.error('[getWagerStatus] RPC error:', (err as Error)?.message || err);
     return null;
   }
+}
+
+/**
+ * Generic SDK-backed object reader. Callers (e.g. /api/admin/adopt-wager)
+ * use this instead of raw fetch so they inherit retry-with-backoff and the
+ * SDK's connection pooling. Returns the full object response so the caller
+ * can read both fields and type.
+ */
+export async function readObjectWithRetry(
+  objectId: string,
+  options: { showContent?: boolean; showType?: boolean } = { showContent: true, showType: true },
+): Promise<{
+  fields: Record<string, unknown> | null;
+  type: string | null;
+}> {
+  return withRetry(`Object.read[${objectId.slice(0, 10)}…]`, async () => {
+    const obj = await client.getObject({ id: objectId, options });
+    const fields = (obj.data?.content as { fields?: Record<string, unknown> } | undefined)?.fields ?? null;
+    const type = (obj.data?.type as string | undefined) ?? null;
+    return { fields, type };
+  });
 }

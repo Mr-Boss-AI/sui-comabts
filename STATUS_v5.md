@@ -4,6 +4,81 @@
 > `feature/v5-redeploy` — every change committed locally; nothing pushed
 > to GitHub yet (per standing user rule).
 
+## 2026-04-30 Session — Gemini-audit verification + hardening
+
+Independent verification of a 5-concern audit Gemini Antigravity ran against
+the codebase (88/100). Every concern traced through actual files + on-chain
+state before any code changed; plan written to
+`~/.claude/plans/here-s-the-prompt-copy-paste-tender-parnas.md`.
+
+### Gemini's 5 concerns — verdicts
+
+| # | Concern | Verdict | Action |
+|---|---|---|---|
+| 1 | Gas coin contention in settlement | ✅ Right | **Fixed (Block 1.1)** — sequential treasury queue |
+| 2 | In-memory state not persisted | ✅ Right (partial) | **Fixed (Block 2)** — Supabase wager-in-flight rows + boot sweeper |
+| 3 | Raw `fetch()` bypassing SDK | ✅ Right | **Fixed (Block 3)** — both raw fetches → SDK clients |
+| 4 | Server can siphon wagers | ⚠️ Partial | **Documented + deferred to v5.1** — player-signed attestation in next package publish |
+| 5 | Missing `sui::display` | ❌ **Wrong** | No-op — verified live on chain via GraphQL: both Display objects exist with proper templates + Pinata image URLs |
+
+### Plus 4 issues Gemini missed — all fixed
+
+| Tag | Issue | Fix |
+|---|---|---|
+| Other-A | `findCharacterObjectId` returns wrong NFT for multi-character wallets | **Fixed (Block 1.2)** — `Character.onChainObjectId` pinned at restore + persisted in Supabase, hot paths read pinned id |
+| Other-B | Wager-lobby TOCTOU between `wagerLobby.get` / `await getWagerStatus` / `wagerLobby.delete` | **Fixed (Block 1.3)** — `processingWagerAccepts: Set<string>` single-flight guard |
+| Other-C | Marketplace cold-sync cursor doesn't advance on empty pages | **Fixed** (hitchhiked Block 2) — cursor advances on every page |
+| Other-D | Fight-lock release errors silently leave players locked ≤1h | **Fixed (Block 1.4)** — sticky toast + new `/api/admin/force-unlock` admin endpoint |
+
+### What landed (file by file)
+
+**Server**
+
+- `server/src/utils/sui-settle.ts` — sequential FIFO treasury queue (`enqueueTreasury` + `pumpTreasuryQueue`); concurrency knob via `TREASURY_QUEUE_CONCURRENCY` env (default 1); `getTreasuryQueueStats()` for `/health`; `withChainRetry` re-export; new `readObjectWithRetry` SDK helper.
+- `server/src/types.ts` — `Character.onChainObjectId?: string`.
+- `server/src/data/db.ts` — `DbCharacter.onchain_character_id`; new `wager_in_flight` table I/O (`dbInsertWagerInFlight` / `dbDeleteWagerInFlight` / `dbLoadStaleWagersInFlight`).
+- `server/src/data/characters.ts` — `restoreCharacterFromChain` accepts `onChainObjectId`, idempotently backfills legacy rows; new `setOnChainObjectId` for the auth path.
+- `server/src/data/orphan-wager-recovery.ts` (NEW) — `sweepOrphanActiveWagers` runs once at boot. Per-row chain-status check; ACTIVE → `admin_cancel_wager` 50/50; SETTLED → drop stale row; transient RPC fail → leave row for next sweep.
+- `server/src/ws/handler.ts` — `processingWagerAccepts` TOCTOU guard; `dbInsertWagerInFlight` BEFORE `wagerLobby.delete`; auth path resolves chain id once + pins it via `setOnChainObjectId`.
+- `server/src/ws/fight-room.ts` — `createFight` + `finishFight` IIFE prefer `character.onChainObjectId` over event scan; settlement success drops the wager-in-flight row; fight-lock release failure now sends a sticky toast.
+- `server/src/index.ts` — `/api/admin/force-unlock` (testnet-only); `/health` exposes `treasuryQueue` stats; raw fetch in `/api/admin/adopt-wager` → `readObjectWithRetry` (SDK + retry).
+- `server/src/data/marketplace.ts` — `coldSync` and `catchUpFromCursor` always advance cursor (even on empty pages).
+
+**Frontend**
+
+- `frontend/src/lib/sui-contracts.ts` — module-level lazy `SuiJsonRpcClient` for events queries; `fetchCharacterNFT` uses `rpc.queryEvents` instead of raw fetch.
+- `frontend/src/app/game-provider.tsx` — `restore_character` send now includes `objectId` (pins NFT server-side); `error` handler honors `sticky` flag.
+- `frontend/src/types/ws-messages.ts` — `restore_character` carries `objectId`; `error` accepts optional `sticky`.
+
+### Tests — 218 / 218 PASS
+
+| Gauntlet | Tests | Status |
+|---|---:|---|
+| `scripts/qa-xp.ts` | 143 | ✅ |
+| `scripts/qa-marketplace.ts` | 55 | ✅ |
+| `scripts/qa-treasury-queue.ts` (NEW) | 20 | ✅ |
+| **Total** | **218** | **All green** |
+
+`qa-treasury-queue.ts` covers: `getTreasuryQueueStats` shape, `withChainRetry` retry-then-succeed, `withChainRetry` exhaustion error preservation, FIFO ordering on a single-flight queue (5 tasks × 30ms — total ≥ 150ms), bounded concurrency (6 tasks × 30ms with concurrency=3 — total ~60ms), failure does not stall queue, env-knob-driven concurrency.
+
+### Block 4 (player-signed settlement) — DEFERRED to v5.1
+
+- Documented trust assumption: TREASURY key holder can pick the wrong winner from `{player_a, player_b}` in `settle_wager`. Worst case: 95% of in-flight wager pool to attacker if attacker is one of the two players.
+- Mitigation plan: new on-chain entry function `settle_wager_attested` that requires both players' `signPersonalMessage` signatures over a fight-outcome hash. Server still calls it (still owns AdminCap, still pays gas), but chain refuses to settle without both signatures.
+- Re-publish required → natural fit for v5 → v5.1 cycle. ~12 hours work including Move tests + frontend signing UX.
+
+### What's still UNTESTED — pick up here
+
+Same list as the prior session, plus orphan-wager recovery itself. Browser gauntlet items that need real wallet interaction:
+
+- ⏳ **Wager fight end-to-end.** Create wager → accept → fight → settle 95/5 on chain. Verify Suiscan: `WagerMatch` SETTLED, balance deltas match.
+- ⏳ **Stuck-item retrieve flow** (carries over from prior session). Mr_Boss has Steel Greatsword stuck in his kiosk from a pre-fix delist; the new "Unlisted in Kiosk" panel should let him retrieve.
+- ⏳ **Multi-fight XP gauntlet.** 5 ranked wins back-to-back as fresh L1, no Lv X / Y display drift.
+- ⏳ **Shield 3-block-zone mechanic.** Sx equips Wooden Buckler — fight UI must show 3 zones, validator accepts 3-zone adjacent line.
+- ⏳ **Treasury queue under wager load.** 3 wagers ending within seconds; check `/health` for queue-depth telemetry; confirm settlements drain serially without `EX_OBJECT_LOCKED` errors.
+- ⏳ **Orphan-wager sweeper.** Mid-fight `kill -9` the server with a real ACTIVE wager on chain and a Supabase row pre-written; restart; confirm boot log shows the row was swept and `admin_cancel_wager` paid both players 50/50.
+- ⏳ **Multi-character regression** (Block 1.2 verification). Mr_Boss has two Characters on chain; auth pins one and every later admin call hits THAT one — log out, re-auth, equip something, trigger `update_after_fight` and verify on Suiscan it's the pinned NFT, not the older sibling.
+
 ## 2026-04-29 Session — Recap
 
 The full set of fixes that landed this session, in the order they shipped:

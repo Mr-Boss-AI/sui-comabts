@@ -204,11 +204,16 @@ async function coldSync(): Promise<void> {
         txDigest: event.id?.txDigest ?? null,
       });
     }
+    // Always advance both cursors — empty pages otherwise leave them stuck
+    // at the previous boundary and re-process the same window forever.
+    // The lastEventCursor stays usable for live-stream gap-fill, while the
+    // local `cursor` is what drives the next queryEvents request.
     if (page.data.length > 0) {
       const last = page.data[page.data.length - 1];
       lastEventCursor = { txDigest: last.id.txDigest, eventSeq: last.id.eventSeq };
     }
-    if (!page.hasNextPage || !page.nextCursor) break;
+    if (!page.hasNextPage) break;
+    if (!page.nextCursor) break;
     cursor = page.nextCursor;
   }
 }
@@ -237,7 +242,8 @@ async function catchUpFromCursor(): Promise<void> {
       const last = page.data[page.data.length - 1];
       lastEventCursor = { txDigest: last.id.txDigest, eventSeq: last.id.eventSeq };
     }
-    if (!page.hasNextPage || !page.nextCursor) break;
+    if (!page.hasNextPage) break;
+    if (!page.nextCursor) break;
     cursor = page.nextCursor;
   }
 }

@@ -33,6 +33,10 @@ export type ClientMessage =
   | {
       type: "restore_character";
       name: string;
+      /** Chain-truth Character NFT object id. Server pins this and uses it
+       *  for every later admin call (no event scan) so multi-character
+       *  wallets always hit the right NFT. */
+      objectId: string;
       strength: number;
       dexterity: number;
       intuition: number;
@@ -87,7 +91,14 @@ export type ServerMessage =
       hasCharacter: boolean;
       character: Character | null;
     }
-  | { type: "error"; message: string }
+  | {
+      type: "error";
+      message: string;
+      /** When true, bypass auto-fade — surfaces for irreversible chain
+       *  events the player must see (failed fight-lock release, stuck
+       *  wager settlement). Defaults to false. */
+      sticky?: boolean;
+    }
   | { type: "character_data"; character: Character }
   | { type: "character_created"; character: Character }
   | { type: "points_allocated"; character: Character }

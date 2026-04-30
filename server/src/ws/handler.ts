@@ -18,6 +18,7 @@ import {
   restoreCharacterFromChain,
   getCharacterByWallet,
   restoreCharacterFromDb,
+  setOnChainObjectId,
   equipItem,
   unequipItem,
   addToInventory,
@@ -27,6 +28,7 @@ import {
 } from '../data/characters';
 import { getLeaderboard } from '../data/leaderboard';
 import { getMatchmaking } from '../game/matchmaking';
+import { dbInsertWagerInFlight } from '../data/db';
 import {
   submitTurnAction,
   addSpectator,
@@ -434,11 +436,22 @@ async function acceptAuthenticatedSession(
   if (character) {
     client.characterId = character.id;
 
+    // Resolve the chain Character NFT id ONCE and pin it on the server-side
+    // record. Prefer the previously-pinned id (Supabase-backed) over a fresh
+    // event scan — for wallets with multiple Characters the scan returns
+    // "newest" which may not be the one this session is using.
+    let charObjectId = character.onChainObjectId;
+    if (!charObjectId) {
+      charObjectId = (await findCharacterObjectId(walletAddress)) ?? undefined;
+      if (charObjectId) {
+        setOnChainObjectId(walletAddress, charObjectId);
+      }
+    }
+
     // Hydrate equipment from on-chain DOFs so server state matches the
     // player's "last saved" loadout before any fight resolution uses it.
     // Chain DOFs are authoritative for on-chain items; off-chain NPC items
     // are preserved in slots the chain doesn't touch.
-    const charObjectId = await findCharacterObjectId(walletAddress);
     if (charObjectId) {
       const dof = await fetchEquippedFromDOFs(charObjectId);
       if (dof) {
@@ -548,12 +561,20 @@ function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessage): vo
   const wins = Number(msg.wins) || 0;
   const losses = Number(msg.losses) || 0;
   const rating = Number(msg.rating) || 1000;
+  // Frontend's `fetchCharacterNFT` already resolved the canonical chain id —
+  // pin it now so every later admin call (update_after_fight, set_fight_lock,
+  // DOF reads) targets THIS NFT instead of "whichever CharacterCreated event
+  // happens to be newest" (the legacy `findCharacterObjectId(wallet)` answer).
+  const onChainObjectId = typeof msg.objectId === 'string' && msg.objectId.startsWith('0x')
+    ? (msg.objectId as string)
+    : undefined;
 
   const result = restoreCharacterFromChain(
     client.walletAddress,
     name,
     { strength, dexterity, intuition, endurance },
     level, xp, unallocatedPoints, wins, losses, rating,
+    onChainObjectId,
   );
 
   if (!result.character) {
@@ -1083,6 +1104,17 @@ function handleCancelWagerLobby(client: ConnectedClient, msg: ClientMessage): vo
   console.log(`[Wager Lobby] ${entry.creatorName} cancelled wager (${wagerMatchId})`);
 }
 
+/**
+ * Wagers currently mid-acceptance. The handler awaits a chain RPC
+ * (`getWagerStatus`) between checking the lobby and deleting from it, so
+ * two concurrent `wager_accepted` messages for the SAME wagerMatchId can
+ * both pass the existence check and both proceed to `createFight` —
+ * spawning two ghost fights for one on-chain wager. Adding the id to this
+ * set on entry and removing on exit makes the handler single-flight per
+ * wager, which is what we want.
+ */
+const processingWagerAccepts = new Set<string>();
+
 async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage): Promise<void> {
   const wagerMatchId = msg.wagerMatchId as string;
   if (!wagerMatchId) {
@@ -1090,70 +1122,94 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     return;
   }
 
-  const entry = wagerLobby.get(wagerMatchId);
-  if (!entry) {
-    sendError(client, 'Wager not found in lobby (may have been cancelled or accepted by someone else)');
+  if (processingWagerAccepts.has(wagerMatchId)) {
+    sendError(client, 'This wager is already being accepted. Try again in a moment.');
     return;
   }
-
-  if (client.walletAddress === entry.creatorWallet) {
-    sendError(client, 'You cannot accept your own wager');
-    return;
-  }
-
-  // Prevent accepting while in a fight
-  if (client.currentFightId) {
-    sendError(client, 'Cannot accept a wager while in a fight');
-    return;
-  }
-
-  // Prevent accepting if player has an active open wager in the lobby
-  for (const lobbyEntry of wagerLobby.values()) {
-    if (lobbyEntry.creatorWallet === client.walletAddress) {
-      sendError(client, 'You have an open wager. Cancel it first before accepting another.');
+  processingWagerAccepts.add(wagerMatchId);
+  try {
+    const entry = wagerLobby.get(wagerMatchId);
+    if (!entry) {
+      sendError(client, 'Wager not found in lobby (may have been cancelled or accepted by someone else)');
       return;
     }
-  }
 
-  // Verify on-chain that the wager is now ACTIVE (status=1)
-  const status = await getWagerStatus(wagerMatchId);
-  if (status !== 1) {
-    sendError(client, `Wager not active on-chain (status: ${status}). Did the accept_wager transaction succeed?`);
-    return;
-  }
-
-  // Remove from lobby
-  wagerLobby.delete(wagerMatchId);
-  broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
-
-  // Get characters and start the fight
-  const charA = getCharacterByWallet(entry.creatorWallet);
-  const charB = getCharacterByWallet(client.walletAddress!);
-
-  if (!charA || !charB) {
-    sendError(client, 'Character not found');
-    return;
-  }
-
-  if (!client.characterId) {
-    sendError(client, 'Create a character first');
-    return;
-  }
-
-  console.log(`[Wager Lobby] ${charB.name} accepted ${charA.name}'s wager for ${entry.wagerAmount} SUI`);
-
-  const fight = await createFight(charA, charB, 'wager', entry.wagerAmount);
-  fight.wagerMatchId = wagerMatchId;
-
-  // Auto-cancel any remaining open wagers for either player (safety net for race conditions)
-  for (const [id, lobbyEntry] of wagerLobby) {
-    if (lobbyEntry.creatorWallet === entry.creatorWallet || lobbyEntry.creatorWallet === client.walletAddress) {
-      wagerLobby.delete(id);
-      broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
-      adminCancelWagerOnChain(id).catch((err) => {
-        console.error('[Wager Lobby] Auto-cancel on fight start failed:', err.message);
-      });
+    if (client.walletAddress === entry.creatorWallet) {
+      sendError(client, 'You cannot accept your own wager');
+      return;
     }
+
+    // Prevent accepting while in a fight
+    if (client.currentFightId) {
+      sendError(client, 'Cannot accept a wager while in a fight');
+      return;
+    }
+
+    // Prevent accepting if player has an active open wager in the lobby
+    for (const lobbyEntry of wagerLobby.values()) {
+      if (lobbyEntry.creatorWallet === client.walletAddress) {
+        sendError(client, 'You have an open wager. Cancel it first before accepting another.');
+        return;
+      }
+    }
+
+    // Verify on-chain that the wager is now ACTIVE (status=1)
+    const status = await getWagerStatus(wagerMatchId);
+    if (status !== 1) {
+      sendError(client, `Wager not active on-chain (status: ${status}). Did the accept_wager transaction succeed?`);
+      return;
+    }
+
+    // Persist a recovery row BEFORE we drop the wager from the in-memory
+    // lobby. If the server crashes between this point and `settle_wager`
+    // landing, the boot sweeper will see the row, confirm chain status =
+    // ACTIVE, and call `admin_cancel_wager` for a 50/50 refund. Fire-and-
+    // forget — a Supabase write blip should not block the fight; the
+    // chain's 10-min `cancel_expired_wager` is the fallback safety net.
+    dbInsertWagerInFlight({
+      wager_match_id: wagerMatchId,
+      player_a: entry.creatorWallet,
+      player_b: client.walletAddress!,
+      accepted_at_ms: Date.now(),
+    }).catch((err) => {
+      console.error('[Wager] dbInsertWagerInFlight failed:', err?.message || err);
+    });
+
+    // Remove from lobby
+    wagerLobby.delete(wagerMatchId);
+    broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
+
+    // Get characters and start the fight
+    const charA = getCharacterByWallet(entry.creatorWallet);
+    const charB = getCharacterByWallet(client.walletAddress!);
+
+    if (!charA || !charB) {
+      sendError(client, 'Character not found');
+      return;
+    }
+
+    if (!client.characterId) {
+      sendError(client, 'Create a character first');
+      return;
+    }
+
+    console.log(`[Wager Lobby] ${charB.name} accepted ${charA.name}'s wager for ${entry.wagerAmount} SUI`);
+
+    const fight = await createFight(charA, charB, 'wager', entry.wagerAmount);
+    fight.wagerMatchId = wagerMatchId;
+
+    // Auto-cancel any remaining open wagers for either player (safety net for race conditions)
+    for (const [id, lobbyEntry] of wagerLobby) {
+      if (lobbyEntry.creatorWallet === entry.creatorWallet || lobbyEntry.creatorWallet === client.walletAddress) {
+        wagerLobby.delete(id);
+        broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
+        adminCancelWagerOnChain(id).catch((err) => {
+          console.error('[Wager Lobby] Auto-cancel on fight start failed:', err.message);
+        });
+      }
+    }
+  } finally {
+    processingWagerAccepts.delete(wagerMatchId);
   }
 }
 

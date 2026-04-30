@@ -20,7 +20,7 @@ import {
   updateCharacter,
   persistItems,
 } from '../data/characters';
-import { dbSaveFight } from '../data/db';
+import { dbSaveFight, dbDeleteWagerInFlight } from '../data/db';
 import type {
   Character,
   ConnectedClient,
@@ -128,9 +128,14 @@ export async function createFight(
   // any save the player did between auth and this moment. Done in parallel
   // with the character lookup so fight-start latency stays in the same
   // budget as the RPC we already pay for fight-lock acquisition.
+  // Prefer the pinned `onChainObjectId` on the server-side Character record
+  // — set once at auth/restore time. Multi-character wallets (legacy / migration)
+  // would otherwise hit the wrong NFT via `findCharacterObjectId`'s newest-first
+  // event scan. Fall back to the scan only if pinning hasn't happened yet
+  // (legacy rows pre-onChainObjectId).
   const [aObjId, bObjId] = await Promise.all([
-    findCharacterObjectId(characterA.walletAddress),
-    findCharacterObjectId(characterB.walletAddress),
+    characterA.onChainObjectId ?? findCharacterObjectId(characterA.walletAddress),
+    characterB.onChainObjectId ?? findCharacterObjectId(characterB.walletAddress),
   ]);
   const [dofA, dofB] = await Promise.all([
     aObjId ? fetchEquippedFromDOFs(aObjId) : Promise.resolve(null),
@@ -428,16 +433,24 @@ function finishFight(
 
     // Wager handling — settle on-chain if wagerMatchId exists, else fall back to gold
     if (fight.type === 'wager' && fight.wagerMatchId && winnerWallet) {
-      settleWagerOnChain(fight.wagerMatchId, winnerWallet)
+      const wagerMatchId = fight.wagerMatchId;
+      settleWagerOnChain(wagerMatchId, winnerWallet)
         .then(({ digest }) => {
           console.log(`[Wager] Settled on-chain: ${digest}`);
-          sendToWallet(fight.playerA.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId: fight.wagerMatchId });
-          sendToWallet(fight.playerB.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId: fight.wagerMatchId });
+          // Settlement landed — drop the in-flight recovery row so the boot
+          // sweeper doesn't accidentally re-cancel a settled wager on next
+          // restart. (Idempotent: admin_cancel_wager would abort with
+          // EMatchAlreadySettled anyway, but cleaning up keeps the table
+          // honest.)
+          dbDeleteWagerInFlight(wagerMatchId).catch(() => {});
+          sendToWallet(fight.playerA.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId });
+          sendToWallet(fight.playerB.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId });
         })
         .catch((err) => {
           console.error('[Wager] On-chain settlement failed:', err);
-          sendToWallet(fight.playerA.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Contact support.' });
-          sendToWallet(fight.playerB.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Contact support.' });
+          // Leave the in-flight row in place — boot sweeper handles it.
+          sendToWallet(fight.playerA.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Refund expected within 10 minutes.', sticky: true });
+          sendToWallet(fight.playerB.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Refund expected within 10 minutes.', sticky: true });
         });
     } else if (fight.type === 'wager' && fight.wagerAmount) {
       // Fallback: gold-based wager (no on-chain escrow)
@@ -503,9 +516,14 @@ function finishFight(
     const winnerCharRef = winnerChar;
     const loserCharRef = loserChar;
     void (async () => {
+      // Pinned id wins; falls back to event scan only for legacy records.
       const [winnerObjId, loserObjId] = await Promise.all([
-        findCharacterObjectId(winnerCharRef.walletAddress).catch(() => null),
-        findCharacterObjectId(loserCharRef.walletAddress).catch(() => null),
+        winnerCharRef.onChainObjectId
+          ? Promise.resolve(winnerCharRef.onChainObjectId)
+          : findCharacterObjectId(winnerCharRef.walletAddress).catch(() => null),
+        loserCharRef.onChainObjectId
+          ? Promise.resolve(loserCharRef.onChainObjectId)
+          : findCharacterObjectId(loserCharRef.walletAddress).catch(() => null),
       ]);
 
       if (winnerObjId) {
@@ -557,14 +575,33 @@ function finishFight(
         }
       }
 
-      // Release fight-locks (fire-and-forget — auto-expiry from createFight is the safety net).
+      // Release fight-locks. Routes through the treasury queue (sequential)
+      // so the release tx never races a concurrent settlement for the same
+      // gas coin. On exhausted retry we surface a sticky toast so the
+      // player knows their lock is auto-expiring; the chain's MAX_LOCK_MS
+      // = 1 hour ceiling is the ultimate safety net, and the testnet-only
+      // `/api/admin/force-unlock` endpoint can clear it sooner.
       if (winnerObjId) {
-        setFightLockOnChain(winnerObjId, 0).catch((err) =>
-          console.error('[FightLock] Release (winner) failed:', err?.message || err));
+        setFightLockOnChain(winnerObjId, 0).catch((err) => {
+          const detail = err?.message || String(err);
+          console.error('[FightLock] Release (winner) failed:', detail);
+          sendToWallet(winnerCharRef.walletAddress, {
+            type: 'error',
+            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
+            sticky: true,
+          });
+        });
       }
       if (loserObjId) {
-        setFightLockOnChain(loserObjId, 0).catch((err) =>
-          console.error('[FightLock] Release (loser) failed:', err?.message || err));
+        setFightLockOnChain(loserObjId, 0).catch((err) => {
+          const detail = err?.message || String(err);
+          console.error('[FightLock] Release (loser) failed:', detail);
+          sendToWallet(loserCharRef.walletAddress, {
+            type: 'error',
+            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
+            sticky: true,
+          });
+        });
       }
     })();
   } else if (draw) {

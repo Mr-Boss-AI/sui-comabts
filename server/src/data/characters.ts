@@ -63,6 +63,7 @@ export async function restoreCharacterFromDb(walletAddress: string): Promise<Cha
     losses: row.losses,
     rating: row.rating,
     unallocatedPoints: row.unallocated_points || 0,
+    onChainObjectId: row.onchain_character_id ?? undefined,
     fightHistory: [],
     createdAt: new Date(row.created_at).getTime(),
   };
@@ -179,11 +180,19 @@ export function restoreCharacterFromChain(
   wins: number,
   losses: number,
   rating: number,
+  onChainObjectId?: string,
 ): { character: Character | null; error?: string } {
-  // Idempotent: return existing server record if already registered
+  // Idempotent: return existing server record if already registered. If the
+  // existing record is missing the on-chain id (legacy row) and the caller
+  // supplied one, backfill it so subsequent admin calls hit the right NFT.
   if (walletToCharacter.has(walletAddress)) {
     const existing = characters.get(walletToCharacter.get(walletAddress)!);
-    return existing ? { character: existing } : { character: null, error: 'Stale wallet index' };
+    if (!existing) return { character: null, error: 'Stale wallet index' };
+    if (!existing.onChainObjectId && onChainObjectId) {
+      existing.onChainObjectId = onChainObjectId;
+      dbSaveCharacter(existing).catch(() => {});
+    }
+    return { character: existing };
   }
 
   const emptyEquipment: EquipmentSlots = {
@@ -206,6 +215,7 @@ export function restoreCharacterFromChain(
     losses,
     rating,
     unallocatedPoints,
+    onChainObjectId,
     fightHistory: [],
     createdAt: Date.now(),
   };
@@ -216,8 +226,20 @@ export function restoreCharacterFromChain(
 
   dbSaveCharacter(character).catch(() => {});
 
-  console.log(`[Character] Restored from chain: "${character.name}" lvl ${level} for ${walletAddress.slice(0, 10)}...`);
+  console.log(`[Character] Restored from chain: "${character.name}" lvl ${level} for ${walletAddress.slice(0, 10)}... (onChain ${onChainObjectId ? onChainObjectId.slice(0, 10) + '...' : 'unknown'})`);
   return { character };
+}
+
+/** Pin or update the on-chain object id for an existing server-side
+ *  character. Used by the auth handler when DOF hydration discovers the
+ *  canonical NFT id but the in-memory record was created before this
+ *  field existed. Idempotent — no-op when the id is already correct. */
+export function setOnChainObjectId(walletAddress: string, onChainObjectId: string): void {
+  const character = getCharacterByWallet(walletAddress);
+  if (!character) return;
+  if (character.onChainObjectId === onChainObjectId) return;
+  character.onChainObjectId = onChainObjectId;
+  dbSaveCharacter(character).catch(() => {});
 }
 
 export function deleteCharacter(walletAddress: string): boolean {

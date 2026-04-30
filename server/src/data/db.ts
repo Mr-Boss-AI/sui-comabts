@@ -24,6 +24,12 @@ export interface DbCharacter {
   wins: number;
   losses: number;
   unallocated_points?: number;
+  /**
+   * The on-chain Character NFT object ID this server-side record was hydrated
+   * from. Pinned at create/restore time — never re-derived from a chain
+   * event scan. Nullable for legacy rows; gets backfilled on next login.
+   */
+  onchain_character_id?: string | null;
   created_at: string;
 }
 
@@ -46,6 +52,7 @@ export async function dbSaveCharacter(char: Character): Promise<void> {
     wins: char.wins,
     losses: char.losses,
     unallocated_points: char.unallocatedPoints,
+    onchain_character_id: char.onChainObjectId ?? null,
     created_at: new Date(char.createdAt).toISOString(),
   };
 
@@ -161,6 +168,86 @@ export async function dbLoadFightHistory(walletAddress: string, limit = 50): Pro
   }
 
   return (data as DbFightHistory[]) || [];
+}
+
+// ─── Orphan ACTIVE wager recovery ───────────────────────────────────
+//
+// When a fight is mid-flight (player B has accepted on chain, server has
+// the FightState in memory, but settlement hasn't fired yet), a server
+// crash leaves the on-chain WagerMatch in STATUS_ACTIVE with no server
+// memory of it. The escrow auto-expires via `cancel_expired_wager`
+// after 10 minutes — but that's anyone-callable and slow to discover.
+//
+// We persist a tiny row per ACTIVE wager (insert before
+// `wagerLobby.delete`, drop after settlement) so that on the next boot
+// we can scan for stuck rows and call `admin_cancel_wager` (50/50 split)
+// to make players whole within seconds, not minutes.
+//
+// The schema is:
+//   wager_in_flight (
+//     wager_match_id text primary key,
+//     player_a       text not null,
+//     player_b       text not null,
+//     accepted_at_ms bigint not null,
+//     fight_id       text                  -- nullable, set when fight starts
+//   )
+
+export interface DbWagerInFlight {
+  wager_match_id: string;
+  player_a: string;
+  player_b: string;
+  accepted_at_ms: number;
+  fight_id?: string | null;
+}
+
+/**
+ * Record an in-flight ACTIVE wager. Idempotent (upsert). Should be called
+ * BEFORE we delete the wager from the in-memory lobby, so a crash between
+ * the two is recoverable.
+ */
+export async function dbInsertWagerInFlight(row: DbWagerInFlight): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+  const { error } = await sb
+    .from('wager_in_flight')
+    .upsert(row, { onConflict: 'wager_match_id' });
+  if (error) {
+    console.error('[DB] Failed to insert wager_in_flight:', error.message);
+  }
+}
+
+/** Drop the in-flight row when the wager settles cleanly. */
+export async function dbDeleteWagerInFlight(wagerMatchId: string): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+  const { error } = await sb
+    .from('wager_in_flight')
+    .delete()
+    .eq('wager_match_id', wagerMatchId);
+  if (error) {
+    console.error('[DB] Failed to delete wager_in_flight:', error.message);
+  }
+}
+
+/**
+ * Load every in-flight wager row that's older than `minAgeMs`. Used at
+ * boot by the orphan-wager sweeper. Restricting to old rows avoids racing
+ * a clean-restart scenario where the in-memory FightState legitimately
+ * exists for a wager that just had its row written seconds ago.
+ */
+export async function dbLoadStaleWagersInFlight(minAgeMs: number): Promise<DbWagerInFlight[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const cutoff = Date.now() - minAgeMs;
+  const { data, error } = await sb
+    .from('wager_in_flight')
+    .select('*')
+    .lt('accepted_at_ms', cutoff);
+  if (error) {
+    console.error('[DB] Failed to load wager_in_flight:', error.message);
+    return [];
+  }
+  return (data as DbWagerInFlight[]) || [];
 }
 
 // ─── Items inventory ────────────────────────────────────────────────

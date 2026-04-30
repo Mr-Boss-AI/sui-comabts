@@ -1,6 +1,27 @@
 import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
 import type { Item } from "@/types/game";
+
+// =============================================================================
+// JSON-RPC CLIENT (events-only)
+//
+// The dapp-kit `useCurrentClient()` returns a SuiGrpcClient, but Mysten's
+// gRPC API doesn't expose a `queryEvents` equivalent — that's JSON-RPC only.
+// We instantiate one lazy JsonRpc client per network specifically for event
+// reads (`fetchCharacterNFT` below). The SDK handles retries / connection
+// pooling internally; no more raw fetch with bare try/catch.
+// =============================================================================
+let jsonRpcClientCache: SuiJsonRpcClient | null = null;
+function getJsonRpcClient(): SuiJsonRpcClient {
+  if (jsonRpcClientCache) return jsonRpcClientCache;
+  const network = (process.env.NEXT_PUBLIC_SUI_NETWORK ?? "testnet") as "mainnet" | "testnet";
+  jsonRpcClientCache = new SuiJsonRpcClient({
+    url: getJsonRpcFullnodeUrl(network),
+    network,
+  });
+  return jsonRpcClientCache;
+}
 
 // =============================================================================
 // PACKAGE / OBJECT IDS
@@ -84,37 +105,31 @@ export interface OnChainCharacter {
 
 /**
  * Find a player's Character NFT via the CharacterCreated event log, then
- * fetch the shared object directly.
+ * fetch the shared object directly. Events go through the JSON-RPC SDK
+ * (built-in retry, connection pooling, typed response). The Object fetch
+ * uses the gRPC client passed in — already typed and pooled.
+ *
+ * Returns the MOST RECENT Character NFT for the wallet (events are queried
+ * descending). Wallets with multiple Characters from migration / test
+ * pollution will pin to the newest one for THIS hydration; the server
+ * persists the resulting `objectId` so subsequent admin calls don't
+ * re-derive it.
  */
 export async function fetchCharacterNFT(
   client: SuiGrpcClient,
   owner: string,
 ): Promise<OnChainCharacter | null> {
-  const rpcUrl =
-    (process.env.NEXT_PUBLIC_SUI_NETWORK ?? "testnet") === "mainnet"
-      ? "https://fullnode.mainnet.sui.io:443"
-      : "https://fullnode.testnet.sui.io:443";
   try {
-    const evRes = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "suix_queryEvents",
-        params: [
-          { MoveEventType: `${PACKAGE_ID}::character::CharacterCreated` },
-          null, 50, true,
-        ],
-      }),
+    const rpc = getJsonRpcClient();
+    const events = await rpc.queryEvents({
+      query: { MoveEventType: `${PACKAGE_ID}::character::CharacterCreated` },
+      limit: 50,
+      order: "descending",
     });
-    const evJson = (await evRes.json()) as Record<string, unknown>;
-    const evResult = evJson.result as { data?: Array<{ parsedJson?: Record<string, unknown> }> } | undefined;
-    const events = evResult?.data || [];
 
     let characterId: string | null = null;
-    for (const event of events) {
-      const parsed = event.parsedJson;
+    for (const event of events.data) {
+      const parsed = event.parsedJson as Record<string, unknown> | undefined;
       if (parsed?.owner === owner) {
         characterId = String(parsed.character_id);
         break;
@@ -146,7 +161,8 @@ export async function fetchCharacterNFT(
       rating: Number(json.rating ?? 1000),
       loadoutVersion: Number(json.loadout_version ?? 0),
     };
-  } catch {
+  } catch (err) {
+    console.warn("[fetchCharacterNFT] failed:", err);
     return null;
   }
 }

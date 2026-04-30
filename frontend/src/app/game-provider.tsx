@@ -251,7 +251,13 @@ export default function GameProvider({
           dispatch({ type: "SET_PENDING_CHALLENGE", challenge: null });
           break;
         case "error":
-          dispatch({ type: "SET_ERROR", message: msg.message });
+          dispatch({
+            type: "SET_ERROR",
+            message: msg.message,
+            // Sticky errors bypass the auto-fade — used for irreversible chain
+            // events the player must see (failed fight-lock release, stuck wager).
+            sticky: msg.sticky === true,
+          });
           break;
       }
     },
@@ -290,9 +296,13 @@ export default function GameProvider({
           // Restore character on server from on-chain data.
           // Use restore_character (not create_character) — on-chain stats may
           // sum to more than 20 if the player leveled up and allocated points.
+          // Pass objectId so the server pins THIS NFT (not whichever
+          // CharacterCreated event happens to be newest for the wallet —
+          // important when a wallet has more than one Character).
           socket.send({
             type: "restore_character",
             name: nft.name,
+            objectId: nft.objectId,
             strength: nft.strength,
             dexterity: nft.dexterity,
             intuition: nft.intuition,

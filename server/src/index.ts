@@ -11,9 +11,10 @@ import { getLeaderboard } from './data/leaderboard';
 import { getSupabase } from './data/supabase';
 import { getFight } from './ws/fight-room';
 import { applyXp, xpForNextLevel } from './game/combat';
-import { findCharacterObjectId, updateCharacterOnChain } from './utils/sui-settle';
+import { findCharacterObjectId, updateCharacterOnChain, setFightLockOnChain, getTreasuryQueueStats, readObjectWithRetry } from './utils/sui-settle';
 import { getConnectedClients, adoptWagerIntoLobby, broadcastToAuthenticated } from './ws/handler';
 import { startMarketplaceIndex, shutdownMarketplaceIndex, subscribeMarketplace, listingToWire } from './data/marketplace';
+import { sweepOrphanActiveWagers } from './data/orphan-wager-recovery';
 import type { QueueEntry, WagerLobbyEntry } from './types';
 
 // === Express App ===
@@ -28,6 +29,7 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     uptime: process.uptime(),
     onlinePlayers: getOnlineCount(),
+    treasuryQueue: getTreasuryQueueStats(),
     timestamp: Date.now(),
   });
 });
@@ -130,6 +132,48 @@ app.post('/api/admin/grant-xp', async (req, res) => {
   });
 });
 
+// --- Admin: force-unlock a Character (testnet-only) ---
+// POST /api/admin/force-unlock { wallet?: "0x...", characterId?: "0x..." }
+//
+// Clears any active fight-lock DOF on the Character NFT. Reaches for the
+// pinned `onChainObjectId` first; falls back to the event scan for legacy
+// rows. Used when the post-fight `setFightLockOnChain(0)` failed and the
+// player would otherwise have to wait up to 1 hour for the chain
+// `MAX_LOCK_MS` auto-expiry.
+app.post('/api/admin/force-unlock', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wallet = String(req.body?.wallet ?? '').trim();
+  const characterIdParam = String(req.body?.characterId ?? '').trim();
+  if ((!wallet || !wallet.startsWith('0x')) && !characterIdParam.startsWith('0x')) {
+    res.status(400).json({ error: 'Body must be { wallet?: "0x..." } or { characterId?: "0x..." }' });
+    return;
+  }
+
+  let characterId = characterIdParam;
+  if (!characterId) {
+    const character = getCharacterByWallet(wallet)
+      ?? (await restoreCharacterFromDb(wallet)) ?? undefined;
+    characterId = character?.onChainObjectId
+      ?? (await findCharacterObjectId(wallet)) ?? '';
+    if (!characterId) {
+      res.status(404).json({ error: 'No on-chain Character resolved for that wallet' });
+      return;
+    }
+  }
+
+  try {
+    const { digest } = await setFightLockOnChain(characterId, 0);
+    console.log(`[Admin] Force-unlock ${characterId.slice(0, 10)}... tx=${digest}`);
+    res.json({ ok: true, characterId, digest });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err), characterId });
+  }
+});
+
 // --- Admin: adopt orphaned wager into lobby (testnet-only) ---
 // POST /api/admin/adopt-wager  { wagerMatchId: "0x..." }
 //
@@ -150,24 +194,13 @@ app.post('/api/admin/adopt-wager', async (req, res) => {
     return;
   }
 
-  // Fetch WagerMatch from chain
-  const rpcUrl = CONFIG.SUI_NETWORK === 'mainnet'
-    ? 'https://fullnode.mainnet.sui.io:443'
-    : 'https://fullnode.testnet.sui.io:443';
-
-  let fields: Record<string, any> | undefined;
+  // Fetch WagerMatch from chain via the shared SDK client (inherits retry +
+  // connection pooling from `sui-settle::readObjectWithRetry`).
+  let fields: Record<string, unknown> | null;
   try {
-    const resp = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: 1, method: 'sui_getObject',
-        params: [wagerMatchId, { showContent: true, showType: true }],
-      }),
-    });
-    const json = await resp.json() as any;
-    fields = json?.result?.data?.content?.fields;
-    const objType = json?.result?.data?.type as string | undefined;
+    const result = await readObjectWithRetry(wagerMatchId, { showContent: true, showType: true });
+    fields = result.fields;
+    const objType = result.type;
     if (!fields || !objType?.includes('::arena::WagerMatch')) {
       res.status(404).json({ error: 'Object not found or not a WagerMatch', type: objType });
       return;
@@ -306,6 +339,17 @@ initMatchmaking(onMatchFound);
 // === Initialize Supabase ===
 
 getSupabase();
+
+// === Crash recovery — orphan ACTIVE wager sweeper ===
+//
+// On boot, scan Supabase for in-flight wager rows older than 60s. For
+// each, check chain status; if still ACTIVE, call admin_cancel_wager
+// (50/50 refund); if SETTLED, drop the stale row. Runs once after
+// matchmaking is wired (so the treasury queue is ready) and after
+// Supabase is initialised.
+sweepOrphanActiveWagers().catch((err) => {
+  console.error('[OrphanWager] sweep failed:', err?.message || err);
+});
 
 // === Initialize Marketplace event index ===
 //

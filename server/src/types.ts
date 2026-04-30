@@ -103,6 +103,20 @@ export interface Character {
   /** CUMULATIVE total XP earned (matches chain `Character.xp`). Never resets on level-up. */
   xp: number;
   walletAddress: string;
+  /**
+   * The on-chain Character NFT object ID for this server-side record.
+   * Resolved once via `CharacterCreated` event scan at restore/create time
+   * and persisted in Supabase. Every later admin call (`update_after_fight`,
+   * `set_fight_lock`, DOF reads) targets THIS object id directly — never
+   * re-scans events. Wallets with multiple Characters (legacy / migration)
+   * always pin to the one we hydrated, not "whichever was newest at scan
+   * time" (which is what `findCharacterObjectId(wallet)` returns and is
+   * therefore unsafe on hot paths).
+   *
+   * `undefined` only for characters created before this field was added
+   * (server reconciles by re-scanning on next login).
+   */
+  onChainObjectId?: string;
   stats: CharacterStats;
   equipment: EquipmentSlots;
   inventory: Item[];
