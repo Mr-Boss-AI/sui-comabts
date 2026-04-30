@@ -99,13 +99,78 @@ then, the manual `/api/admin/cancel-wager` endpoint is the recovery tool.
 3. Fight buttons clickable before turn timer starts.
 4. Stat-allocation modal preset to 0/0/0/0 (UX clarity).
 
+### Tomorrow-morning checklist (copy-paste ready)
+
+**Server status was left running** at end of session with `Mr_Boss_v5.1`
+pinned for mr_boss's wallet in memory. As long as nothing killed the
+process overnight, mr_boss connects → server returns `Mr_Boss_v5.1` (L2,
+245 XP) → DOFs re-hydrate from chain → all gear back automatically.
+
+**1) Quick-check the pin survived overnight:**
+
+```bash
+curl -s http://localhost:3001/health | python3 -m json.tool
+curl -s http://localhost:3001/api/character/0x06d6cb677518cc70884df24541d91d7a1d2ca5db2d8628a69568172652239624 \
+  | python3 -c "import sys,json; c=json.load(sys.stdin)['character']; print(f\"name={c['name']} lvl={c['level']} xp={c['xp']}\")"
+```
+
+Expected: `name=Mr_Boss_v5.1 lvl=2 xp=245`. If you see `name=mee lvl=1 xp=0`,
+the server restarted overnight + the descending event scan picked the dupe
+again. Run the next command to fix.
+
+**2) If the pin was lost, repin:**
+
+```bash
+curl -s -X POST http://localhost:3001/api/admin/repin-character \
+  -H 'Content-Type: application/json' \
+  -d '{"wallet":"0x06d6cb677518cc70884df24541d91d7a1d2ca5db2d8628a69568172652239624","characterId":"0x9b294d7d6af20d8de72755df834e385f10e211ed41026d17cdfd09dc10ea808a"}'
+```
+
+Same idea for sx if she ever ends up pointing at the wrong character (her
+`Sx_v5.1` is `0xaca14d0f78c167a9e26ddec05a01076bedaadf8a420b00cb0d1d27b4f0fe5d3a`,
+wallet `0xd05ae8e26e9c239b4888822c83046fe7adaac243f46888ea430d852dafb6e92b`).
+
+**3) Server isn't running? Start both:**
+
+```bash
+cd /home/shakalis/sui-comabts/server   && npm run dev > /tmp/server.log   2>&1 &
+cd /home/shakalis/sui-comabts/frontend && npm run dev > /tmp/frontend.log 2>&1 &
+```
+
+If you ran step 3, immediately run step 2 to repin (the in-memory pin from
+tonight is gone after restart).
+
 ### Next session — pickup list
 
-1. **Implement the 3-layer create-character fix** (frontend gate + server guard, defer Move registry to v5.1) — proposal documented above; waiting approval.
-2. **Configure Supabase** so the orphan-wager sweeper has real persistence to read.
-3. **End-to-end orphan-sweep test** with real `kill -9` mid-fight + Supabase row → boot sweeper → `admin_cancel_wager` → players refunded within seconds of restart.
-4. **Polish bugs** (4 items above).
-5. **Block 4 prep** (v5.1 republish): player-signed settlement attestation + Move-side per-wallet Character registry, in one new package.
+In recommended execution order:
+
+1. **Ship layers 1+2 of the create-character fix** (approved tonight — implement when back). Frontend state machine + server pre-mint guard. Layer 3 (Move registry) defers to v5.1.
+2. **Persist `Character.onChainObjectId` without Supabase.** Gemini's audit pinned this — the in-memory pin survives one restart at most. Two options: (a) configure Supabase creds in `server/.env`; (b) add a fallback JSON-file cache (`server/.character-pins.json`) so the pin survives without external infra. Pick (a) if you have Supabase credentials handy, else (b).
+3. **End-to-end orphan-wager sweep test** — once persistence is real, `kill -9` mid-fight, watch boot log show `[OrphanWager] Found 1 stale wager_in_flight row(s)` → `admin_cancel_wager` → 50/50 refund within seconds of restart.
+4. **UI polish bugs from tonight:**
+   - Equipped items not visible at fight start (refresh fixes — equipment hydrates after fight room renders)
+   - Fight buttons clickable before turn timer starts
+   - Stat-allocation modal preset to 0/0/0/0 (UX clarity)
+5. **Block 4 prep** for v5.1 republish: player-signed settlement attestation + Move-side per-wallet Character registry (closes layer 3 of the create-character bug at the same time).
+
+### Tonight's commits (all on `feature/v5-redeploy`, none pushed)
+
+```
+a70832b admin(v5): cancel-wager + repin-character endpoints, recovery from live test
+ba41fe6 hardening(v5): treasury queue, crash recovery, multi-char fix, SDK hygiene
+07732d2 feat(v5): XP rewrite, marketplace end-to-end, hardening from gauntlet
+```
+
+### Tests (all green, run nightly)
+
+```
+cd server
+npx tsx ../scripts/qa-xp.ts             # 143 / 143
+npx tsx ../scripts/qa-marketplace.ts    #  55 / 55
+npx tsx ../scripts/qa-treasury-queue.ts #  20 / 20
+```
+
+Total: **218 / 218 PASS.**
 
 ## 2026-04-30 Session — Gemini-audit verification + hardening
 
