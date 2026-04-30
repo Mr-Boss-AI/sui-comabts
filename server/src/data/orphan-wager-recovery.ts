@@ -26,6 +26,23 @@ import {
 import { adminCancelWagerOnChain, getWagerStatus } from '../utils/sui-settle';
 
 /**
+ * Dependency-injection seam for `sweepOne`. Production wires the real chain
+ * client + Supabase delete; the unit test in `scripts/qa-orphan-sweep.ts`
+ * injects mocks to exercise every branch without touching chain or DB.
+ */
+export interface SweepDeps {
+  getWagerStatus: (wagerMatchId: string) => Promise<number | null>;
+  adminCancelWager: (wagerMatchId: string) => Promise<{ digest: string }>;
+  deleteRow: (wagerMatchId: string) => Promise<void>;
+}
+
+const productionDeps: SweepDeps = {
+  getWagerStatus: (id) => getWagerStatus(id),
+  adminCancelWager: (id) => adminCancelWagerOnChain(id),
+  deleteRow: (id) => dbDeleteWagerInFlight(id),
+};
+
+/**
  * Minimum age before we consider an in-flight row "stale". Set to 60s
  * so a clean restart (the row was written ~30s ago, the fight is still
  * live in some other process) doesn't get wiped out. In practice clean
@@ -34,7 +51,7 @@ import { adminCancelWagerOnChain, getWagerStatus } from '../utils/sui-settle';
  */
 const STALE_AGE_MS = 60_000;
 
-interface SweepResult {
+export interface SweepResult {
   rowsScanned: number;
   cancelled: number;
   alreadySettled: number;
@@ -71,7 +88,7 @@ export async function sweepOrphanActiveWagers(): Promise<SweepResult> {
 
   for (const row of rows) {
     try {
-      await sweepOne(row, result);
+      await sweepOne(row, result, productionDeps);
     } catch (err: any) {
       result.errors++;
       console.error(
@@ -88,8 +105,18 @@ export async function sweepOrphanActiveWagers(): Promise<SweepResult> {
   return result;
 }
 
-async function sweepOne(row: DbWagerInFlight, result: SweepResult): Promise<void> {
-  const status = await getWagerStatus(row.wager_match_id);
+/**
+ * Reconcile a single in-flight row against chain state. Exported with a
+ * `_ForTest` suffix because the test gauntlet drives every branch with
+ * mocked deps — production callers go through `sweepOrphanActiveWagers`,
+ * which injects `productionDeps`.
+ */
+export async function sweepOne(
+  row: DbWagerInFlight,
+  result: SweepResult,
+  deps: SweepDeps = productionDeps,
+): Promise<void> {
+  const status = await deps.getWagerStatus(row.wager_match_id);
   if (status === null) {
     // RPC failure — leave the row in place; next sweep tick can retry.
     result.errors++;
@@ -102,7 +129,7 @@ async function sweepOne(row: DbWagerInFlight, result: SweepResult): Promise<void
   if (status === 2 /* STATUS_SETTLED */) {
     // Settled cleanly — the row is just stale. Drop it.
     result.alreadySettled++;
-    await dbDeleteWagerInFlight(row.wager_match_id);
+    await deps.deleteRow(row.wager_match_id);
     console.log(
       `[OrphanWager] ${row.wager_match_id.slice(0, 10)}… already SETTLED — dropping stale row`,
     );
@@ -111,8 +138,8 @@ async function sweepOne(row: DbWagerInFlight, result: SweepResult): Promise<void
 
   if (status === 1 /* STATUS_ACTIVE */) {
     // Still ACTIVE → refund 50/50 via admin_cancel_wager.
-    const { digest } = await adminCancelWagerOnChain(row.wager_match_id);
-    await dbDeleteWagerInFlight(row.wager_match_id);
+    const { digest } = await deps.adminCancelWager(row.wager_match_id);
+    await deps.deleteRow(row.wager_match_id);
     result.cancelled++;
     console.log(
       `[OrphanWager] ${row.wager_match_id.slice(0, 10)}… ACTIVE → 50/50 refund tx=${digest}`,
@@ -127,7 +154,7 @@ async function sweepOne(row: DbWagerInFlight, result: SweepResult): Promise<void
       `[OrphanWager] ${row.wager_match_id.slice(0, 10)}… is WAITING ` +
       `(unexpected — row should have only been written post-accept). Dropping row.`,
     );
-    await dbDeleteWagerInFlight(row.wager_match_id);
+    await deps.deleteRow(row.wager_match_id);
     return;
   }
 

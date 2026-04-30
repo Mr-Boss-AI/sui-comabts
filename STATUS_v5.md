@@ -4,6 +4,154 @@
 > `feature/v5-redeploy` — every change committed locally; nothing pushed
 > to GitHub yet (per standing user rule).
 
+## 2026-04-30 (later) — Blocks A through D shipped
+
+Tonight's full sweep of the four follow-up blocks from the Gemini re-audit
++ live-test bug list. Every block landed as a separate local commit on
+`feature/v5-redeploy`.
+
+### Block A — Duplicate-Character mint fix (layers 1+2) ✅
+
+Closes the bug reproduced live this session: mr_boss minted "mee" on top
+of `Mr_Boss_v5.1` during the auth-flicker window because the frontend
+rendered `<CharacterCreation />` as the default fallback whenever
+`state.character` was null. Three-layer fix per STATUS proposal — layer
+3 (Move `CharacterRegistry`) deferred to v5.1 republish; layers 1+2
+shipped tonight.
+
+**Layer 1 — frontend auth-phase state machine.**
+New leaf module `frontend/src/lib/auth-phase.ts` with the typed
+phases `auth_pending | chain_check_pending | chain_check_failed |
+no_character` and a set of pure render-gate predicates
+(`shouldRenderCreateForm`, `shouldRenderLoadingScreen`,
+`shouldRenderRetryScreen`). `game-provider.tsx` drives the transitions
+explicitly off `socket.authenticated` + `fetchCharacterNFT` outcomes;
+`game-screen.tsx` renders one of {LoadingScreen, RetryScreen,
+CharacterCreation} based on phase. The 1.5s `setTimeout` is gone — the
+chain check fires immediately on auth, and the create form is reachable
+**only** when the chain has been confirmed empty. RPC failures land in
+`chain_check_failed` and surface a Try-again button.
+
+**Layer 2 — server pre-mint guard.**
+New helper `findAllCharacterIdsForWallet` in `server/src/utils/sui-settle.ts`
+returns every `CharacterCreated` event id for a wallet (asc by event
+timestamp). New pure predicate `shouldRejectDuplicateMint` rejects when
+length > 1 — i.e. a pre-existing Character was on chain when the user
+clicked Create. `handleCreateCharacter` is now async, calls the helper,
+rejects with a clear error pointing the user at the original (oldest) id
+and instructing a refresh. Length === 1 is the legitimate first mint —
+its id is pinned to the server-side record on the spot.
+
+**Tests — `scripts/qa-character-mint.ts` (NEW): 63/63 PASS.**
+The whole gauntlet runs against the same predicates that `game-provider`
++ `game-screen` consume, so a regression in either render path or the
+state machine fails the test. Includes:
+
+- L1.1–L1.4 — phase transitions on auth flips and chain-check outcomes
+- L1.5–L1.7 — render-gate invariants (mutual exclusion, create-form
+  HIDDEN during auth/chain-check phases)
+- L1.8 — full auth-flicker → chain-check end-to-end simulation
+- L2.1–L2.5 — duplicate-mint guard (boundary cases + the exact 3-character
+  scenario reproduced 2026-04-30)
+
+### Block B — Supabase wiring + orphan-sweep instrumentation ⚠️ BLOCKED on user provisioning
+
+The boot sweeper code (`server/src/data/orphan-wager-recovery.ts`,
+shipped in the prior session) is fully live, but `SUPABASE_URL` is empty
+in `server/.env` so `dbInsertWagerInFlight` /
+`dbLoadStaleWagersInFlight` are no-ops and the sweeper has nothing to
+read. Tonight's work landed everything that doesn't require an actual
+Supabase project:
+
+1. **Schema migration** — new `server/src/data/migrations/002_wager_in_flight.sql`
+   adds the `wager_in_flight` table the sweeper reads, plus backfills two
+   columns added to `characters` in v5 (`unallocated_points`,
+   `onchain_character_id`). Idempotent: every statement uses
+   `IF NOT EXISTS` / `IF EXISTS`, so re-running on top of a partial
+   migration is safe.
+2. **`setup-db.mjs` rewrite** — now walks every `*.sql` in
+   `migrations/` lexically, prints the combined SQL the operator pastes
+   into the Supabase SQL Editor (Supabase REST does not expose raw SQL
+   execution), and probes both `characters` and `wager_in_flight` to
+   confirm creds + tables.
+3. **Sweep refactor for testability** — `sweepOne` now accepts an
+   injected `SweepDeps` (chain status fetcher, admin-cancel call, row
+   deleter). Production wires the real deps; the new gauntlet wires
+   mocks.
+4. **Tests — `scripts/qa-orphan-sweep.ts` (NEW): 30/30 PASS.** Pins
+   every branch:
+
+   - STATUS_ACTIVE  → `admin_cancel_wager` + drop row + `cancelled++`
+   - STATUS_SETTLED → drop row only (race: settle landed pre-crash)
+   - STATUS_WAITING → drop row defensively (shouldn't happen)
+   - `getWagerStatus` null → leave row for next sweep, `errors++`
+   - Unknown status code → leave row defensively
+   - Multiple rows aggregate counts correctly
+   - `adminCancelWager` throws → propagates to outer try/catch
+
+#### What's still BLOCKED — user provisioning step
+
+The end-to-end live test requires a real Supabase project. To unblock:
+
+1. **Provision a free-tier Supabase project** —
+   <https://supabase.com/dashboard/new/p>. Region close to wherever the
+   game server runs. Free tier is fine for testnet (500 MB / 1 GB egress).
+2. **Grab credentials** — Project Settings → API:
+   - `Project URL` → set as `SUPABASE_URL` in `server/.env`
+   - `service_role` key (NOT `anon`) → set as `SUPABASE_KEY`. Server-only;
+     bypasses RLS by design.
+3. **Apply schema** — `cd server && node setup-db.mjs`. The script
+   prints the combined migration SQL; paste it into the Supabase SQL
+   Editor → Run. Re-run `node setup-db.mjs` afterwards; both probes
+   should report `✓ EXISTS`.
+4. **Restart the server** — `npm run dev`. Look for
+   `[Supabase] Client initialized` in the boot log instead of
+   `[Supabase] No credentials configured — running in-memory only`.
+
+#### End-to-end recovery validation (run AFTER step 4 above)
+
+1. Both wallets log in, both have characters.
+2. mr_boss creates a 0.1 SUI wager from the lobby UI.
+3. sx accepts → fight starts.
+4. After turn 1 or 2 lands cleanly (server log shows
+   `[Wager] dbInsertWagerInFlight` for the wager match id), in another
+   shell:
+
+   ```bash
+   kill -9 $(lsof -ti:3001)
+   ```
+
+5. Confirm chain-side state via Sui GraphQL: the WagerMatch should be
+   `status=1` (ACTIVE) with the full 0.2 SUI escrow. Confirm Supabase
+   has the row (`select * from wager_in_flight` in the SQL Editor).
+6. Restart the server (`cd server && npm run dev`).
+7. Within ~10 seconds of boot, look for these log lines (in order):
+
+   ```
+   [Supabase] Client initialized
+   [OrphanWager] Found 1 stale wager_in_flight row(s) — sweeping
+   [OrphanWager] 0x…  ACTIVE → 50/50 refund tx=…
+   [OrphanWager] Sweep complete: 1 cancelled (50/50 refund), 0 already settled, 0 errors
+   ```
+
+8. Verify on Suiscan: WagerMatch is now `status=2` (SETTLED) with the
+   admin_cancel digest. Both wallets have +0.05 SUI.
+
+If step 7 doesn't show the cancellation log, the sweeper isn't seeing
+the row — re-check `SUPABASE_KEY` is the **service_role** key, not the
+anon key. The anon key hits RLS and reads zero rows.
+
+### Block C — Three Gemini re-audit findings
+
+_(In flight — will be appended to this section when the Block C commit
+lands.)_
+
+### Block D — Final wrap
+
+_(In flight — will be appended after the Block D commit.)_
+
+---
+
 ## 2026-04-30 Session — Live testing + critical bug + recovery
 
 The hardening from the prior session block (treasury queue, crash recovery,
