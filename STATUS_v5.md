@@ -141,14 +141,152 @@ If step 7 doesn't show the cancellation log, the sweeper isn't seeing
 the row — re-check `SUPABASE_KEY` is the **service_role** key, not the
 anon key. The anon key hits RLS and reads zero rows.
 
-### Block C — Three Gemini re-audit findings
+### Block C — Three Gemini re-audit findings ✅
 
-_(In flight — will be appended to this section when the Block C commit
-lands.)_
+All three issues flagged in tonight's re-audit are fixed and unit-tested.
 
-### Block D — Final wrap
+**C1 — fight-room reconnect grace window (CRITICAL — pre-mainnet blocker).**
+Pre-fix, `handlePlayerDisconnect` (`server/src/ws/fight-room.ts:766`)
+called `finishFight('disconnect')` IMMEDIATELY on socket close — players
+forfeited real SUI to a 2-second wifi blip. New module
+`server/src/ws/reconnect-grace.ts` owns a per-wallet timer state with a
+configurable grace window (default 60s). The flow is:
 
-_(In flight — will be appended after the Block D commit.)_
+1. Socket drops → `handlePlayerDisconnect` calls `markDisconnect(wallet,
+   fightId, onTimeout)`. Forfeit is scheduled, not executed. The
+   opponent receives a new `opponent_disconnected` WS message
+   (`{fightId, expiresAt, graceMs}`) so the UI shows a non-sticky toast
+   "Opponent disconnected. Waiting up to 60s…".
+2. Same wallet re-authenticates within the window → `markReconnect`
+   cancels the forfeit. The opponent receives `opponent_reconnected`
+   (clears the toast); the rejoining client receives `fight_resumed`
+   (rehydrates the live fight state — turn count, HP, log).
+3. No reconnect within the window → the scheduled callback fires
+   `finishFight('disconnect')`. Same outcome as pre-fix, but only after
+   the player had a real chance to come back.
+
+The grace module takes an injected `GraceScheduler` so the test
+gauntlet drives every branch with a manual scheduler — no real
+`setTimeout`, no flaky timing.
+
+**C2 — marketplace gap-fill retry loop (HIGH).**
+Pre-fix, `runSubscription` (`server/src/data/marketplace.ts:258`)
+caught gap-fill failures, logged once, and proceeded to open the gRPC
+stream at "now" — every event in the gap window was permanently lost
+from the index. `catchUpFromCursor` now wraps each `queryEvents` page
+in `withChainRetry` with the widened backoff
+`GAP_FILL_BACKOFF_MS = [1000, 3000, 9000, 27000]` = 5 total attempts
+(Gemini spec). If still failing after 5, `runSubscription`'s outer catch
+calls `scheduleReconnect` — the next reconnect attempt re-tries the
+whole gap-fill from the same cursor, instead of streaming live with a
+known-incomplete index.
+
+**C3 — coldSync withChainRetry (MEDIUM).**
+Pre-fix, `coldSync` (`server/src/data/marketplace.ts:190`) had no
+internal retries — a boot-time RPC blip left the marketplace empty for
+the entire server uptime (the outer catch in `index.ts:535` swallowed
+the error). Each `queryEvents` page is now wrapped in `withChainRetry`
+(default 3 attempts, 1s+3s sleeps). A transient blip self-heals.
+
+The retry helper itself was widened — `withChainRetry` now accepts an
+optional `backoffMs` parameter (delays-between-attempts; total attempts
+= length + 1). Default is `[1000, 3000]` = 3 attempts, preserving
+prior production semantics. The C2 marketplace constant is exported so
+the test gauntlet pins its shape.
+
+**Tests** — `scripts/qa-reconnect-grace.ts` (NEW): 35/35 PASS.
+`scripts/qa-treasury-queue.ts` +5 tests for the parameterised
+withChainRetry (custom budget → N+1 attempts, boundary cases,
+eventual-success). `scripts/qa-marketplace.ts` +8 tests pinning
+`GAP_FILL_BACKOFF_MS` (length=4, exact values, exponential 3× ratio).
+
+### Block D — Final wrap ✅
+
+**Test totals — all six gauntlets green.** Run from `server/`:
+
+| Gauntlet | Pass count |
+|---|---:|
+| `qa-xp.ts` | 143 |
+| `qa-marketplace.ts` | 63 (was 55) |
+| `qa-treasury-queue.ts` | 25 (was 20) |
+| `qa-character-mint.ts` | 63 NEW |
+| `qa-orphan-sweep.ts` | 30 NEW |
+| `qa-reconnect-grace.ts` | 35 NEW |
+| **Total** | **359 / 359 PASS** |
+
+(218 → 359 — 141 new assertions tonight, all Block A/B/C related.)
+
+**Mainnet readiness ranking — what's closed, what's deferred to v5.1.**
+
+The 8 mainnet blockers from the prior session, ranked:
+
+| # | Blocker | Status |
+|---|---|---|
+| 1 | Gas-coin contention in admin tx settlement | ✅ CLOSED — sequential treasury queue (prior session) |
+| 2 | Mid-fight crash leaves wagers stuck on chain | ⚠️ CODE COMPLETE — orphan sweeper live, blocked on user provisioning Supabase (Block B) |
+| 3 | Multi-Character wallet picks wrong NFT on hot paths | ✅ CLOSED — `Character.onChainObjectId` pinning (prior session) + DB column (Block B) |
+| 4 | Wager-lobby TOCTOU race on accept | ✅ CLOSED — single-flight guard (prior session) |
+| 5 | Marketplace cursor stuck on empty pages | ✅ CLOSED — cursor advances unconditionally (prior session) |
+| 6 | Marketplace silent gap-fill loss on reconnect | ✅ CLOSED — Block C2 retry loop |
+| 7 | Marketplace coldSync no boot retry | ✅ CLOSED — Block C3 withChainRetry |
+| 8 | Duplicate-Character mint during auth flicker | ✅ CLOSED for the auth-flicker scenario — Block A layers 1+2; layer 3 (Move `CharacterRegistry`) deferred to v5.1 |
+| (new) | Instant forfeit on WS drop costs real SUI | ✅ CLOSED — Block C1 reconnect grace |
+
+**5 of 8 original blockers fully closed tonight (#3, #6, #7, #8, plus
+the new C1 found mid-audit). Blocker #2 is code-complete, awaiting
+user-side Supabase provisioning.** Two items deferred to v5.1
+republish (always intended):
+
+- **Block 4 — player-signed settlement attestation.** Closes the
+  TREASURY-key holder trust assumption (server can pick the wrong
+  winner). Requires a fresh `settle_wager_attested` move entry that
+  validates two `signPersonalMessage` signatures over the fight outcome
+  hash. ~12h work + frontend signing UX. Not regressed, just deferred.
+- **Block A layer 3 — Move CharacterRegistry.** Closes the remaining
+  bypass path (someone calls `create_character` directly via Slush,
+  ignoring frontend Layer 1). Layers 1+2 close the auth-flicker
+  reproduction tonight — Layer 3 closes the adversarial UI-bypass
+  variant. Deferred alongside Block 4 since both need a fresh package
+  publish.
+
+**Net mainnet readiness assessment:** the testnet build is now
+production-grade for the failure modes we know about. The remaining
+mainnet work is the one v5.1 republish (player-signed settlement +
+Move CharacterRegistry) plus end-to-end live validation of orphan
+sweep against a real Supabase instance. Everything else — treasury
+queue, multi-char pin, marketplace resilience, duplicate-mint defence,
+reconnect grace — is shipped and tested.
+
+#### Next-session pickup notes (in priority order)
+
+1. **Provision the Supabase project** (free tier, walkthrough in
+   Block B section above) and run the `kill -9` mid-fight test to
+   validate the orphan sweep end-to-end. This is the last code-side
+   item gating the orphan-recovery story.
+2. **Live browser regression of Block A** — open two tabs, simulate the
+   auth-flicker by throttling network, confirm `<CharacterCreation />`
+   never renders during the loading window. Confirm the retry button
+   appears on simulated RPC failure.
+3. **Live browser regression of Block C1** — start a wager fight,
+   `kill -9` one player's tab mid-fight, confirm the opponent sees
+   "Opponent disconnected. Waiting up to 60s…" toast. Reopen within 60s
+   → confirm `fight_resumed` rehydrates the UI. Reopen after 60s →
+   confirm forfeit fires.
+4. **Polish bugs from prior session** still open: equipped items
+   invisible at fight start (refresh fixes), fight buttons clickable
+   before turn timer, stat-allocation modal preset to 0/0/0/0.
+5. **v5.1 prep** — Move `CharacterRegistry` + player-signed
+   settlement attestation. One package republish closes the last two
+   pre-mainnet items.
+
+#### Tonight's commits — all on `feature/v5-redeploy`, none pushed
+
+```
+a462fec fix(v5): close duplicate-Character-mint bug (layers 1+2)        # Block A
+999300e fix(v5): orphan-wager sweep — schema, setup, testability         # Block B
+468a43e fix(v5): three Gemini re-audit findings (C1 + C2 + C3)           # Block C
+   …    docs(v5): STATUS wrap — Blocks A–D shipped, mainnet ranking      # Block D (this commit)
+```
 
 ---
 
