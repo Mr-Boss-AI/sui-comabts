@@ -11,7 +11,8 @@ import { getLeaderboard } from './data/leaderboard';
 import { getSupabase } from './data/supabase';
 import { getFight } from './ws/fight-room';
 import { applyXp, xpForNextLevel } from './game/combat';
-import { findCharacterObjectId, updateCharacterOnChain, setFightLockOnChain, getTreasuryQueueStats, readObjectWithRetry } from './utils/sui-settle';
+import { findCharacterObjectId, updateCharacterOnChain, setFightLockOnChain, getTreasuryQueueStats, readObjectWithRetry, adminCancelWagerOnChain, getWagerStatus } from './utils/sui-settle';
+import { setOnChainObjectId, restoreCharacterFromChain, deleteCharacter } from './data/characters';
 import { getConnectedClients, adoptWagerIntoLobby, broadcastToAuthenticated } from './ws/handler';
 import { startMarketplaceIndex, shutdownMarketplaceIndex, subscribeMarketplace, listingToWire } from './data/marketplace';
 import { sweepOrphanActiveWagers } from './data/orphan-wager-recovery';
@@ -172,6 +173,181 @@ app.post('/api/admin/force-unlock', async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err), characterId });
   }
+});
+
+// --- Admin: cancel an orphan ACTIVE wager (testnet-only) ---
+// POST /api/admin/cancel-wager  { wagerMatchId: "0x..." }
+//
+// Manual recovery path for any wager that's stuck in STATUS_ACTIVE because:
+//   - Server crashed mid-fight AND Supabase wasn't configured (so the
+//     boot sweeper saw nothing to sweep), OR
+//   - settle_wager retries exhausted, OR
+//   - Some other operational path lost the wagerMatchId reference.
+//
+// Calls `arena::admin_cancel_wager` (TREASURY-only on chain) for a 50/50
+// refund split. Routes through the treasury queue so it doesn't race
+// concurrent settlements.
+app.post('/api/admin/cancel-wager', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wagerMatchId = String(req.body?.wagerMatchId ?? '').trim();
+  if (!wagerMatchId.startsWith('0x') || wagerMatchId.length < 42) {
+    res.status(400).json({ error: 'Body must be { wagerMatchId: "0x..." }' });
+    return;
+  }
+
+  // Pre-check chain status — clearer error than a Move abort EMatchAlreadySettled.
+  let preStatus: number | null;
+  try {
+    preStatus = await getWagerStatus(wagerMatchId);
+  } catch (err: any) {
+    preStatus = null;
+    console.warn('[Admin] cancel-wager preflight failed:', err?.message || err);
+  }
+  if (preStatus === 2) {
+    res.status(409).json({ error: 'Wager is already SETTLED on chain', status: preStatus });
+    return;
+  }
+
+  try {
+    const { digest } = await adminCancelWagerOnChain(wagerMatchId);
+    console.log(`[Admin] Cancel-wager ${wagerMatchId.slice(0, 10)}... tx=${digest}`);
+    res.json({ ok: true, wagerMatchId, preStatus, digest });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err), wagerMatchId });
+  }
+});
+
+// --- Admin: re-pin a wallet's active Character to a specific NFT (testnet-only) ---
+// POST /api/admin/repin-character  { wallet: "0x...", characterId: "0x..." }
+//
+// Recovery path for the duplicate-mint bug: wallet has more than one
+// Character NFT and the server attached to the wrong one (the descending
+// event scan returns the most-recent, which can be the accidental dupe).
+// This endpoint:
+//   1. Fetches the target Character NFT from chain
+//   2. Validates `owner == wallet` (refuses cross-wallet repin)
+//   3. Drops any existing server-side Character record for the wallet
+//   4. Re-inserts using the NFT's chain values (level, xp, stats, …)
+//      with `onChainObjectId` PINNED to the requested id — every later
+//      admin call will hit THIS NFT, not whichever one was newest.
+//   5. Pushes a `character_data` refresh to the connected WS client so
+//      the user sees their character back without a manual reload.
+app.post('/api/admin/repin-character', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wallet = String(req.body?.wallet ?? '').trim();
+  const characterId = String(req.body?.characterId ?? '').trim();
+  if (!wallet.startsWith('0x') || !characterId.startsWith('0x')) {
+    res.status(400).json({ error: 'Body must be { wallet: "0x...", characterId: "0x..." }' });
+    return;
+  }
+
+  // 1) Fetch the target Character NFT
+  let fields: Record<string, unknown> | null;
+  let typeRepr: string | null;
+  try {
+    const r = await readObjectWithRetry(characterId, { showContent: true, showType: true });
+    fields = r.fields;
+    typeRepr = r.type;
+  } catch (err: any) {
+    res.status(502).json({ error: `Chain RPC failed: ${err?.message || err}` });
+    return;
+  }
+  if (!fields || !typeRepr?.endsWith('::character::Character')) {
+    res.status(404).json({ error: 'Object is not a Character', type: typeRepr });
+    return;
+  }
+
+  // 2) Verify ownership
+  const ownerOnChain = String(fields.owner ?? '').toLowerCase();
+  if (ownerOnChain !== wallet.toLowerCase()) {
+    res.status(403).json({
+      error: 'Character is not owned by the requested wallet',
+      ownerOnChain,
+      requestedWallet: wallet,
+    });
+    return;
+  }
+
+  // 3) Drop any existing server-side record so the new one gets inserted
+  //    cleanly. (deleteCharacter is a no-op when the wallet has nothing.)
+  const previous = getCharacterByWallet(wallet);
+  if (previous) {
+    deleteCharacter(wallet);
+  }
+
+  // 4) Re-create from chain truth, pinning the requested objectId.
+  const restored = restoreCharacterFromChain(
+    wallet,
+    String(fields.name ?? ''),
+    {
+      strength: Number(fields.strength ?? 5),
+      dexterity: Number(fields.dexterity ?? 5),
+      intuition: Number(fields.intuition ?? 5),
+      endurance: Number(fields.endurance ?? 5),
+    },
+    Number(fields.level ?? 1),
+    Number(fields.xp ?? 0),
+    Number(fields.unallocated_points ?? 0),
+    Number(fields.wins ?? 0),
+    Number(fields.losses ?? 0),
+    Number(fields.rating ?? 1000),
+    characterId,
+  );
+
+  if (!restored.character) {
+    res.status(500).json({ error: restored.error || 'Failed to rebuild server character' });
+    return;
+  }
+  // Belt + braces: ensure the pin sticks even if `restoreCharacterFromChain`
+  // returned an existing record (idempotent path).
+  setOnChainObjectId(wallet, characterId);
+
+  // 5) Push the refreshed character to the connected client (if any). They'll
+  //    re-render against the canonical NFT without a manual reload.
+  for (const [, c] of getConnectedClients()) {
+    if (c.walletAddress === wallet && c.socket.readyState === c.socket.OPEN) {
+      c.characterId = restored.character.id;
+      c.socket.send(JSON.stringify({
+        type: 'character_data',
+        character: {
+          id: restored.character.id,
+          name: restored.character.name,
+          level: restored.character.level,
+          xp: restored.character.xp,
+          walletAddress: restored.character.walletAddress,
+          stats: restored.character.stats,
+          unallocatedPoints: restored.character.unallocatedPoints,
+          equipment: restored.character.equipment,
+          wins: restored.character.wins,
+          losses: restored.character.losses,
+          rating: restored.character.rating,
+        },
+      }));
+    }
+  }
+
+  console.log(
+    `[Admin] Repinned wallet ${wallet.slice(0, 10)}…` +
+    ` from ${previous?.onChainObjectId?.slice(0, 10) ?? 'none'}…` +
+    ` to ${characterId.slice(0, 10)}… (${restored.character.name})`,
+  );
+
+  res.json({
+    ok: true,
+    wallet,
+    previousCharacterId: previous?.onChainObjectId ?? null,
+    pinnedCharacterId: characterId,
+    name: restored.character.name,
+    level: restored.character.level,
+  });
 });
 
 // --- Admin: adopt orphaned wager into lobby (testnet-only) ---

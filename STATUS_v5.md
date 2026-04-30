@@ -4,6 +4,109 @@
 > `feature/v5-redeploy` — every change committed locally; nothing pushed
 > to GitHub yet (per standing user rule).
 
+## 2026-04-30 Session — Live testing + critical bug + recovery
+
+The hardening from the prior session block (treasury queue, crash recovery,
+multi-char fix, SDK hygiene) went live for browser-based testing tonight.
+Most of the gauntlet items in the "STILL UNTESTED" list are now ✅, one is
+🟡 inconclusive, and a new ⚠️ critical bug was discovered.
+
+### ✅ Live-tested + working
+
+| Gauntlet item | Result |
+|---|---|
+| Auth + balance display | Navbar SUI matches Slush exactly; live refresh works; JWT survives reload |
+| **Wager fight end-to-end** (validated twice) | mr_boss creates 0.1 SUI → sx accepts → 5-turn fight → instant 95/5 settlement → +XP / +rating / loot drop |
+| **Multi-character regression** (Other-A from Gemini audit) | mr_boss has Mr_Boss_v5 + Mr_Boss_v5.1 on chain; server correctly pinned and used Mr_Boss_v5.1 throughout the session — no DOF desync |
+| Marketplace full lifecycle | mr_boss listed Wooden Buckler → sx bought it → equipped + used → 2.5% royalty paid; both browsers updated reactively; withdraw profits works |
+| **Shield 3-block-zone** | Sx equipped the bought shield → fight log shows "0/3 line" → blocked 3 zones in one turn |
+| Counter-triangle balance | 5 fights: Sx (evasion build) vs mr_boss (crit build) → Sx wins 60% (3W-2L) |
+| Level-up + stat allocation | Sx hit L3 → "+3 points" appeared → modal + Slush sign → on-chain commit + stat refresh |
+| Multi-fight stability | 5+ wager fights back-to-back with zero memory leak, state drift, or UI desync |
+
+### ⚠️ CRITICAL BUG — duplicate-Character mint during auth flicker
+
+**Found:** During the 1.5s auth-flicker window (where the frontend renders
+`<CharacterCreation />` as the default fallback while waiting for
+`fetchCharacterNFT` to resolve), a user can submit the form and mint a
+SECOND Character NFT on a wallet that already has one. The newer NFT then
+becomes the "active" one for the session because the server's
+`findCharacterObjectId` returns the most-recent CharacterCreated event.
+
+**Reproduced:** mr_boss's wallet now has 3 Characters on chain:
+- `Mr_Boss_v5`     `0x6161af02…`  (legacy)
+- `Mr_Boss_v5.1`   `0x9b294d7d…`  L2, 245 XP, 2W/3L, rating 983 — the real character
+- **`mee`**        `0xec6fbbcf…`  L1, fresh — the accidental dupe from tonight
+
+**Why the existing `Other-A` fix didn't catch it:** `Other-A` pins
+`onChainObjectId` on the server side AT auth/restore time. But the dupe mint
+happened BEFORE auth finished — a fresh `create_character` with no prior
+server-side record. The pin pinned the dupe, not the real character.
+
+**Three-layer fix proposal** (NOT YET IMPLEMENTED — awaiting approval):
+
+1. **Frontend gate** — `frontend/src/components/layout/game-screen.tsx:256` and `frontend/src/app/game-provider.tsx:284-324`. Replace the "no character → render CharacterCreation as fallback" pattern with an explicit state machine:
+   - `auth_pending` → spinner
+   - `chain_check_pending` (post-auth, fetching `CharacterCreated` events) → spinner with "Looking for your character on-chain…"
+   - `chain_check_failed` (RPC error) → error toast + retry button (DO NOT silently fall through to CharacterCreation)
+   - `no_character` (chain check returned 0 results) → CharacterCreation
+   - `has_character` → game UI
+   The 1500ms `setTimeout` "let server respond first" delay goes away — the server's `auth_ok` already includes `character: null` definitively if it has none in memory. The chain check fires immediately after.
+2. **Server pre-mint guard** — `server/src/ws/handler.ts::handleCreateCharacter`. Before letting the WS message proceed, call `findCharacterObjectId(client.walletAddress)`. If non-null, refuse with `Wallet already has Character X on chain — refresh to see it`. The chain RPC is one extra round-trip per mint, irrelevant for UX.
+3. **Move contract registry** — `contracts/sources/character.move`. Add a shared `CharacterRegistry` object mapping `address → ID`. `create_character` aborts with `EWalletAlreadyHasCharacter` if the registry already has an entry for `tx_context::sender`. **Defers to v5.1** alongside the player-signed settlement (Block 4 in the prior plan) since both require a fresh package publish.
+
+Layers 1+2 close 99% of the bug at the cost of zero re-publish. Layer 3 closes the remaining race (someone bypasses the frontend by signing the PTB directly via Slush) and ships in v5.1.
+
+### 🟡 Orphan-wager sweep — INCONCLUSIVE this session
+
+Block 2's `sweepOrphanActiveWagers` ran clean on every boot tonight ("No
+stale in-flight rows"), but **Supabase isn't configured** in the running
+server (`SUPABASE_URL` / `SUPABASE_KEY` empty in `.env`). With no
+persistence layer, `dbInsertWagerInFlight` and `dbLoadStaleWagersInFlight`
+are no-ops — the sweeper is correctly seeing zero rows because no rows are
+ever written. So the recovery code path itself never executed.
+
+Wager `0xcadb…0d09` (0.2 SUI escrow, accepted 01:30:06 UTC, status=ACTIVE
+post-crash) became the live test of the manual recovery path:
+- Confirmed via Sui GraphQL that the wager was stuck in STATUS_ACTIVE with
+  no settlement / refund event for ~7 minutes.
+- Used the new `/api/admin/cancel-wager` endpoint (added this session) to
+  call `arena::admin_cancel_wager` for the 50/50 split.
+- Tx digest `82ZB1vWqUjoXRm3q4oFGyijvwkraLitvqwMpv4qhNPUK` — wager now
+  `status=2` (SETTLED), `escrow=0`, both wallets refunded 0.1 SUI each.
+
+**Still need:** point Supabase creds at a real instance and re-run the
+mid-fight `kill -9` test. The CODE PATH is unverified end-to-end. Until
+then, the manual `/api/admin/cancel-wager` endpoint is the recovery tool.
+
+### Recovery actions taken this session
+
+| Issue | Tool | Result |
+|---|---|---|
+| Wager `0xcadb…0d09` stuck ACTIVE with 0.2 SUI locked | New `POST /api/admin/cancel-wager` | Tx `82ZB1vWqU…`, 50/50 refund (0.1 SUI each) |
+| Server pinned mr_boss to "mee" (the accidental dupe) instead of `Mr_Boss_v5.1` | New `POST /api/admin/repin-character` | Pinned `0x9b294d7d…` (Mr_Boss_v5.1, L2, 245 XP). On reconnect mr_boss will see his real character |
+
+### What landed this session (code)
+
+- `server/src/index.ts` — two new testnet-only admin endpoints:
+  - `POST /api/admin/cancel-wager  { wagerMatchId }` — manual `admin_cancel_wager` 50/50 refund. Pre-checks chain status to surface clearer errors.
+  - `POST /api/admin/repin-character { wallet, characterId }` — drop the server's existing record for that wallet, rebuild from the specified Character NFT (validates `owner == wallet` first), pin `onChainObjectId`, push `character_data` to the live WS client.
+
+### Polish bugs discovered (not blockers)
+
+1. Create-character flicker on every login/refresh — drives the critical bug above.
+2. Equipped items not visible at fight start (refresh fixes it; equipment hydrates after fight-room renders).
+3. Fight buttons clickable before turn timer starts.
+4. Stat-allocation modal preset to 0/0/0/0 (UX clarity).
+
+### Next session — pickup list
+
+1. **Implement the 3-layer create-character fix** (frontend gate + server guard, defer Move registry to v5.1) — proposal documented above; waiting approval.
+2. **Configure Supabase** so the orphan-wager sweeper has real persistence to read.
+3. **End-to-end orphan-sweep test** with real `kill -9` mid-fight + Supabase row → boot sweeper → `admin_cancel_wager` → players refunded within seconds of restart.
+4. **Polish bugs** (4 items above).
+5. **Block 4 prep** (v5.1 republish): player-signed settlement attestation + Move-side per-wallet Character registry, in one new package.
+
 ## 2026-04-30 Session — Gemini-audit verification + hardening
 
 Independent verification of a 5-concern audit Gemini Antigravity ran against
