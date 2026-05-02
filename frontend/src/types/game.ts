@@ -124,6 +124,16 @@ export interface Character {
   losses: number;
   rating: number;
   walletAddress: string;
+  /** Server-pinned canonical chain Character NFT id. The server resolves
+   *  this once at auth/restore time and uses it for every admin call
+   *  (update_after_fight, set_fight_lock, DOF reads). The frontend uses
+   *  it to bypass the descending CharacterCreated event scan in
+   *  `fetchCharacterNFT` for wallets that have minted multiple Characters
+   *  — without this, the frontend would read chain state from the WRONG
+   *  NFT (the newest event), producing permanent server/chain
+   *  disagreement (BUG E, 2026-05-02 retest #2). null when the server
+   *  hasn't yet pinned an id for legacy records. */
+  onChainObjectId?: string | null;
 }
 
 // ===== EQUIPMENT =====

@@ -4,6 +4,111 @@
 > `feature/v5-redeploy` — every change committed locally; nothing pushed
 > to GitHub yet (per standing user rule).
 
+## 2026-05-02 (very late) — BUG E: server pin not shared with frontend → wrong-NFT chain reads
+
+User leveled mr_boss from L3 → L4 after a wager fight. Chain correctly
+emitted `LevelUp { unallocated_points: 6 }`; server log showed
+`unalloc=6, leveledUp=true` and broadcast 6 over WS. But the UI showed
+no points to allocate, no "+N" badge, no Allocate modal — across
+disconnect / hard refresh / new tab.
+
+### Root cause — multi-character wallet + descending event scan
+
+mr_boss has THREE `CharacterCreated` events on chain:
+
+  - `Mr_Boss_v5`     `0x6161af02…`  (legacy, L1)
+  - `Mr_Boss_v5.1`   `0x9b294d7d…`  (canonical — L4, 6 unallocated, the
+    one the server pinned via /api/admin/repin-character earlier)
+  - `mee`            `0xec6fbbcf…`  (the auth-flicker dupe from the
+    earlier session — L1, 0 unallocated, NEWEST event)
+
+Server has `Mr_Boss_v5.1` pinned (`character.onChainObjectId`) and
+correctly mirrors chain truth: 6 unallocated.
+
+Frontend's `fetchCharacterNFT` does a `descending` event scan,
+returns FIRST owner-match → returns `mee` (the newest) with 0
+unallocated. `state.onChainCharacter` ends up pointing at the wrong
+NFT.
+
+`effectiveUnallocatedPoints(server=6, chain=0)` → `min(6, 0) = 0`. The
+b39202d clamp behaves correctly given its inputs — but the inputs are
+wrong because the frontend never learned which NFT the server pinned.
+
+The user's hypothesis at the bottom of their report nailed it
+verbatim:
+
+> If chain shows `unallocated_points: 0` → … OR frontend is reading
+> wrong … the b39202d clamp `min(server, chain)` is correctly
+> clamping to 0.
+
+### Fix — server publishes the pin; frontend uses it
+
+1. **Server** — `sanitizeCharacter` (handler.ts) now includes
+   `onChainObjectId` in the wire payload. Every `character_data` /
+   `character_created` / `auth_ok` carries the canonical id the server
+   resolved at auth/restore time.
+
+2. **Frontend** — `Character` type (frontend/src/types/game.ts) gains
+   `onChainObjectId?: string | null`.
+
+3. **Frontend** — `fetchCharacterNFT(client, owner, pinnedObjectId?)`
+   accepts an optional pinned id. When provided, queries that object
+   directly (skip the descending event scan). When omitted, falls
+   back to the event scan — used during the initial auth-phase chain
+   check before the server has restored a record.
+
+4. **Frontend** — `game-provider.tsx` passes
+   `state.character?.onChainObjectId` to every post-auth
+   `fetchCharacterNFT` call:
+
+   - `character_updated_onchain` message handler (uses a ref because
+     handleMessage is memoised)
+   - The `onChainRefreshTrigger` useEffect (deps include the pinned id
+     so it re-runs when server changes the pin)
+
+5. **Frontend** — `stat-allocate-modal.tsx`'s post-tx chain refresh
+   passes `character.onChainObjectId`.
+
+### Why this lay quiet through Block A
+
+Block A's "duplicate-mint" fix closed the layer-1 + layer-2 paths
+(state machine + server pre-mint guard) so future wallets never end up
+with multiple Characters at all. mr_boss's triple-Character state
+predates that fix — the legacy mints survived because Layer 3 (Move
+`CharacterRegistry`) is deferred to v5.1. The server's
+`onChainObjectId` pinning correctly handles legacy multi-char wallets,
+but the frontend was reading the chain independently and never
+learned about the pin.
+
+This fix surfaces the pin server→frontend so legacy multi-char
+wallets work correctly until the v5.1 republish removes the dupes
+entirely.
+
+### Tests — no new gauntlet (all pre-existing)
+
+`fetchCharacterNFT`'s pinnedObjectId path is exercised live by every
+post-auth chain refresh once the server includes the field. The pure
+predicate that drives the UI (`effectiveUnallocatedPoints`) was
+already pinned by `qa-stat-points.ts` (45 PASS) — the bug was input
+shape, not predicate logic. The full multi-char regression coverage
+(closing the auth-flicker root cause) is in `qa-character-mint.ts`
+(63 PASS).
+
+All 9 gauntlets green: 475 / 475 PASS.
+
+### Verifying after this fix
+
+mr_boss should now see the +6 badge AND be able to spend it. The
+Allocate Stat Points TX targets `Mr_Boss_v5.1` (server-pinned) instead
+of `mee`. Slush popup will show the correct Object Changes preview
+(touching `0x9b294d7d…`, NOT `0xec6fbbcf…`).
+
+If the user wants to clean up the legacy "mee" + "Mr_Boss_v5"
+characters, a v5.1 admin endpoint could call a `burn_character`
+function — out of scope tonight (would need a Move republish).
+
+---
+
 ## 2026-05-02 (late) — Bug 1 retest cleanup: equipment race, auth-after-allocate, naked-stats gap
 
 User retested Bug 1 (allocate_points). Chain accepted the allocation

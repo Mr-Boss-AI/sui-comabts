@@ -104,35 +104,44 @@ export interface OnChainCharacter {
 }
 
 /**
- * Find a player's Character NFT via the CharacterCreated event log, then
- * fetch the shared object directly. Events go through the JSON-RPC SDK
- * (built-in retry, connection pooling, typed response). The Object fetch
- * uses the gRPC client passed in — already typed and pooled.
+ * Find a player's Character NFT and read its current chain state.
  *
- * Returns the MOST RECENT Character NFT for the wallet (events are queried
- * descending). Wallets with multiple Characters from migration / test
- * pollution will pin to the newest one for THIS hydration; the server
- * persists the resulting `objectId` so subsequent admin calls don't
- * re-derive it.
+ * When `pinnedObjectId` is provided (the canonical id the server pinned
+ * at auth time, exposed via `Character.onChainObjectId`), we skip the
+ * event scan and read the shared object directly. This is the path for
+ * EVERY post-auth chain refresh — closes BUG E (2026-05-02 retest #2)
+ * where wallets with multiple `CharacterCreated` events
+ * (mr_boss has 3) would have the frontend's descending scan return the
+ * NEWEST event while the server pinned a different (older but
+ * canonical) NFT, producing permanent server/chain disagreement.
+ *
+ * When `pinnedObjectId` is omitted, we fall back to the descending
+ * `CharacterCreated` event scan — used during the initial chain check
+ * before the server has restored a record (game-provider's auth-phase
+ * state machine). Returns the MOST RECENT Character NFT for the wallet
+ * in that case; the server's chain-restore path then pins it for
+ * subsequent reads.
  */
 export async function fetchCharacterNFT(
   client: SuiGrpcClient,
   owner: string,
+  pinnedObjectId?: string | null,
 ): Promise<OnChainCharacter | null> {
   try {
-    const rpc = getJsonRpcClient();
-    const events = await rpc.queryEvents({
-      query: { MoveEventType: `${PACKAGE_ID}::character::CharacterCreated` },
-      limit: 50,
-      order: "descending",
-    });
-
-    let characterId: string | null = null;
-    for (const event of events.data) {
-      const parsed = event.parsedJson as Record<string, unknown> | undefined;
-      if (parsed?.owner === owner) {
-        characterId = String(parsed.character_id);
-        break;
+    let characterId: string | null = pinnedObjectId ?? null;
+    if (!characterId) {
+      const rpc = getJsonRpcClient();
+      const events = await rpc.queryEvents({
+        query: { MoveEventType: `${PACKAGE_ID}::character::CharacterCreated` },
+        limit: 50,
+        order: "descending",
+      });
+      for (const event of events.data) {
+        const parsed = event.parsedJson as Record<string, unknown> | undefined;
+        if (parsed?.owner === owner) {
+          characterId = String(parsed.character_id);
+          break;
+        }
       }
     }
 

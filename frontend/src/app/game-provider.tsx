@@ -53,6 +53,12 @@ export default function GameProvider({
   // explicit retry.
   const chainCheckInFlight = useRef(false);
   const toastedFightIdRef = useRef<string | null>(null);
+  // BUG E (2026-05-02 retest #2) — handleMessage is memoised over
+  // [walletAddress, socket, client], so it closes over a stale snapshot of
+  // state.character. Reading state.character.onChainObjectId from inside
+  // the handler requires a live ref. Updated by the effect below on every
+  // character change.
+  const pinnedCharIdRef = useRef<string | null>(null);
 
   // Keep socket ref in sync
   const stateWithSocket = { ...state, socket };
@@ -212,10 +218,17 @@ export default function GameProvider({
           break;
         case "character_updated_onchain":
           // On-chain update complete — re-fetch for unallocated points / level
+          // Use the server-pinned id (BUG E fix) so multi-character wallets
+          // (mr_boss has 3 NFTs) read the canonical NFT, not whichever
+          // CharacterCreated event happens to be newest.
           if (client && walletAddress) {
             (async () => {
               try {
-                const nft = await fetchCharacterNFT(client, walletAddress);
+                const nft = await fetchCharacterNFT(
+                  client,
+                  walletAddress,
+                  pinnedCharIdRef.current,
+                );
                 if (nft) dispatch({ type: "SET_ONCHAIN_CHARACTER", data: nft });
               } catch {}
             })();
@@ -351,6 +364,14 @@ export default function GameProvider({
     return socket.addHandler(handleMessage);
   }, [socket, handleMessage]);
 
+  // Keep the pinned-id ref in sync with state.character. handleMessage
+  // reads pinnedCharIdRef.current when it needs to refresh the chain
+  // character — using the SERVER-pinned id ensures the frontend reads
+  // chain truth from the same NFT the server is using (closes BUG E).
+  useEffect(() => {
+    pinnedCharIdRef.current = state.character?.onChainObjectId ?? null;
+  }, [state.character?.onChainObjectId]);
+
   // Auto-fetch character on auth, and prime the auth-phase state machine.
   useEffect(() => {
     if (socket.authenticated) {
@@ -471,20 +492,35 @@ export default function GameProvider({
   ]);
 
   // Fetch on-chain Character NFT (for unallocated_points, level, xp)
-  // Re-runs when onChainRefreshTrigger bumps (after successful equip/unequip).
+  // Re-runs when onChainRefreshTrigger bumps (after successful equip/unequip)
+  // OR when the server pins a different canonical id (e.g. via the admin
+  // repin endpoint) so the chain read tracks the server's source of truth.
   useEffect(() => {
     if (!socket.authenticated || !walletAddress || !client) return;
     let cancelled = false;
+    const pinnedId = state.character?.onChainObjectId ?? null;
     (async () => {
       try {
-        const nft = await fetchCharacterNFT(client, walletAddress);
+        // BUG E fix (2026-05-02 retest #2): pass the server-pinned id so
+        // the read targets the canonical NFT instead of "whichever
+        // CharacterCreated event happens to be newest" — which broke
+        // mr_boss (3 chain Characters: Mr_Boss_v5 / Mr_Boss_v5.1 / "mee";
+        // descending scan returned "mee" with 0 unallocated while server
+        // had Mr_Boss_v5.1 with 6 pinned).
+        const nft = await fetchCharacterNFT(client, walletAddress, pinnedId);
         if (!cancelled && nft) {
           dispatch({ type: "SET_ONCHAIN_CHARACTER", data: nft });
         }
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [socket.authenticated, walletAddress, client, state.onChainRefreshTrigger]);
+  }, [
+    socket.authenticated,
+    walletAddress,
+    client,
+    state.onChainRefreshTrigger,
+    state.character?.onChainObjectId,
+  ]);
 
   // Fight-with-dirty toast (LOADOUT_DESIGN.md D4). When a fight begins and the
   // user had staged-but-unsaved changes, surface a one-time info message so

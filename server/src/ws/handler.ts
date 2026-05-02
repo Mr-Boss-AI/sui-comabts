@@ -1408,6 +1408,16 @@ function sanitizeCharacter(character: any): Record<string, any> {
     level: character.level,
     xp: character.xp,
     walletAddress: character.walletAddress,
+    // BUG E fix (2026-05-02 retest #2): expose the server-pinned canonical
+    // chain Character NFT id so the frontend reads chain truth from the
+    // SAME object the server is using. Without this, wallets that have
+    // multiple CharacterCreated events on chain (mr_boss has 3:
+    // Mr_Boss_v5, Mr_Boss_v5.1, "mee") would have the frontend's
+    // `fetchCharacterNFT` descending-scan return the NEWEST event ("mee")
+    // while the server pins the canonical Mr_Boss_v5.1 — producing a
+    // permanent server/chain disagreement (clamp showed 0 unallocated
+    // because "mee" has 0, even though Mr_Boss_v5.1 had 6).
+    onChainObjectId: character.onChainObjectId ?? null,
     stats: {
       strength: character.stats.strength,
       dexterity: character.stats.dexterity,

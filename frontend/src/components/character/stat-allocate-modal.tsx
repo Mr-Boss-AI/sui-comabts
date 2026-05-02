@@ -74,9 +74,15 @@ export function StatAllocateModal({
         const signer = new CurrentAccountSigner(dAppKit as any);
         await signer.signAndExecuteTransaction({ transaction: tx });
 
-        // Re-fetch on-chain character for updated unallocated_points
+        // Re-fetch on-chain character for updated unallocated_points.
+        // BUG E fix (2026-05-02 retest #2): pass the server-pinned id so
+        // multi-character wallets read the canonical NFT.
         if (client) {
-          const nft = await fetchCharacterNFT(client, character.walletAddress);
+          const nft = await fetchCharacterNFT(
+            client,
+            character.walletAddress,
+            character.onChainObjectId ?? null,
+          );
           if (nft) dispatch({ type: "SET_ONCHAIN_CHARACTER", data: nft });
         }
 
