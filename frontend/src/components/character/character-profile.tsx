@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { computeDerivedStats, getArchetype, getArchetypeColor } from "@/lib/combat";
+import { effectiveUnallocatedPoints } from "@/lib/stat-points";
 import { MAX_LEVEL, getXpInCurrentLevel, getXpProgress, getXpSpanForLevel } from "@/types/game";
 import type { Character, EquipmentSlots, Item } from "@/types/game";
 import { StatAllocateModal } from "./stat-allocate-modal";
@@ -109,8 +110,16 @@ export function CharacterProfile({ character, compact }: { character: Character;
         ? "No unsaved changes"
         : `Save ${dirtySlots.size} slot change(s) on-chain`;
 
-  // Prefer server-tracked unallocatedPoints, fall back to on-chain
-  const unallocatedPoints = character.unallocatedPoints || (state.onChainCharacter?.unallocatedPoints ?? 0);
+  // BUG 1 (live test 2026-05-02): the modal's "+N to allocate" must reflect
+  // chain truth, not the server's optimistic post-fight value, otherwise
+  // clicking Allocate stages a tx that aborts with ENotEnoughPoints. The
+  // helper takes min(server, chain) when chain has been hydrated, falling
+  // back to server only when chain is unavailable (in which case the
+  // wallet popup never fires anyway).
+  const unallocatedPoints = effectiveUnallocatedPoints(
+    character.unallocatedPoints,
+    state.onChainCharacter?.unallocatedPoints,
+  );
   const characterObjectId = state.onChainCharacter?.objectId;
 
   // Display pendingEquipment (what the user WANTS). Committed is the chain

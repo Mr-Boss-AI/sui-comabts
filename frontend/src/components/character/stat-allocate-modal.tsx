@@ -7,6 +7,7 @@ import { useGame } from "@/hooks/useGameStore";
 import { useDAppKit, useCurrentClient } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import { buildAllocateStatsTx, fetchCharacterNFT } from "@/lib/sui-contracts";
+import { effectiveUnallocatedPoints, isAwaitingChainCatchup } from "@/lib/stat-points";
 import type { Character, CharacterStats } from "@/types/game";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 
@@ -22,7 +23,18 @@ export function StatAllocateModal({
   const { state, dispatch } = useGame();
   const dAppKit = useDAppKit();
   const client = useCurrentClient() as SuiGrpcClient | null;
-  const available = character.unallocatedPoints;
+  // BUG 1 (live test 2026-05-02): chain is the contract's source of truth
+  // for allocate_points; the server value can be ahead during the
+  // post-fight treasury-queue window. Clamp to min(server, chain) so the
+  // modal never offers points the chain can't accept.
+  const available = effectiveUnallocatedPoints(
+    character.unallocatedPoints,
+    state.onChainCharacter?.unallocatedPoints,
+  );
+  const awaitingChain = isAwaitingChainCatchup(
+    character.unallocatedPoints,
+    state.onChainCharacter?.unallocatedPoints,
+  );
   const [alloc, setAlloc] = useState<CharacterStats>({
     strength: 0,
     dexterity: 0,
@@ -134,6 +146,13 @@ export function StatAllocateModal({
         {characterObjectId && (
           <p className="text-xs text-zinc-500">
             This will open your wallet to sign the transaction on-chain.
+          </p>
+        )}
+        {awaitingChain && (
+          <p className="text-xs text-amber-400">
+            Chain state is catching up after your last fight. A few of your
+            new points haven&apos;t landed on chain yet — they&apos;ll appear
+            here in 5–10 seconds.
           </p>
         )}
         <Button onClick={handleAllocate} disabled={used === 0 || signing} className="w-full">

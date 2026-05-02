@@ -4,6 +4,120 @@
 > `feature/v5-redeploy` — every change committed locally; nothing pushed
 > to GitHub yet (per standing user rule).
 
+## 2026-05-02 — Live-test bug sweep (3 bugs from yesterday's session)
+
+User ran a fresh wager-fight gauntlet and reported three real bugs.
+Single commit, no Move republish, all chain-side staying on the same v5
+package.
+
+### BUG 1 ✅ — `allocate_points` MoveAbort code 2 (server-chain drift)
+
+**Repro:** Sx_v5.1 (L4, +3 unallocated points after a recent level-up)
+opened the Allocate modal → spent 3 → Slush returned `MoveAbort code 2
+(ENotEnoughPoints)`. Frontend stuck.
+
+**Root cause:** `applyXp` on the server bumps
+`character.unallocatedPoints` the instant the fight ends. The on-chain
+`update_after_fight` (which actually grants the points to the
+Character NFT) runs through the treasury queue AFTER `settle_wager` +
+the opponent's `update_after_fight`, landing 5–25 s later. Window:
+server says +3, chain still says +0. Modal happily lets the user
+click. Slush dry-runs against chain. Abort.
+
+**Fix:** Frontend clamp via new leaf `frontend/src/lib/stat-points.ts`:
+`effectiveUnallocatedPoints(server, chain)` returns
+`min(server, chain)` when chain is hydrated (falls back to server
+otherwise). Used in `character-profile.tsx` (the +N badge) and
+`stat-allocate-modal.tsx` (the available count + a new amber hint
+"Chain state is catching up after your last fight…" when drift is
+detected). The Modal's +/- buttons + Allocate button gate on the
+clamped value, so doomed transactions can't be submitted.
+
+**Tests:** `scripts/qa-stat-points.ts` (NEW) — 32/32 PASS. Pins:
+agreement, drift in both directions, RPC-down fallback, NaN /
+negative / fractional sanitization, and a full timeline simulation
+(pre-fight → fight_end → chain catchup → spent).
+
+### BUG 2 ✅ — Save-loadout fight-lock race after forfeit
+
+**Repro:** User clicks Save Loadout immediately after a forfeit fight
+ends → `[Tx] Aborted. Raw result: {}`. Suspected fight-lock still
+active on chain because the post-fight `setFightLockOnChain(0)` hasn't
+landed yet.
+
+**Root cause:** Treasury queue serializes admin txs (single
+concurrency, by design — gas-coin contention). Order in
+`finishFight` was:
+
+  1. `settle_wager` (~2–5 s)
+  2. `update_after_fight` winner (~2–5 s)
+  3. `update_after_fight` loser (~2–5 s)
+  4. `set_fight_lock(0)` winner
+  5. `set_fight_lock(0)` loser
+
+Lock release lands ~10–25 s after fight_end. User clicking Save in
+that window hits `equipment.move::EFightLocked` (code 5) on every
+`equipment::*_v2` call inside the save-loadout PTB.
+
+**Fix:** Reorder in `server/src/ws/fight-room.ts::finishFight` — fire
+both `setFightLockOnChain(0)` calls FIRST, ahead of `settle_wager` +
+`update_after_fight`. Lock release lands within ~2–5 s instead of
+~25 s. Safe because the lock exists to prevent equipment changes
+DURING combat; once `finishFight` runs, combat is over and post-fight
+bookkeeping doesn't depend on the lock state.
+
+**Tests:** Existing `qa-treasury-queue.ts` covers the queue ordering
+contract; the reorder is a callsite change. Live verification will
+confirm the user-visible window collapsed.
+
+### BUG 3 ✅ — Off-chain loot drops removed (v5 NFT-only)
+
+**Repro:** Fight wins awarded "Wooden Club" / "Cloth Hood" type items
+that violated the v5 NFT-only contract — no chain presence, couldn't
+be equipped via the loadout-save PTB, couldn't be marketplaced or
+transferred, disappeared on Reset Character.
+
+**Root cause:** `rollLoot` in `server/src/game/loot.ts` returns a
+server-side `Item` with a UUID and randomly-rolled stat bonuses;
+`finishFight` pushed it into `winnerChar.inventory`. Pre-Phase-0.5
+behaviour that should have been deleted at the v5 redeploy.
+
+**Fix:** Remove the `rollLoot` call from `finishFight` (the import is
+gone too, with a comment explaining why the function survives in
+`game/loot.ts` — v5.1 will reuse the rarity + stat-roll math when it
+adds an admin-signed on-chain Item NFT mint). `loot.item` and
+`fightHistory.lootGained` are now always `undefined` / `null`.
+
+Existing junk in player inventories will sit there until the player
+clicks Reset Character (or the server restarts without Supabase).
+Mainnet readiness unchanged — this was a test-time-only path.
+
+### Test totals — all 8 gauntlets green
+
+| Gauntlet | Pass count |
+|---|---:|
+| `qa-xp.ts` | 143 |
+| `qa-marketplace.ts` | 63 |
+| `qa-treasury-queue.ts` | 25 |
+| `qa-character-mint.ts` | 63 |
+| `qa-orphan-sweep.ts` | 30 |
+| `qa-reconnect-grace.ts` | 35 |
+| `qa-fight-pause.ts` | 46 |
+| `qa-stat-points.ts` (NEW) | 32 |
+| **Total** | **437 / 437 PASS** |
+
+### Verification observation
+
+While digging into BUG 1 the chain query revealed STATUS_v5.md had a
+typo on Sx_v5.1's character object id — the real id is
+`0xaca14d0f3b13333f5bbda44ff514d9f1fb0052e1838c8bc7da753e9715046a40`,
+not `…78c167…` as previously documented. The repin curl in the
+earlier wrap should be updated for sx if anyone uses it again. (Not
+fixed retroactively — the running server resolves Sx_v5.1 correctly
+via the descending event scan.)
+
+---
+
 ## 2026-04-30 (later) — Blocks A through D shipped
 
 Tonight's full sweep of the four follow-up blocks from the Gemini re-audit

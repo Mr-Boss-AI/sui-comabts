@@ -12,7 +12,10 @@ import {
   resolveTurn,
   validateTurnAction,
 } from '../game/combat';
-import { rollLoot } from '../game/loot';
+// BUG 3 (live test 2026-05-02) — `rollLoot` is intentionally not imported
+// here. v5 is NFT-only; the off-chain loot path violates that contract.
+// The function is preserved in `../game/loot` so v5.1 can reuse the rarity
+// + stat-roll logic when it adds an admin-signed on-chain Item NFT mint.
 import { calculateEloChange, calculateXpReward } from '../utils/elo';
 import {
   addFightHistory,
@@ -446,7 +449,6 @@ function finishFight(
   let loserRatingChange = 0;
   let winnerXp = 0;
   let loserXp = 0;
-  let lootDrop: Item | null = null;
 
   if (winnerChar && loserChar && !draw) {
     // ELO update for ranked/wager
@@ -496,11 +498,18 @@ function finishFight(
       loserChar.gold = Math.max(0, loserChar.gold - fight.wagerAmount);
     }
 
-    // Loot
-    lootDrop = rollLoot(winnerChar.level);
-    if (lootDrop) {
-      winnerChar.inventory.push(lootDrop);
-    }
+    // BUG 3 (live test 2026-05-02) — v5 is NFT-only. The legacy `rollLoot`
+    // path generated server-side fake items (UUID id, randomly-rolled stat
+    // bonuses) and pushed them to `winnerChar.inventory`. These items had
+    // no chain presence, couldn't be equipped via the loadout-save PTB,
+    // couldn't be listed on the marketplace, and couldn't be transferred
+    // between wallets — so they violated the v5 NFT-only contract while
+    // also confusing players who saw "Wooden Club / Cloth Hood" drops
+    // disappear on Reset Character. The whole rollLoot+inventory.push
+    // block is removed; the wire shape (loot.item / fightHistory.lootGained)
+    // continues to carry undefined / null. A real on-chain loot mint
+    // (admin-signed Item NFT minted to the winner) is tracked for v5.1
+    // alongside the player-signed settlement republish.
 
     // Persist
     updateCharacter(winnerChar);
@@ -515,7 +524,8 @@ function finishFight(
       result: 'win',
       ratingChange: winnerRatingChange,
       xpGained: winnerXp,
-      lootGained: lootDrop,
+      // BUG 3 (2026-05-02) — off-chain loot drops removed for v5.
+      lootGained: null,
       turns: fight.turn,
       timestamp: Date.now(),
     });
@@ -543,14 +553,27 @@ function finishFight(
     persistItems(winnerChar);
     persistItems(loserChar);
 
-    // Update on-chain Character NFTs + release fight-lock.
+    // BUG 2 (live test 2026-05-02): release fight-locks BEFORE the heavier
+    // settle_wager + update_after_fight admin calls. The treasury queue
+    // serializes everything (single concurrency, by design — gas coin
+    // contention), so the lock release was previously stuck behind ~10–25 s
+    // of settle/update work. A player clicking Save Loadout immediately
+    // after fight_end hit `EFightLocked` (equipment.move code 5) because
+    // chain still showed an active lock.
+    //
+    // Reordering is safe: the lock exists to prevent equipment changes
+    // DURING combat. By the time finishFight runs, combat is over and
+    // post-fight bookkeeping (XP / wins / loot persistence) doesn't depend
+    // on lock state. Releasing now lets the player save a fresh loadout
+    // within ~2–5 s instead of ~10–25 s.
+    //
     // Each updateCharacterOnChain has built-in 3-attempt exponential-backoff
-    // retry. On success, the returned FightResultEffects (parsed from on-chain
-    // events) is the SOURCE OF TRUTH for the post-fight character state — we
-    // overwrite the server's optimistic in-memory cache with chain values so
-    // server and chain never diverge on `unallocated_points`. On exhausted
-    // retry, we send a sticky error to the affected player so they know the
-    // chain state is stale.
+    // retry. On success, the returned FightResultEffects (parsed from
+    // on-chain events) is the SOURCE OF TRUTH for the post-fight character
+    // state — we overwrite the server's optimistic in-memory cache with
+    // chain values so server and chain never diverge on `unallocated_points`.
+    // On exhausted retry, we send a sticky error to the affected player so
+    // they know the chain state is stale.
     const winnerCharRef = winnerChar;
     const loserCharRef = loserChar;
     void (async () => {
@@ -563,6 +586,36 @@ function finishFight(
           ? Promise.resolve(loserCharRef.onChainObjectId)
           : findCharacterObjectId(loserCharRef.walletAddress).catch(() => null),
       ]);
+
+      // Release fight-locks FIRST — see comment above. Routes through the
+      // treasury queue (sequential) so the release tx never races a
+      // concurrent settlement for the same gas coin. On exhausted retry we
+      // surface a sticky toast so the player knows their lock is
+      // auto-expiring; the chain's MAX_LOCK_MS = 1 hour ceiling is the
+      // ultimate safety net, and the testnet-only `/api/admin/force-unlock`
+      // endpoint can clear it sooner.
+      if (winnerObjId) {
+        setFightLockOnChain(winnerObjId, 0).catch((err) => {
+          const detail = err?.message || String(err);
+          console.error('[FightLock] Release (winner) failed:', detail);
+          sendToWallet(winnerCharRef.walletAddress, {
+            type: 'error',
+            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
+            sticky: true,
+          });
+        });
+      }
+      if (loserObjId) {
+        setFightLockOnChain(loserObjId, 0).catch((err) => {
+          const detail = err?.message || String(err);
+          console.error('[FightLock] Release (loser) failed:', detail);
+          sendToWallet(loserCharRef.walletAddress, {
+            type: 'error',
+            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
+            sticky: true,
+          });
+        });
+      }
 
       if (winnerObjId) {
         try {
@@ -611,35 +664,6 @@ function finishFight(
             message: 'On-chain character update failed after retries. Stats may be temporarily out of sync — please refresh.',
           });
         }
-      }
-
-      // Release fight-locks. Routes through the treasury queue (sequential)
-      // so the release tx never races a concurrent settlement for the same
-      // gas coin. On exhausted retry we surface a sticky toast so the
-      // player knows their lock is auto-expiring; the chain's MAX_LOCK_MS
-      // = 1 hour ceiling is the ultimate safety net, and the testnet-only
-      // `/api/admin/force-unlock` endpoint can clear it sooner.
-      if (winnerObjId) {
-        setFightLockOnChain(winnerObjId, 0).catch((err) => {
-          const detail = err?.message || String(err);
-          console.error('[FightLock] Release (winner) failed:', detail);
-          sendToWallet(winnerCharRef.walletAddress, {
-            type: 'error',
-            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
-            sticky: true,
-          });
-        });
-      }
-      if (loserObjId) {
-        setFightLockOnChain(loserObjId, 0).catch((err) => {
-          const detail = err?.message || String(err);
-          console.error('[FightLock] Release (loser) failed:', detail);
-          sendToWallet(loserCharRef.walletAddress, {
-            type: 'error',
-            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
-            sticky: true,
-          });
-        });
       }
     })();
   } else if (draw) {
@@ -695,7 +719,9 @@ function finishFight(
       loot: {
         xpGained: winnerXp,
         ratingChange: winnerRatingChange,
-        item: lootDrop ? { id: lootDrop.id, name: lootDrop.name, rarity: lootDrop.rarity, itemType: lootDrop.itemType } : undefined,
+        // BUG 3 — off-chain loot drops removed for v5 (NFT-only). v5.1
+        // re-introduces this as an admin-signed on-chain Item NFT mint.
+        item: undefined,
       },
     };
 
