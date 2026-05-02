@@ -4,6 +4,117 @@
 > `feature/v5-redeploy` — every change committed locally; nothing pushed
 > to GitHub yet (per standing user rule).
 
+## 2026-05-02 (later) — Orphan wager 0xbdd3c596 recovered + WS-loss orphan class closed
+
+User caught a 0.8 SUI orphan WagerMatch
+(`0xbdd3c59664ac87b9c40fcebcc84a1735da6e5a0c53b61c4695362771a85fcd65`):
+on-chain `create_wager` succeeded (status WAITING, escrow 0.8 SUI), but
+the `queue_fight` WS message that registers the wager in the in-memory
+lobby never reached the server. No fight ever started; SUI sat locked.
+
+### Recovery (immediate)
+
+Used the existing `/api/admin/cancel-wager` endpoint (calls
+`arena::admin_cancel_wager` from TREASURY). For STATUS_WAITING wagers
+the contract refunds the FULL escrow to player_a (no 50/50 split — see
+`arena.move:231-244`).
+
+  - Tx digest: `f1okCdAi5R7p8hpVXVnaKHEKAoPNbN8vLUisigF1WLv`
+  - Mr_Boss balance: 0.054 → 0.854 SUI (+0.800 SUI exactly)
+  - Treasury gas: 0.002 SUI
+  - WagerCancelled event emitted; wager now SETTLED, escrow=0
+
+### Root cause — silent WebSocket loss
+
+`useGameSocket.send` returns `true` whenever
+`wsRef.current.readyState === WebSocket.OPEN` at the moment of the
+check. But TCP-level death between the check and the actual `ws.send`
+call lets the OS silently drop the bytes (half-closed socket, network
+blip mid-Mysten-gRPC-reconnect, etc.). The frontend got a `true` return
+and assumed delivery; the server never received the message; no
+`wager_lobby_added` ever broadcast back. WebSockets in this codebase
+have NO application-level acknowledgment.
+
+The orphan-sweep code (`server/src/data/orphan-wager-recovery.ts`) only
+catches STATUS_ACTIVE wagers (post-accept Supabase row). WAITING-status
+orphans like this slip through entirely.
+
+### Fix — frontend ACK timeout + adopt-wager fallback
+
+New leaf module `frontend/src/lib/wager-register.ts`:
+
+```ts
+registerWagerWithServer(wagerMatchId, deps, timeoutMs = 7_000)
+  → 'ack' | 'recovered' | 'failed'
+```
+
+Flow:
+
+  1. Subscribe to incoming WS messages
+  2. Send `queue_fight` via WS
+  3. Race: server's `wager_lobby_added` for OUR wagerMatchId, OR a 7 s timeout
+  4. If ACK wins → `kind: 'ack'` (the WS path worked end-to-end)
+  5. If timeout wins → POST `/api/admin/adopt-wager` (REST has TCP-level
+     error reporting; the server-side handler reads chain truth, inserts
+     the lobby entry, broadcasts the same `wager_lobby_added`)
+     a. adopt-wager succeeds → `kind: 'recovered'`
+     b. adopt-wager rejects/throws → `kind: 'failed'` with reason
+
+The matchmaking-queue caller surfaces a sticky error only when both
+paths fail. The pre-fix sticky error on `socket.send` returning `false`
+is gone — that branch now also goes through adopt-wager (REST works
+even when WS doesn't).
+
+This closes the entire silent-WS-loss orphan class: any future
+WAITING-status orphan now self-heals within 7 s without operator
+intervention.
+
+### Tests — `scripts/qa-wager-register.ts` (NEW): 25/25 PASS
+
+Pinned via mocked deps + manual scheduler:
+
+  - Happy path: WS ACK arrives → no adopt-wager call
+  - ⚡ Silent WS loss (the EXACT 2026-05-02 scenario): timeout fires →
+    adopt-wager called with right id → `kind: 'recovered'`
+  - Other player's lobby_added doesn't false-ACK ours
+  - Both paths fail → `kind: 'failed'` with reason
+  - adopt-wager throws → `kind: 'failed'` with humanized reason
+  - WS send returns `false` → still tries adopt-wager (more aggressive than
+    pre-fix; REST succeeds where WS doesn't)
+  - ACK arrives just before timeout — first-wins, no double-resolve
+  - `deriveHttpBaseUrl`: ws→http, wss→https, bare host→http
+
+### Test totals — all 9 gauntlets green
+
+| Gauntlet | Pass count |
+|---|---:|
+| `qa-xp.ts` | 143 |
+| `qa-marketplace.ts` | 63 |
+| `qa-treasury-queue.ts` | 25 |
+| `qa-character-mint.ts` | 63 |
+| `qa-orphan-sweep.ts` | 30 |
+| `qa-reconnect-grace.ts` | 35 |
+| `qa-fight-pause.ts` | 46 |
+| `qa-stat-points.ts` | 32 |
+| `qa-wager-register.ts` (NEW) | 25 |
+| **Total** | **462 / 462 PASS** |
+
+### Still deferred to v5.1 (no Move republish this session)
+
+  - **Supabase wiring for WAITING-state orphans.** The current
+    orphan-sweep only handles ACTIVE rows. With Supabase configured,
+    we could ALSO insert a `wager_in_flight` row at `create_wager`
+    success (before the WS send), so a sweeper run could catch
+    WAITING-state orphans the rare time both the ACK timeout AND the
+    adopt-wager fallback fail. The frontend retry closes ~99% of the
+    failure modes; the server-side belt-and-braces is a v5.1 polish.
+  - **Player-signed settlement attestation** (Block 4) — unchanged,
+    pending v5.1 republish.
+  - **Move CharacterRegistry** (Block A layer 3) — unchanged, pending
+    v5.1 republish.
+
+---
+
 ## 2026-05-02 — Live-test bug sweep (3 bugs from yesterday's session)
 
 User ran a fresh wager-fight gauntlet and reported three real bugs.

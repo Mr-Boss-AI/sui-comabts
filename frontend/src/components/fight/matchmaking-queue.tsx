@@ -9,6 +9,7 @@ import { useWalletBalance } from "@/hooks/useWalletBalance";
 import { useDAppKit } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
+import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
@@ -155,29 +156,56 @@ export function MatchmakingQueue() {
 
         console.log("[Wager] Created on-chain escrow:", wagerMatchId);
 
-        const delivered = state.socket.send({
-          type: "queue_fight",
-          fightType: "wager",
-          wagerAmount,
-          wagerMatchId,
+        // Reliable registration: WS-send-then-ACK with REST fallback. Closes
+        // the silent-WS-loss orphan class (live test 2026-05-02 reproduced
+        // a stuck 0.8 SUI wager when socket.send returned true but the
+        // bytes never reached the server — TCP-level death between
+        // readyState check and write). See lib/wager-register.ts.
+        const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001";
+        const httpBase = deriveHttpBaseUrl(wsUrl);
+        const regResult = await registerWagerWithServer(wagerMatchId, {
+          sendQueueFight: () =>
+            state.socket.send({
+              type: "queue_fight",
+              fightType: "wager",
+              wagerAmount,
+              wagerMatchId,
+            }),
+          onMessage: (handler) => state.socket.addHandler(handler),
+          adoptWager: async (id) => {
+            const r = await fetch(`${httpBase}/api/admin/adopt-wager`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ wagerMatchId: id }),
+            });
+            if (!r.ok) {
+              const text = await r.text().catch(() => "");
+              return { ok: false, error: `adopt-wager HTTP ${r.status}: ${text || r.statusText}` };
+            }
+            return { ok: true };
+          },
         });
 
-        if (!delivered) {
-          // WS was disconnected when we tried to register the wager with
-          // the server. The on-chain escrow is real; the lobby entry is not.
-          // Block the user from retrying (double-stake risk) and surface the
-          // admin recovery path. Sticky = must dismiss.
+        if (regResult.kind === "ack") {
+          console.log("[Wager] Server ACKed lobby entry for", wagerMatchId);
+        } else if (regResult.kind === "recovered") {
+          console.warn("[Wager] WS ACK timed out — recovered via adopt-wager:", wagerMatchId);
+        } else {
+          // Both paths failed. The wager IS on chain; the server has no
+          // record. Sticky error tells the user EXACTLY what to do (don't
+          // retry the create — would lock a second stake) and how to
+          // self-recover (cancel the wager from their wallet).
           const digest = txData.digest || txData.effects?.transactionDigest || "(unknown)";
           dispatch({
             type: "SET_ERROR",
             sticky: true,
             message:
               `Your ${wagerAmount} SUI is locked on-chain (tx ${digest}, wager ${wagerMatchId.slice(0, 12)}...) ` +
-              `but the WebSocket to the game server was disconnected when we tried to register the lobby entry. ` +
-              `Do NOT retry — you'll lock a second stake. Ping the dev to run: ` +
-              `POST /api/admin/adopt-wager { wagerMatchId: "${wagerMatchId}" }`,
+              `but the game server didn't register the lobby entry, and recovery via adopt-wager also failed: ${regResult.reason}. ` +
+              `Do NOT retry creating a wager — you'll lock a second stake. Refresh the page and try again, or ask the dev to run: ` +
+              `POST /api/admin/cancel-wager { wagerMatchId: "${wagerMatchId}" } to refund.`,
           });
-          console.error("[Wager] queue_fight send DROPPED. wagerMatchId:", wagerMatchId);
+          console.error("[Wager] register failed both paths:", regResult.reason);
         }
       } catch (err: any) {
         console.error("[Wager] create_wager failed:", err);
