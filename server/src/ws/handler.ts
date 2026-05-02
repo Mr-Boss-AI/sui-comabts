@@ -198,6 +198,45 @@ function isValidWalletAddress(addr: unknown): addr is string {
   return typeof addr === 'string' && addr.startsWith('0x') && addr.length >= 3;
 }
 
+/**
+ * Read the on-chain DOFs for `character.onChainObjectId` and merge the
+ * equipped items into `character.equipment`. Used by both
+ * `acceptAuthenticatedSession` and `handleRestoreCharacter` so that any
+ * code path that creates a server-side character record ends up with the
+ * SAME chain-truthful equipment state — closes the BUG C/D race where
+ * `handleRestoreCharacter` was responding with `character_created`
+ * carrying empty equipment, which made the frontend render "naked" stats
+ * for ~1 s before the next on-chain refresh ticked.
+ *
+ * No-op (with logging) if the character has no pinned NFT id or the RPC
+ * read fails. Fail-open is fine: the next reconnect / refresh will retry.
+ */
+async function hydrateDOFsForCharacter(
+  walletAddress: string,
+  character: import('../types').Character,
+  reasonTag: string,
+): Promise<void> {
+  const charObjectId = character.onChainObjectId;
+  if (!charObjectId) {
+    console.log(`[${reasonTag}] DOF ${walletAddress.slice(0, 10)}: no on-chain character id`);
+    return;
+  }
+  const dof = await fetchEquippedFromDOFs(charObjectId);
+  if (!dof) {
+    console.log(`[${reasonTag}] DOF ${walletAddress.slice(0, 10)}: read failed — keeping current state`);
+    return;
+  }
+  const populated = (Object.entries(dof) as Array<[string, unknown]>)
+    .filter(([, v]) => v !== null)
+    .map(([k]) => k);
+  const changed = applyDOFEquipment(character.equipment, dof);
+  console.log(
+    `[${reasonTag}] DOF ${walletAddress.slice(0, 10)}: chain has ${populated.length} equipped` +
+    `${populated.length ? ` (${populated.join(', ')})` : ''}` +
+    `, ${changed.length} slot(s) synced`,
+  );
+}
+
 function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
   // Pre-auth message types the router accepts before client.authenticated.
   // The legacy bare `auth { walletAddress }` no longer authenticates — it now
@@ -453,24 +492,7 @@ async function acceptAuthenticatedSession(
     // player's "last saved" loadout before any fight resolution uses it.
     // Chain DOFs are authoritative for on-chain items; off-chain NPC items
     // are preserved in slots the chain doesn't touch.
-    if (charObjectId) {
-      const dof = await fetchEquippedFromDOFs(charObjectId);
-      if (dof) {
-        const populated = (Object.entries(dof) as Array<[string, unknown]>)
-          .filter(([, v]) => v !== null)
-          .map(([k]) => k);
-        const changed = applyDOFEquipment(character.equipment, dof);
-        console.log(
-          `[Auth] DOF ${walletAddress.slice(0, 10)}: chain has ${populated.length} equipped` +
-          `${populated.length ? ` (${populated.join(', ')})` : ''}` +
-          `, ${changed.length} slot(s) synced`,
-        );
-      } else {
-        console.log(`[Auth] DOF ${walletAddress.slice(0, 10)}: read failed — keeping server state`);
-      }
-    } else {
-      console.log(`[Auth] DOF ${walletAddress.slice(0, 10)}: no on-chain character found`);
-    }
+    await hydrateDOFsForCharacter(walletAddress, character, 'Auth');
     // NOTE: verifyEquipmentOwnership used to run here as a ghost-item sweep.
     // Removed because its mental model ("equipped items live in the wallet")
     // is wrong under Phase 0.5 — equipped items are dynamic object fields on
@@ -585,16 +607,20 @@ async function handleCreateCharacter(client: ConnectedClient, msg: ClientMessage
 
 // === Restore Character from Chain ===
 
-function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessage): void {
+async function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessage): Promise<void> {
   if (!client.walletAddress) {
     sendError(client, 'Not authenticated');
     return;
   }
 
-  // If server already has the character in memory, just return it
+  // If server already has the character in memory, just return it. We still
+  // run DOF hydration in case the in-memory record was created before the
+  // chain id was pinned (legacy path) — that's a no-op when DOFs already
+  // match the in-memory equipment.
   const existing = getCharacterByWallet(client.walletAddress);
   if (existing) {
     client.characterId = existing.id;
+    await hydrateDOFsForCharacter(client.walletAddress, existing, 'RestoreCached');
     send(client, { type: 'character_created', character: sanitizeCharacter(existing) });
     return;
   }
@@ -632,6 +658,13 @@ function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessage): vo
   }
 
   client.characterId = result.character.id;
+
+  // BUG C/D fix (2026-05-02): hydrate equipment DOFs BEFORE responding so
+  // the frontend's character_created arrives with full equipment in one
+  // shot. Pre-fix this path responded with empty equipment; the frontend
+  // rendered "naked" stats for ~1 s until the next on-chain refresh ticked.
+  await hydrateDOFsForCharacter(client.walletAddress, result.character, 'Restore');
+
   send(client, { type: 'character_created', character: sanitizeCharacter(result.character) });
 }
 

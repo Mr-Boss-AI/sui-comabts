@@ -79,9 +79,23 @@ export function StatAllocateModal({
           const nft = await fetchCharacterNFT(client, character.walletAddress);
           if (nft) dispatch({ type: "SET_ONCHAIN_CHARACTER", data: nft });
         }
+
+        // BUG B fix (2026-05-02 retest): chain TX succeeded — reflect the
+        // new stats locally NOW so the user sees the right numbers
+        // regardless of what happens with the WS sync below. Pre-fix the
+        // WS allocate_points could land while the socket was mid-reconnect
+        // (auth-pending), the server rejected it with "Not authenticated",
+        // and the user saw a red error toast even though the chain
+        // accepted the allocation.
+        dispatch({ type: "LOCAL_ALLOCATE", ...alloc });
       }
 
-      // Always update server-side stats
+      // Best-effort server sync. If the WS is mid-reconnect, the server
+      // will reject this with "Not authenticated" — game-provider's
+      // error handler suppresses that specific toast (see BUG B fix).
+      // Server reconciles its in-memory stats on next chain re-read
+      // (acceptAuthenticatedSession's DOF hydration + onChainCharacter
+      // fetch triggered by get_character).
       state.socket.send({
         type: "allocate_points",
         ...alloc,
@@ -89,7 +103,7 @@ export function StatAllocateModal({
 
       onClose();
     } catch (err: any) {
-      console.error("[Stats] allocate_points failed:", err);
+      console.error("[Stats] allocate_points chain tx failed:", err);
       dispatch({ type: "SET_ERROR", message: err?.message || "Stat allocation failed" });
     } finally {
       setSigning(false);

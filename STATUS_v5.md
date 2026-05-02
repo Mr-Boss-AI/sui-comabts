@@ -4,6 +4,134 @@
 > `feature/v5-redeploy` — every change committed locally; nothing pushed
 > to GitHub yet (per standing user rule).
 
+## 2026-05-02 (late) — Bug 1 retest cleanup: equipment race, auth-after-allocate, naked-stats gap
+
+User retested Bug 1 (allocate_points). Chain accepted the allocation
+cleanly (no MoveAbort code 2 — the b39202d clamp logic worked: chain had
+caught up by the time the modal opened). But three secondary failure
+modes surfaced. Single commit, no Move republish, no chain-side
+changes.
+
+### BUG B ✅ — "Not authenticated. Send auth_request first." after allocate
+
+**Repro:** Wallet signed `allocate_points` on chain, the chain mutated
+correctly (post-refresh stats matched), but the modal got stuck on
+"Signing transaction…" and a red error toast appeared bottom-center.
+
+**Root cause:** After the chain TX, `stat-allocate-modal` sends a
+`allocate_points` WS message so the server can mirror the optimistic
+state in memory. If the WS happens to be mid-reconnect at that moment
+(common — Mysten gRPC reconnect spam, network blip, or just the 5–15 s
+the user spent in the Slush popup), the server's auth-pending check
+rejects the message with "Not authenticated. Send auth_request first."
+The frontend surfaced that as a red toast even though the chain
+allocation succeeded.
+
+**Fix:** Three-layer defense.
+
+1. New pure helper `applyLocalAllocate` in
+   `frontend/src/lib/stat-points.ts` — applies the allocation to a
+   `{stats, unallocatedPoints}` snapshot. Clamps unallocated to 0
+   defensively; sanitizes NaN/negative input.
+2. New reducer action `LOCAL_ALLOCATE` in `useGameStore.ts`. Modal
+   dispatches it IMMEDIATELY after the chain tx succeeds — frontend
+   reflects truth regardless of WS state.
+3. Game-provider's `error` case suppresses the auth-pending message
+   specifically (logs to console only). The user never sees the red
+   toast for a transient auth blip; useGameSocket auto-retries the
+   handshake within ~3 s and the WS sync re-sends naturally on the
+   next interaction. (If server stats stay stale beyond the next
+   `get_character` round, the helper's `min(server, chain)` keeps the
+   user's view honest.)
+
+### BUG C ✅ — Naked-stats gap on chain-restore path
+
+**Repro:** Hard refresh after the failed allocate showed character page
+with naked stats (170 HP / 25 ATK / Armor 0); ~1 s later equipment
+hydrated and stats jumped to (175 HP / 28 ATK / Armor 2). The
+"Character not found" toast also flashed during the gap.
+
+**Root cause:** `acceptAuthenticatedSession` runs DOF hydration before
+sending `auth_ok` — but the chain-restore path
+(`handleRestoreCharacter`, used when server has no in-memory record
+because Supabase isn't configured) calls `restoreCharacterFromChain`
+and IMMEDIATELY responds with `character_created` carrying empty
+equipment. Frontend rendered character with empty equipment for ~1 s
+until the next on-chain refresh ticked.
+
+**Fix:** Extracted DOF hydration into a shared helper
+`hydrateDOFsForCharacter(walletAddress, character, reasonTag)` and
+called it from BOTH paths:
+
+- `acceptAuthenticatedSession` (existing, just refactored)
+- `handleRestoreCharacter` — async now; runs DOF hydration BEFORE
+  responding with `character_created`. Equipment lands in the same
+  payload as the character.
+
+The helper accepts a `reasonTag` so log lines show whether the
+hydration was triggered by `[Auth]` (token resume / signed challenge),
+`[RestoreCached]` (chain-restore message hit an in-memory cached
+record), or `[Restore]` (fresh chain-restore). Same Auth-style log
+format preserved.
+
+### BUG D ✅ — LoadingScreen skipped after refresh / auth_ok ignored
+
+**Repro:** After hard refresh the app rendered the character page
+immediately in a partially-loaded state (no LoadingScreen).
+
+**Root cause:** `auth_ok` carries the fully-hydrated character payload
+(from `acceptAuthenticatedSession`'s DOF hydration), but
+`game-provider.tsx` never had a `case "auth_ok"` handler. SET_CHARACTER
+fired only on the redundant `get_character` round-trip that follows.
+The few-frame gap between auth_ok arriving and the get_character reply
+was when game-screen rendered with character=null briefly, then with
+character=fresh-load.
+
+**Fix:** Added `case "auth_ok"` to game-provider's message handler.
+When the payload includes a character, dispatch SET_CHARACTER directly
+— the auth gate releases with full equipment in one step, no
+intermediate render.
+
+### BUG A — clamp/amber-hint observation
+
+The clamp `min(server, chain)` was the b39202d fix and is unit-tested
+(`qa-stat-points.ts` 32 → 45 PASS). The user's modal opened with "3"
+because chain had caught up to server before they clicked. That's
+correct behavior — the clamp fires invisibly when there's no drift, and
+the amber "catching up" hint only shows during the actual drift window
+(typically 5–25 s after a fight ends, while the treasury queue is
+draining `update_after_fight`). Not a regression — just a sign the
+clamp is working as intended in the common case. To witness the hint,
+finish a fight and IMMEDIATELY open the allocate modal within the
+queue-drain window.
+
+### Tests — `scripts/qa-stat-points.ts` extended: 32 → 45 PASS
+
+Added 13 assertions for `applyLocalAllocate`:
+
+- positive allocation: stats incremented, unallocated decremented
+- zero-total returns null (no-op)
+- ⚡ clamps unallocated to 0 if server is already drifting behind chain
+  (prevents negative)
+- defensive: NaN / negative inputs sanitized to 0
+
+### Test totals — all 9 gauntlets green
+
+| Gauntlet | Pass count |
+|---|---:|
+| `qa-xp.ts` | 143 |
+| `qa-marketplace.ts` | 63 |
+| `qa-treasury-queue.ts` | 25 |
+| `qa-character-mint.ts` | 63 |
+| `qa-orphan-sweep.ts` | 30 |
+| `qa-reconnect-grace.ts` | 35 |
+| `qa-fight-pause.ts` | 46 |
+| `qa-stat-points.ts` | 45 (was 32) |
+| `qa-wager-register.ts` | 25 |
+| **Total** | **475 / 475 PASS** |
+
+---
+
 ## 2026-05-02 (later) — Orphan wager 0xbdd3c596 recovered + WS-loss orphan class closed
 
 User caught a 0.8 SUI orphan WagerMatch

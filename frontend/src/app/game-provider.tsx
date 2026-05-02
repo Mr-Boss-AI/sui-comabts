@@ -60,6 +60,19 @@ export default function GameProvider({
   const handleMessage = useCallback(
     (msg: ServerMessage) => {
       switch (msg.type) {
+        case "auth_ok":
+          // BUG D fix (2026-05-02 retest): the server's auth_ok payload
+          // already carries the fully-hydrated character (DOF equipment
+          // included via acceptAuthenticatedSession + hydrateDOFsForCharacter).
+          // Pre-fix this handler didn't dispatch — game-provider waited for
+          // the redundant get_character round-trip, exposing a window where
+          // game-screen rendered with character=null AFTER auth completed
+          // (LoadingScreen looked skipped). Dispatching here makes the
+          // gate release with full equipment in one step.
+          if (msg.character) {
+            dispatch({ type: "SET_CHARACTER", character: msg.character });
+          }
+          break;
         case "character_data":
         case "character_created":
         case "points_allocated":
@@ -301,7 +314,25 @@ export default function GameProvider({
         case "challenge_declined":
           dispatch({ type: "SET_PENDING_CHALLENGE", challenge: null });
           break;
-        case "error":
+        case "error": {
+          // BUG B fix (2026-05-02 retest): "Not authenticated. Send
+          // auth_request first." fires when a client message arrives
+          // during a WS auth-pending window (fresh socket re-connecting,
+          // auth_token round-trip not done). The user can't act on it
+          // and useGameSocket auto-retries the handshake. Surfacing it
+          // as a red toast confused the user during stat-allocate, which
+          // landed the chain tx then sent its WS sync mid-reconnect.
+          // Demote to a console log so the auto-recovery is silent.
+          if (
+            msg.message === "Not authenticated. Send auth_request first." ||
+            msg.message === "Not authenticated"
+          ) {
+            console.warn(
+              "[WS] auth-pending error suppressed (auto-retries via auth_token):",
+              msg.message,
+            );
+            break;
+          }
           dispatch({
             type: "SET_ERROR",
             message: msg.message,
@@ -310,6 +341,7 @@ export default function GameProvider({
             sticky: msg.sticky === true,
           });
           break;
+        }
       }
     },
     [walletAddress, socket, client]

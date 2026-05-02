@@ -53,3 +53,45 @@ export function isAwaitingChainCatchup(
   if (chainPoints == null) return false;
   return sanitize(serverPoints) > sanitize(chainPoints);
 }
+
+/**
+ * BUG B fix (2026-05-02 retest): pure helper the LOCAL_ALLOCATE reducer
+ * action uses to apply an allocation locally after a successful on-chain
+ * tx. Pre-fix the modal sent a `allocate_points` WS message after the
+ * chain tx; if the WS was mid-reconnect (fresh socket, auth_token
+ * round-trip not done) the server rejected with "Not authenticated" and
+ * the user saw a red toast even though the chain accepted the allocation.
+ *
+ * The helper is conservative — clamps unallocated to 0 if the server is
+ * already drifting behind chain (the optimistic update could otherwise go
+ * negative).
+ */
+export interface LocalStats {
+  strength: number;
+  dexterity: number;
+  intuition: number;
+  endurance: number;
+}
+
+export interface LocalAllocateInput extends LocalStats {}
+
+export function applyLocalAllocate(
+  current: { stats: LocalStats; unallocatedPoints: number },
+  alloc: LocalAllocateInput,
+): { stats: LocalStats; unallocatedPoints: number } | null {
+  const total =
+    sanitize(alloc.strength) +
+    sanitize(alloc.dexterity) +
+    sanitize(alloc.intuition) +
+    sanitize(alloc.endurance);
+  if (total <= 0) return null;
+  return {
+    stats: {
+      strength: current.stats.strength + sanitize(alloc.strength),
+      dexterity: current.stats.dexterity + sanitize(alloc.dexterity),
+      intuition: current.stats.intuition + sanitize(alloc.intuition),
+      endurance: current.stats.endurance + sanitize(alloc.endurance),
+    },
+    unallocatedPoints: Math.max(0, current.unallocatedPoints - total),
+  };
+}

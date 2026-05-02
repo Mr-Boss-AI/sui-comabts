@@ -25,6 +25,7 @@
 import {
   effectiveUnallocatedPoints,
   isAwaitingChainCatchup,
+  applyLocalAllocate,
 } from '../frontend/src/lib/stat-points';
 
 let passes = 0;
@@ -147,6 +148,89 @@ function main(): void {
   server = 0;
   chain = 0;
   eq(effectiveUnallocatedPoints(server, chain), 0, '[t=spent] back to 0');
+
+  // ===========================================================================
+  // 8 — applyLocalAllocate (BUG B fix, 2026-05-02 retest)
+  //
+  // After a successful on-chain allocate_points tx, the modal dispatches
+  // LOCAL_ALLOCATE to reflect the new stats locally — independent of
+  // whether the WS sync succeeded. Pre-fix, a WS auth-pending blip caused
+  // the server to reject the sync with "Not authenticated", producing a
+  // red toast even though the chain accepted the allocation.
+  // ===========================================================================
+  console.log('\n[8] applyLocalAllocate — pure local stat update');
+  {
+    const before = {
+      stats: { strength: 5, dexterity: 6, intuition: 4, endurance: 5 },
+      unallocatedPoints: 3,
+    };
+    const after = applyLocalAllocate(before, {
+      strength: 1,
+      dexterity: 1,
+      intuition: 1,
+      endurance: 0,
+    });
+    eq(after !== null, true, 'returns updated state on positive allocation');
+    if (after) {
+      eq(after.stats.strength, 6, 'strength incremented');
+      eq(after.stats.dexterity, 7, 'dexterity incremented');
+      eq(after.stats.intuition, 5, 'intuition incremented');
+      eq(after.stats.endurance, 5, 'endurance unchanged (alloc was 0)');
+      eq(after.unallocatedPoints, 0, '3 spent → 0 remaining');
+    }
+  }
+
+  console.log('\n[9] applyLocalAllocate — zero-total returns null (no-op)');
+  {
+    const before = {
+      stats: { strength: 5, dexterity: 5, intuition: 5, endurance: 5 },
+      unallocatedPoints: 3,
+    };
+    const after = applyLocalAllocate(before, {
+      strength: 0,
+      dexterity: 0,
+      intuition: 0,
+      endurance: 0,
+    });
+    eq(after, null, 'zero-total → null');
+  }
+
+  console.log('\n[10] applyLocalAllocate — clamps unallocated to 0 if drift');
+  {
+    // Server thinks unallocated = 1, but user is requesting 3 (chain has
+    // already granted +3 via update_after_fight that the server didn't
+    // mirror). Clamp prevents going negative.
+    const before = {
+      stats: { strength: 5, dexterity: 5, intuition: 5, endurance: 5 },
+      unallocatedPoints: 1,
+    };
+    const after = applyLocalAllocate(before, {
+      strength: 1,
+      dexterity: 1,
+      intuition: 1,
+      endurance: 0,
+    });
+    eq(after?.unallocatedPoints, 0, 'unallocated clamped to 0 (not -2)');
+    eq(after?.stats.strength, 6, 'strength still incremented (chain succeeded)');
+  }
+
+  console.log('\n[11] applyLocalAllocate — defensive: NaN / negative inputs');
+  {
+    const before = {
+      stats: { strength: 5, dexterity: 5, intuition: 5, endurance: 5 },
+      unallocatedPoints: 5,
+    };
+    const after = applyLocalAllocate(before, {
+      strength: Number.NaN,
+      dexterity: -1,
+      intuition: 2,
+      endurance: 0,
+    });
+    eq(after?.stats.strength, 5, 'NaN sanitized to 0 (no change)');
+    eq(after?.stats.dexterity, 5, 'negative sanitized to 0 (no change)');
+    eq(after?.stats.intuition, 7, 'valid input applied');
+    eq(after?.unallocatedPoints, 3, '5 - 2 = 3');
+  }
 
   console.log(`\n${failures === 0 ? '\x1b[32m✔' : '\x1b[31m✘'} ${passes} pass / ${failures} fail\x1b[0m\n`);
   process.exit(failures === 0 ? 0 : 1);

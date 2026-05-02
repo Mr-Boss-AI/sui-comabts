@@ -18,6 +18,7 @@ import type { OnChainCharacter } from "@/lib/sui-contracts";
 import type { FightHistoryEntry } from "@/types/ws-messages";
 import { EMPTY_EQUIPMENT, cloneEquipment } from "@/lib/loadout";
 import type { AuthPhase } from "@/lib/auth-phase";
+import { applyLocalAllocate } from "@/lib/stat-points";
 export type { AuthPhase } from "@/lib/auth-phase";
 
 export interface GameState {
@@ -169,6 +170,7 @@ export type GameAction =
   | { type: "SET_AUTH_PHASE"; phase: AuthPhase }
   | { type: "SET_OPPONENT_DISCONNECT"; payload: GameState["opponentDisconnect"] }
   | { type: "SET_TURN_PAUSE"; paused: boolean; remainingMs: number | null; deadline: number | null }
+  | { type: "LOCAL_ALLOCATE"; strength: number; dexterity: number; intuition: number; endurance: number }
   | { type: "BUMP_ONCHAIN_REFRESH" }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
   | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
@@ -354,6 +356,31 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case "SET_AUTH_PHASE":
       if (state.authPhase === action.phase) return state;
       return { ...state, authPhase: action.phase };
+    case "LOCAL_ALLOCATE": {
+      // BUG B fix (2026-05-02 retest): after a successful on-chain
+      // allocate_points tx, immediately reflect the new stats locally.
+      // The server-side WS sync is best-effort — if the WS auth is mid-
+      // reconnect when we send `allocate_points`, the server rejects with
+      // "Not authenticated. Send auth_request first." and its in-memory
+      // stats stay stale until the next get_character refresh. The local
+      // dispatch ensures the user sees the correct stats immediately
+      // regardless of WS state. Server eventually reconciles via chain
+      // re-read on next reconnect.
+      if (!state.character) return state;
+      const next = applyLocalAllocate(
+        { stats: state.character.stats, unallocatedPoints: state.character.unallocatedPoints },
+        action,
+      );
+      if (!next) return state;
+      return {
+        ...state,
+        character: {
+          ...state.character,
+          stats: next.stats,
+          unallocatedPoints: next.unallocatedPoints,
+        },
+      };
+    }
     case "SET_OPPONENT_DISCONNECT":
       return { ...state, opponentDisconnect: action.payload };
     case "SET_TURN_PAUSE": {
