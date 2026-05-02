@@ -1,7 +1,40 @@
 # SUI Combats — Mainnet Deployment Prep Checklist
 
 > **READ THIS BEFORE ANY MAINNET ACTION.** Testnet lessons encoded here.
-> Last updated: 2026-04-18, after Phase 0 + 0.5 upgrade landed on testnet.
+> Last updated: 2026-05-03, after the v5 testnet hardening pass and
+> repo cleanup. The Sui-protocol content (sections A–H) is unchanged
+> from the original 2026-04-18 draft — those facts are baked into the
+> chain semantics, not our code state.
+
+---
+
+## Current state — 2026-05-03
+
+**v5 is the testnet codename.** Branch `feature/v5-redeploy`, commit
+`dc28eff` (final code) + the cleanup commit immediately after. v5 is
+a fresh `sui client publish` of the entire package — not an upgrade
+of any prior package. Per section A below, that's the only valid
+mainnet path too.
+
+**v5.1 is the planned mainnet republish.** It bundles every Move-side
+change still pending so we never re-publish for a single fix:
+
+| Item | Move work | Why |
+|---|---|---|
+| Player-signed settlement attestation | new `settle_wager_attested(wager, winner, sig_a, sig_b)` entry | Closes the TREASURY-key-holder trust assumption (server can pick wrong winner) |
+| `CharacterRegistry` | shared object mapping `address → ID`; aborts new mints when wallet already has one | Closes layer 3 of the duplicate-mint bug (UI bypass via direct Slush PTB) |
+| `burn_character` | admin-gated entry to retire a Character object | Cleanup for legacy mr_boss + sx multi-Character residue |
+| Admin-signed loot mint | reuse existing `item::mint_item` with rarity + stat-roll math from `server/src/game/loot.ts` | Replace the v5 disabled "fake loot" path with real on-chain Item NFTs |
+
+**Mainnet readiness:** 5/8 original blockers + 5 hotfixes closed (see
+`STATUS.md` → "Mainnet readiness"). The only ⚠️ items are (a) Block 2
+end-to-end validation gated on Supabase provisioning, and (b) the
+v5.1 republish above.
+
+**Test gauntlet:** 9 suites, 475/475 PASS. Plus 35/35 Move unit tests
+in `contracts/tests/`. See `STATUS.md` → "Test totals".
+
+---
 
 ---
 
