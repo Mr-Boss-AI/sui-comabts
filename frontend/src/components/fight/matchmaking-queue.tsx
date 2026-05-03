@@ -10,6 +10,7 @@ import { useDAppKit } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
+import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
@@ -91,7 +92,12 @@ function WagerLobbyCard({ entry, isOwn, onAccept, onCancel, signing }: {
 export function MatchmakingQueue() {
   const { state, dispatch } = useGame();
   const { fightQueue, character, wagerLobby } = state;
-  const [wagerAmount, setWagerAmount] = useState(0.1);
+  // Stake is held as a STRING — the raw user text — so the input is
+  // freely editable (clearable, partial like "0.", multi-digit edits)
+  // without snap-back. `parseWagerInput` validates on every render
+  // for live UX hints, and again on submit (Create Wager) as the
+  // authoritative gate. See `frontend/src/lib/wager-input.ts`.
+  const [wagerInput, setWagerInput] = useState(String(MIN_STAKE_SUI));
   const [selectedType, setSelectedType] = useState<FightType>("friendly");
   const [signing, setSigning] = useState(false);
   const dAppKit = useDAppKit();
@@ -100,6 +106,11 @@ export function MatchmakingQueue() {
   // create_wager tx (typical gas is <0.005 SUI) and prevents the user from
   // staking literally everything and then bricking the next call.
   const GAS_BUFFER_SUI = 0.05;
+  const parsedWager = parseWagerInput(wagerInput);
+  // Numeric stake for downstream calls — when the input is invalid we
+  // still need *some* number for messaging like the lock-escrow line;
+  // fall back to the minimum (it's the floor anyway, never overstates).
+  const wagerAmount = parsedWager.ok ? parsedWager.amount : MIN_STAKE_SUI;
   const insufficientFunds = wagerAmount + GAS_BUFFER_SUI > balance.sui;
 
   const level = character?.level ?? 1;
@@ -115,10 +126,18 @@ export function MatchmakingQueue() {
     // ignored and could only lie. The hook's Save Loadout flow puts the
     // truth on-chain in DOFs; the server reads those.
     if (selectedType === "wager") {
+      // Authoritative validation gate. The button is disabled when the
+      // parsed input is invalid, but a determined user could still get
+      // here via keyboard — surface a clear error and bail before
+      // signing rather than rounding silently.
+      if (!parsedWager.ok) {
+        dispatch({ type: "SET_ERROR", message: parsedWager.reason });
+        return;
+      }
       // Sign create_wager on-chain first
       setSigning(true);
       try {
-        const stakeAmountMist = BigInt(Math.round(wagerAmount * 1_000_000_000));
+        const stakeAmountMist = BigInt(Math.round(parsedWager.amount * 1_000_000_000));
         const tx = buildCreateWagerTx(stakeAmountMist);
 
         const signer = new CurrentAccountSigner(dAppKit as any);
@@ -337,33 +356,47 @@ export function MatchmakingQueue() {
                 <div className="flex items-center gap-2">
                   <label className="text-sm text-zinc-400">Stake (SUI):</label>
                   <input
-                    type="number"
-                    min={0.1}
-                    step={0.1}
-                    value={wagerAmount}
-                    onChange={(e) => setWagerAmount(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
-                    className="w-24 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100"
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={wagerInput}
+                    placeholder={`${MIN_STAKE_SUI} minimum`}
+                    onChange={(e) => setWagerInput(e.target.value)}
+                    aria-invalid={!parsedWager.ok}
+                    className={`w-24 bg-zinc-800 border rounded px-2 py-1 text-sm text-zinc-100 ${
+                      parsedWager.ok ? "border-zinc-700" : "border-red-700/60"
+                    }`}
                   />
                 </div>
                 <p className="text-xs text-zinc-500">
                   Wallet balance: <span className="text-amber-300 font-mono">{balance.sui.toFixed(3)} SUI</span>
                   {balance.error ? <span className="text-red-400 ml-2">({balance.error})</span> : null}
                 </p>
-                <p className="text-xs text-zinc-500">
-                  Your wallet will lock {wagerAmount} SUI in on-chain escrow.
-                  Winner gets 95%. 5% platform fee.
-                </p>
-                {insufficientFunds && (
+                {parsedWager.ok ? (
+                  <p className="text-xs text-zinc-500">
+                    Your wallet will lock {parsedWager.amount} SUI in on-chain escrow.
+                    Winner gets 95%. 5% platform fee.
+                  </p>
+                ) : (
+                  <p className="text-xs text-red-400">{parsedWager.reason}</p>
+                )}
+                {parsedWager.ok && insufficientFunds && (
                   <p className="text-xs text-red-400">
                     Insufficient SUI. Need at least {(wagerAmount + GAS_BUFFER_SUI).toFixed(3)} (stake + ~{GAS_BUFFER_SUI} gas).
                   </p>
                 )}
-                <Button onClick={handleQueue} className="w-full" disabled={signing || insufficientFunds}>
+                <Button
+                  onClick={handleQueue}
+                  className="w-full"
+                  disabled={signing || !parsedWager.ok || insufficientFunds}
+                >
                   {signing
                     ? "Signing transaction..."
-                    : insufficientFunds
-                      ? "Insufficient SUI"
-                      : "Create Wager & Lock SUI"}
+                    : !parsedWager.ok
+                      ? "Enter a valid stake"
+                      : insufficientFunds
+                        ? "Insufficient SUI"
+                        : "Create Wager & Lock SUI"}
                 </Button>
               </div>
             )}
