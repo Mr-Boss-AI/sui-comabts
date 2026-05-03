@@ -194,7 +194,7 @@ burn_character + on-chain loot mint).**
 
 ---
 
-## Test totals — 10 gauntlets / 528 assertions
+## Test totals — 11 gauntlets / 607 assertions
 
 Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 
@@ -210,7 +210,8 @@ Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 | `qa-stat-points.ts` | `effectiveUnallocatedPoints(server, chain)` clamp, `isAwaitingChainCatchup`, NaN/negative sanitization, `applyLocalAllocate` reducer helper | 45 |
 | `qa-wager-register.ts` | WS ACK happy path, silent-WS-loss → adopt-wager recovery, other-player's lobby_added doesn't false-ACK, both-paths-fail, throw handling, race resolution | 25 |
 | `qa-equip-picker.ts` | `buildSlotPickerEntries` — locked items kept + annotated, sort order (unlocked alpha → locked asc level), kiosk + pending-equipped exclusion, slot-type matching across all 10 slots, dedup with on-chain wins, boundary `levelReq === level` is unlocked | 53 |
-| **Total** | | **528 / 528 PASS** |
+| `qa-combat-stats.ts` | Element-by-element parity of LEVEL_HP + LEVEL_WEAPON_DAMAGE between server config and frontend mirror, maxHp formula at every level, equipment hpBonus added flat, server `deriveCombatStats` agrees with frontend `computeDerivedStats` for the live-test Mr_Boss / Sx fixtures | 79 |
+| **Total** | | **607 / 607 PASS** |
 
 Plus 35/35 Move unit tests under `contracts/tests/` (`sui move test`).
 

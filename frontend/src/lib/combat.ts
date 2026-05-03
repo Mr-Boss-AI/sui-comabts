@@ -1,8 +1,63 @@
 import type { CharacterStats, DerivedStats, EquipmentSlots, Item } from "@/types/game";
 
-// Fibonacci HP per level (matches server)
-const LEVEL_HP = [0, 40, 65, 105, 170, 275, 445, 720, 1165];
-const LEVEL_WEAPON_DAMAGE = [0, 6, 8, 16, 20, 42, 52, 84, 136];
+// Per-level HP and weapon-damage tables. **Server is canonical** —
+// `server/src/config.ts::GAME_CONSTANTS` is what combat actually runs.
+// These mirrors exist so the character page can show the correct
+// max-HP and base-attack-power without a server round-trip. Drift here
+// produced the live-test 2026-05-03 bug where the character page
+// reported HP 178 (old Fibonacci-curve table) while combat used HP 93
+// (rebalanced "chunky-progression" table) for the same Lv4 Mr_Boss.
+//
+// `qa-combat-stats.ts` pins these element-by-element against the
+// server config so a future rebalance can't silently desync again.
+// Indices 1..20 are the playable range; index 0 is the unused L0 slot.
+export const LEVEL_HP = [
+  0,    // L0 (unused)
+  40,   // L1
+  50,   // L2
+  65,   // L3
+  85,   // L4
+  110,  // L5
+  140,  // L6
+  175,  // L7
+  215,  // L8
+  260,  // L9
+  310,  // L10
+  365,  // L11
+  425,  // L12
+  490,  // L13
+  560,  // L14
+  635,  // L15
+  715,  // L16
+  800,  // L17
+  890,  // L18
+  985,  // L19
+  1085, // L20
+] as const;
+
+export const LEVEL_WEAPON_DAMAGE = [
+  0,   // L0 (unused)
+  6,   // L1
+  8,   // L2
+  11,  // L3
+  14,  // L4
+  18,  // L5
+  22,  // L6
+  27,  // L7
+  32,  // L8
+  38,  // L9
+  44,  // L10
+  50,  // L11
+  57,  // L12
+  64,  // L13
+  72,  // L14
+  80,  // L15
+  88,  // L16
+  97,  // L17
+  106, // L18
+  116, // L19
+  126, // L20
+] as const;
 
 function sumEquipmentStat(
   equipment: EquipmentSlots,

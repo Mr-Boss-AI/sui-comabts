@@ -200,11 +200,19 @@ export function CharacterProfile({ character, compact }: { character: Character;
   const intBonus = sumEquipmentStat(eq, "intuitionBonus");
   const endBonus = sumEquipmentStat(eq, "enduranceBonus");
 
-  const statRows: [string, number, number, string][] = [
-    ["STR", character.stats.strength, strBonus, "text-red-400"],
-    ["DEX", character.stats.dexterity, dexBonus, "text-cyan-400"],
-    ["INT", character.stats.intuition, intBonus, "text-purple-400"],
-    ["END", character.stats.endurance, endBonus, "text-amber-400"],
+  // The bar fill class needs to appear as a literal string somewhere in
+  // the source — Tailwind v4's JIT scanner does not evaluate runtime
+  // string ops like `color.replace("text-", "bg-")`, so a computed
+  // `bg-red-400` is silently absent from the bundle. Carrying the
+  // literal `bg-...` token alongside the `text-...` token here is what
+  // got STR/DEX/INT bars rendering again (END only worked because
+  // `bg-amber-400` happens to appear as a literal elsewhere — e.g. the
+  // dirty-equipment-slot dot, opponent-disconnected banner).
+  const statRows: [string, number, number, string, string][] = [
+    ["STR", character.stats.strength,  strBonus, "text-red-400",    "bg-red-400"],
+    ["DEX", character.stats.dexterity, dexBonus, "text-cyan-400",   "bg-cyan-400"],
+    ["INT", character.stats.intuition, intBonus, "text-purple-400", "bg-purple-400"],
+    ["END", character.stats.endurance, endBonus, "text-amber-400",  "bg-amber-400"],
   ];
 
   return (
@@ -305,13 +313,13 @@ export function CharacterProfile({ character, compact }: { character: Character;
             <div>
               <h3 className="text-[10px] text-amber-700/80 uppercase tracking-widest mb-2 font-bold border-b border-amber-900/15 pb-1">Primary Attributes</h3>
               <div className="space-y-1.5 text-sm">
-                {statRows.map(([label, base, bonus, color]) => {
+                {statRows.map(([label, base, bonus, color, barBg]) => {
                   const total = base + bonus;
                   return (
                     <div key={label} className="flex items-center justify-between">
                       <span className="text-zinc-500 w-10 text-xs font-bold">{label}</span>
                       <div className="flex-1 mx-2 h-1 bg-zinc-900 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${color.replace("text-", "bg-")} opacity-70`} style={{ width: `${Math.min(100, (total / 20) * 100)}%` }} />
+                        <div className={`h-full rounded-full ${barBg} opacity-70`} style={{ width: `${Math.min(100, (total / 20) * 100)}%` }} />
                       </div>
                       <span className={`font-mono font-bold text-xs ${color}`}>
                         {total > base ? (

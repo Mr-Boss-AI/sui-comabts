@@ -104,26 +104,57 @@ The distribution defines your archetype:
 
 ### 3.3 Stat → Combat Formulas
 
+> **Canonical source:** `server/src/config.ts::GAME_CONSTANTS` and
+> `server/src/game/combat.ts::deriveCombatStats`. The frontend's
+> `lib/combat.ts` mirrors the same math for the character page —
+> `qa-combat-stats.ts` pins parity element-by-element. If you change a
+> coefficient or table value below, change it in the server config
+> first; the test gauntlet will fail until the frontend mirror catches
+> up.
+>
+> **2026-05-03 rewrite:** the original GDD pre-rebalance formulas
+> (HP from endurance, attack from STR/DEX/INT mix, crit cap 75 %,
+> exponential defense) were superseded during the v4→v5 hardening
+> cycle. A stale frontend mirror of the HP table produced ~2× HP on
+> the character page vs combat (live-test bug). The values below match
+> what the testnet build actually runs.
+
 ```
-max_hp = 100 + (endurance * 10) + equipment_hp_bonus
+// HP — purely level-driven, equipment hp_bonus added flat.
+max_hp = LEVEL_HP[level] + equipment_hp_bonus
+  // L1=40, L2=50, L3=65, L4=85, L5=110, L6=140, L7=175, L8=215,
+  // L9=260, L10=310, L11=365, L12=425, L13=490, L14=560, L15=635,
+  // L16=715, L17=800, L18=890, L19=985, L20=1085
 
-attack_power = (strength * 0.6) + (dexterity * 0.3) + (intuition * 0.1) + weapon_damage
+// Attack power — base level damage + weapon avg + STR/DEX scaling.
+attack_power = LEVEL_WEAPON_DAMAGE[level]
+             + (weapon_min_dmg + weapon_max_dmg) / 2
+             + effective_strength  * 0.5
+             + effective_dexterity * 0.15
+             + equipment_damage_bonus
+  // LEVEL_WEAPON_DAMAGE: L1=6, L2=8, L3=11, L4=14, L5=18, L6=22, L7=27,
+  // L8=32, L9=38, L10=44, L11=50, L12=57, L13=64, L14=72, L15=80,
+  // L16=88, L17=97, L18=106, L19=116, L20=126
+  // effective_X = base_stat + equipment_X_bonus.
 
-crit_chance = min(75%, (intuition * 0.8) - opponent_anti_crit)
-  // Anti-crit comes from opponent's endurance: anti_crit = endurance * 0.4
+crit_chance = min(25%, effective_intuition * 0.5 - opponent_anti_crit)
+  // anti_crit = (opponent.endurance + opp.equip.endurance_bonus) * 0.3
 
-crit_multiplier = 2.0 + (intuition * 0.005) + equipment_crit_bonus
-  // Default 2x, max ~3.5x at high intuition + gear
+crit_multiplier = 1.5 + effective_intuition * 0.01 + equipment_crit_bonus
+  // base 1.5×, ~1.7× at INT 20, gear contributes flat additions.
+  // crit damage applies armor at 50 % effectiveness (CRIT_ARMOR_PEN).
 
-evasion_chance = min(60%, (dexterity * 0.7) - opponent_anti_evasion)
-  // Anti-evasion comes from opponent's strength: anti_evasion = strength * 0.5
+evasion_chance = min(30%, effective_dexterity * 0.5 - opponent_anti_evasion)
+  // anti_evasion = (opponent.strength + opp.equip.strength_bonus) * 0.3
 
-armor = equipment_armor_total
-  // Flat subtraction from raw damage
+armor = sum of equipment armor_bonus
+  // Flat subtraction from raw damage; halved on crits.
 
-defense = endurance * 0.3 + equipment_defense
-  // Each 250 defense absorbs 50% of post-armor damage (exponential diminishing returns)
-  // Formula: final_dmg = post_armor_dmg * 2^(-defense / 250)
+defense = effective_endurance * 0.3 + equipment_defense_bonus
+  // Flat post-armor subtraction. (No exponential curve in current build.)
+
+// Damage roll: every hit lands raw damage in [0.8 × attack_power,
+// 1.2 × attack_power] before armor + defense subtraction. Floor 1.
 ```
 
 ### 3.4 Counter Triangle

@@ -157,13 +157,14 @@ Pure unit tests; no chain or DB calls. Run from `server/`:
 cd server
 for f in qa-xp qa-marketplace qa-treasury-queue qa-character-mint \
          qa-orphan-sweep qa-reconnect-grace qa-fight-pause \
-         qa-stat-points qa-wager-register qa-equip-picker; do
+         qa-stat-points qa-wager-register qa-equip-picker \
+         qa-combat-stats; do
   echo "=== $f ==="
   npx tsx ../scripts/$f.ts | tail -3
 done
 ```
 
-Total: **528 / 528 PASS** across 10 gauntlets. See [`STATUS.md`](STATUS.md)
+Total: **607 / 607 PASS** across 11 gauntlets. See [`STATUS.md`](STATUS.md)
 for what each one covers.
 
 Plus on-chain smoke tests: `npx tsx ../scripts/qa-chain-gauntlet.ts`
