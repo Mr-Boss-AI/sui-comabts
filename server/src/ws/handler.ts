@@ -38,6 +38,7 @@ import {
   handlePlayerDisconnect,
   handlePlayerReconnect,
 } from './fight-room';
+import { getRecentOutcome } from '../data/recent-outcomes';
 import {
   registerChatClient,
   unregisterChatClient,
@@ -519,6 +520,22 @@ async function acceptAuthenticatedSession(
   // back to the rejoining client. Idempotent for wallets that aren't
   // mid-fight: the helper returns early when no timer is pending.
   handlePlayerReconnect(walletAddress);
+
+  // Bug 3 (live test 2026-05-03) — if the previous session ended while
+  // this wallet was offline (forfeit fired during disconnect, or tab
+  // closed right before settlement), the original `fight_end` vanished
+  // into the closed socket. Replay it as `recent_fight_settled` so the
+  // returning player sees Victory/Defeat once. Frontend uses
+  // localStorage to dedupe — re-replays after subsequent reconnects
+  // are skipped client-side because the ack is already recorded.
+  const recent = getRecentOutcome(walletAddress);
+  if (recent) {
+    send(client, {
+      type: 'recent_fight_settled',
+      fight: recent.fight,
+      loot: recent.loot,
+    });
+  }
 
   // The "joined" broadcast was previously gated on isReconnect (a flag set in
   // the legacy handleAuth). In the new flow the same wallet may auth via

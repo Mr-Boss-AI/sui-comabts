@@ -194,7 +194,7 @@ burn_character + on-chain loot mint).**
 
 ---
 
-## Test totals — 12 gauntlets / 654 assertions
+## Test totals — 13 gauntlets / 685 assertions
 
 Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 
@@ -212,7 +212,8 @@ Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 | `qa-equip-picker.ts` | `buildSlotPickerEntries` — locked items kept + annotated, sort order (unlocked alpha → locked asc level), kiosk + pending-equipped exclusion, slot-type matching across all 10 slots, dedup with on-chain wins, boundary `levelReq === level` is unlocked | 53 |
 | `qa-combat-stats.ts` | Element-by-element parity of LEVEL_HP + LEVEL_WEAPON_DAMAGE between server config and frontend mirror, maxHp formula at every level, equipment hpBonus added flat, server `deriveCombatStats` agrees with frontend `computeDerivedStats` for the live-test Mr_Boss / Sx fixtures | 79 |
 | `qa-wager-form.ts` | `parseWagerInput` — clearable input (empty/whitespace/lone-dot rejected without snap-back), below-min floor named in error, decimal-precision cap at SUI's 9 places, non-numeric / scientific / signed / hex / comma all rejected, whitespace trimmed, defensive null/undefined, full live-repro keystroke sequence | 47 |
-| **Total** | | **654 / 654 PASS** |
+| `qa-reconnect-modal.ts` | Server `recent-outcomes.ts` (record / get / clear / multi-wallet isolation / overwrite / empty-wallet defense) + frontend `shouldReplayOutcome` pure dedupe (no ack → replay, matching ack → skip, newer fight than ack → replay) + full live-bug repro (forfeit-during-disconnect → reconnect-replay → ack-write → no double-pop) | 31 |
+| **Total** | | **685 / 685 PASS** |
 
 Plus 35/35 Move unit tests under `contracts/tests/` (`sui move test`).
 

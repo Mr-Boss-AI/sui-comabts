@@ -108,6 +108,13 @@ export type ServerMessage =
   | { type: "turn_start"; turn: number; deadline: number }
   | { type: "turn_result"; result: TurnResult; fight: FightState }
   | { type: "fight_end"; fight: FightState; loot: LootBoxResult }
+  /** Bug 3 (2026-05-03): replays the per-wallet outcome of the most
+   *  recently settled fight when a player auths in. Lets a player
+   *  who was disconnected at settle time (forfeit / tab-close) see
+   *  Victory/Defeat once on their next session. Frontend dedupes via
+   *  `lib/fight-outcome-ack.ts` so this never re-fires after the
+   *  modal has been dismissed. */
+  | { type: "recent_fight_settled"; fight: FightState; loot: LootBoxResult }
   | { type: "chat"; message: ChatMessage }
   | { type: "online_players"; players: OnlinePlayer[] }
   | { type: "player_joined"; player: OnlinePlayer }

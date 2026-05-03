@@ -18,6 +18,10 @@ import type { Item } from "@/types/game";
 import { playSoundIf } from "@/lib/sounds";
 import { fetchCharacterNFT, fetchOwnedItems, fetchKioskItems } from "@/lib/sui-contracts";
 import { computeDirtySlots } from "@/lib/loadout";
+import {
+  getAcknowledgedFightId,
+  shouldReplayOutcome,
+} from "@/lib/fight-outcome-ack";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 
 export default function GameProvider({
@@ -212,6 +216,27 @@ export default function GameProvider({
             playSoundIf("defeat");
           }
           break;
+        case "recent_fight_settled": {
+          // Bug 3 (2026-05-03) — server replays the most recent settled
+          // fight on auth so a player who was offline at settle time
+          // sees the modal once. Skip if the user has already
+          // acknowledged this fight id on a prior session (localStorage
+          // dedupe via `lib/fight-outcome-ack.ts`).
+          const lastAck = walletAddress
+            ? getAcknowledgedFightId(walletAddress)
+            : null;
+          if (shouldReplayOutcome(msg.fight.id, lastAck)) {
+            dispatch({ type: "SET_FIGHT", fight: msg.fight });
+            dispatch({ type: "SET_LOOT_RESULT", loot: msg.loot });
+            dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
+            // Refresh chain-side stats once — XP / level / rating land
+            // via `update_after_fight` shortly after server settlement.
+            socket.send({ type: "get_character" });
+            // No victory/defeat sound — the moment of settlement was
+            // earlier; replaying the sting now would feel jarring.
+          }
+          break;
+        }
         case "character_deleted":
           dispatch({ type: "SET_CHARACTER", character: null as any });
           dispatch({ type: "SET_ONCHAIN_CHARACTER", data: null });

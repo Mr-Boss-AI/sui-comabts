@@ -9,6 +9,7 @@ import { DamageLog } from "./damage-log";
 import { TurnTimer } from "./turn-timer";
 import { OpponentDisconnectedBanner } from "./opponent-disconnected-banner";
 import { FightResultModal } from "./fight-result-modal";
+import { setAcknowledgedFightId } from "@/lib/fight-outcome-ack";
 import { ITEM_TYPES, RARITY_COLORS, type Zone, type EquipmentSlots, type Item } from "@/types/game";
 
 function FighterDisplay({ name, level, equipment }: { name: string; level: number; equipment: EquipmentSlots }) {
@@ -249,6 +250,13 @@ export function FightArena() {
           loot={lootResult ?? { xpGained: 0, ratingChange: 0 }}
           myAddress={myAddress}
           onClose={() => {
+            // Bug 3 (2026-05-03) — record this fight as acknowledged
+            // so a server-side `recent_fight_settled` replay on the
+            // next session won't re-pop the modal the player just
+            // dismissed.
+            if (myAddress && fight.id) {
+              setAcknowledgedFightId(myAddress, fight.id);
+            }
             dispatch({ type: "SET_FIGHT", fight: null });
             dispatch({ type: "SET_LOOT_RESULT", loot: null });
           }}

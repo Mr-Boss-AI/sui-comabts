@@ -23,6 +23,7 @@ import {
   updateCharacter,
   persistItems,
 } from '../data/characters';
+import { recordRecentOutcome } from '../data/recent-outcomes';
 import { dbSaveFight, dbDeleteWagerInFlight } from '../data/db';
 import {
   markDisconnect as graceMarkDisconnect,
@@ -739,17 +740,52 @@ function finishFight(
 
     // Spectators get the winner's view
     broadcastToSpectators(fight, winnerMsg);
+
+    // Bug 3 (live test 2026-05-03) — if a wallet was disconnected at
+    // settle time (forfeit, tab-closed, network drop), the sendToWallet
+    // above vanishes into the OS buffer. Stash the per-wallet outcome
+    // so the next auth handshake can replay the modal.
+    const settledAt = Date.now();
+    recordRecentOutcome(winnerWallet, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: winnerMsg.loot,
+      settledAt,
+    });
+    recordRecentOutcome(loserWallet, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: loserMsg.loot,
+      settledAt,
+    });
   } else {
     // Draw case
+    const drawLoot = {
+      xpGained: 0,
+      ratingChange: 0,
+    };
     const drawMsg: ServerMessage = {
       type: 'fight_end',
       fight: fightPayload,
-      loot: {
-        xpGained: 0,
-        ratingChange: 0,
-      },
+      loot: drawLoot,
     };
     broadcastToFight(fight, drawMsg);
+
+    // Same replay-on-reconnect coverage for draws — both participants
+    // missed the modal symmetrically.
+    const drawAt = Date.now();
+    recordRecentOutcome(fight.playerA.walletAddress, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: drawLoot,
+      settledAt: drawAt,
+    });
+    recordRecentOutcome(fight.playerB.walletAddress, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: drawLoot,
+      settledAt: drawAt,
+    });
   }
 
   // Clean up client fight references
