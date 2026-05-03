@@ -194,7 +194,7 @@ burn_character + on-chain loot mint).**
 
 ---
 
-## Test totals — 9 gauntlets / 475 assertions
+## Test totals — 10 gauntlets / 528 assertions
 
 Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 
@@ -209,7 +209,8 @@ Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 | `qa-fight-pause.ts` | `pauseFightTimer` / `resumeFightTimer` math — captures exact remaining ms, idempotent, single onTimeout fire across roundtrip, locked-choice preservation | 46 |
 | `qa-stat-points.ts` | `effectiveUnallocatedPoints(server, chain)` clamp, `isAwaitingChainCatchup`, NaN/negative sanitization, `applyLocalAllocate` reducer helper | 45 |
 | `qa-wager-register.ts` | WS ACK happy path, silent-WS-loss → adopt-wager recovery, other-player's lobby_added doesn't false-ACK, both-paths-fail, throw handling, race resolution | 25 |
-| **Total** | | **475 / 475 PASS** |
+| `qa-equip-picker.ts` | `buildSlotPickerEntries` — locked items kept + annotated, sort order (unlocked alpha → locked asc level), kiosk + pending-equipped exclusion, slot-type matching across all 10 slots, dedup with on-chain wins, boundary `levelReq === level` is unlocked | 53 |
+| **Total** | | **528 / 528 PASS** |
 
 Plus 35/35 Move unit tests under `contracts/tests/` (`sui move test`).
 

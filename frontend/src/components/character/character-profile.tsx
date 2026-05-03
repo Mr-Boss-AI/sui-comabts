@@ -6,10 +6,11 @@ import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { computeDerivedStats, getArchetype, getArchetypeColor } from "@/lib/combat";
 import { effectiveUnallocatedPoints } from "@/lib/stat-points";
+import { buildSlotPickerEntries } from "@/lib/equipment-picker";
 import { MAX_LEVEL, getXpInCurrentLevel, getXpProgress, getXpSpanForLevel } from "@/types/game";
 import type { Character, EquipmentSlots, Item } from "@/types/game";
 import { StatAllocateModal } from "./stat-allocate-modal";
-import { RARITY_COLORS, SLOT_TO_ITEM_TYPE, EQUIPMENT_SLOT_LABELS } from "@/types/game";
+import { RARITY_COLORS, EQUIPMENT_SLOT_LABELS } from "@/types/game";
 import { ItemDetailModal } from "@/components/items/item-detail-modal";
 import { ItemCard } from "@/components/items/item-card";
 import { Modal } from "@/components/ui/modal";
@@ -142,24 +143,27 @@ export function CharacterProfile({ character, compact }: { character: Character;
   }, [state.pendingEquipment]);
 
   // Effective equip level = min(server.level, onChain.level).
-  // Server level can be ahead of chain (pre-revert test-XP drift). Filtering by
-  // the minimum prevents offering items the chain will reject with ELevelTooLow.
+  // Server level can be ahead of chain (pre-revert test-XP drift). Used by
+  // `buildSlotPickerEntries` to flag locked items — the chain would
+  // ELevelTooLow them anyway, so the picker greys them out client-side.
   const effectiveLevel = Math.min(
     character.level,
     state.onChainCharacter?.level ?? character.level,
   );
 
-  const equippable = useMemo(() => {
+  // The picker shows ALL slot-compatible items the player owns —
+  // unlocked items first (by name), locked items after (by level then
+  // name). Locked items render dimmed with a "Lv N" badge so the
+  // player can see what's waiting for them at the next level instead
+  // of the "where did my Epic weapon go?" cliff.
+  const pickerEntries = useMemo(() => {
     if (!selectedSlot) return [];
-    // Merge server + on-chain items, dedup by ID (prefer on-chain version)
-    const byId = new Map<string, Item>();
-    for (const item of state.inventory) byId.set(item.id, item);
-    for (const item of state.onChainItems) byId.set(item.id, item);
-    return Array.from(byId.values()).filter((item) =>
-      !item.inKiosk &&
-      !equippedPendingIds.has(item.id) &&
-      SLOT_TO_ITEM_TYPE[selectedSlot].includes(item.itemType) &&
-      item.levelReq <= effectiveLevel
+    return buildSlotPickerEntries(
+      selectedSlot,
+      state.inventory,
+      state.onChainItems,
+      equippedPendingIds,
+      effectiveLevel,
     );
   }, [selectedSlot, state.inventory, state.onChainItems, equippedPendingIds, effectiveLevel]);
 
@@ -392,7 +396,9 @@ export function CharacterProfile({ character, compact }: { character: Character;
         />
       )}
 
-      {/* Empty slot clicked — show compatible items from inventory */}
+      {/* Empty slot clicked — show compatible items from inventory.
+          Locked items render dimmed with a "Lv N" badge instead of being
+          filtered out, so progression motivation stays visible. */}
       {selectedSlot && !selectedItem && (
         <Modal
           open
@@ -400,17 +406,19 @@ export function CharacterProfile({ character, compact }: { character: Character;
           title={`${EQUIPMENT_SLOT_LABELS[selectedSlot]} — Choose Item`}
           wide
         >
-          {equippable.length === 0 ? (
+          {pickerEntries.length === 0 ? (
             <p className="text-zinc-400 text-sm text-center py-4">
               No compatible items in inventory
             </p>
           ) : (
             <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {equippable.map((item) => (
+              {pickerEntries.map(({ item, locked, lockedReason }) => (
                 <ItemCard
                   key={item.id}
                   item={item}
-                  onClick={() => handleEquip(item)}
+                  onClick={locked ? undefined : () => handleEquip(item)}
+                  locked={locked}
+                  lockedReason={lockedReason}
                 />
               ))}
             </div>
