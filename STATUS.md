@@ -194,7 +194,7 @@ burn_character + on-chain loot mint).**
 
 ---
 
-## Test totals — 13 gauntlets / 685 assertions
+## Test totals — 14 gauntlets / 731 assertions
 
 Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 
@@ -205,7 +205,7 @@ Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 | `qa-treasury-queue.ts` | Single-flight FIFO, bounded concurrency, retry-then-succeed, exhaustion preserves last error, env-driven concurrency knob, custom backoff arrays | 25 |
 | `qa-character-mint.ts` | Auth-phase state machine (Block A layer 1), duplicate-mint server-side guard predicate (layer 2) | 63 |
 | `qa-orphan-sweep.ts` | `sweepOne` branches: ACTIVE → admin-cancel + drop, SETTLED → drop only, WAITING → defensive drop, RPC-fail → leave row, throw propagation | 30 |
-| `qa-reconnect-grace.ts` | `markDisconnect` / `markReconnect` state machine — pending detection, idempotency, custom grace, multi-wallet independence, full disconnect → reconnect → disconnect → forfeit roundtrip | 35 |
+| `qa-reconnect-grace.ts` | `markDisconnect` / `markReconnect` state machine — pending detection, idempotency, custom grace, multi-wallet independence, full disconnect → reconnect → disconnect → forfeit roundtrip (per-cycle mechanics) | 35 |
 | `qa-fight-pause.ts` | `pauseFightTimer` / `resumeFightTimer` math — captures exact remaining ms, idempotent, single onTimeout fire across roundtrip, locked-choice preservation | 46 |
 | `qa-stat-points.ts` | `effectiveUnallocatedPoints(server, chain)` clamp, `isAwaitingChainCatchup`, NaN/negative sanitization, `applyLocalAllocate` reducer helper | 45 |
 | `qa-wager-register.ts` | WS ACK happy path, silent-WS-loss → adopt-wager recovery, other-player's lobby_added doesn't false-ACK, both-paths-fail, throw handling, race resolution | 25 |
@@ -213,7 +213,8 @@ Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 | `qa-combat-stats.ts` | Element-by-element parity of LEVEL_HP + LEVEL_WEAPON_DAMAGE between server config and frontend mirror, maxHp formula at every level, equipment hpBonus added flat, server `deriveCombatStats` agrees with frontend `computeDerivedStats` for the live-test Mr_Boss / Sx fixtures | 79 |
 | `qa-wager-form.ts` | `parseWagerInput` — clearable input (empty/whitespace/lone-dot rejected without snap-back), below-min floor named in error, decimal-precision cap at SUI's 9 places, non-numeric / scientific / signed / hex / comma all rejected, whitespace trimmed, defensive null/undefined, full live-repro keystroke sequence | 47 |
 | `qa-reconnect-modal.ts` | Server `recent-outcomes.ts` (record / get / clear / multi-wallet isolation / overwrite / empty-wallet defense) + frontend `shouldReplayOutcome` pure dedupe (no ack → replay, matching ack → skip, newer fight than ack → replay) + full live-bug repro (forfeit-during-disconnect → reconnect-replay → ack-write → no double-pop) | 31 |
-| **Total** | | **685 / 685 PASS** |
+| `qa-grace-budget.ts` | Cumulative grace budget per (wallet, fight) — first cycle gets full budget, second cycle gets only `budget - usedMs`, three cycles totaling 70s forfeit on the third, exhausted budget → synchronous forfeit (no banner / no new timer), over-budget single cycle caps at budgetMs, different fightId resets, `clearFightGrace` wipes per-fight records, multi-wallet independent budgets in same fight | 46 |
+| **Total** | | **731 / 731 PASS** |
 
 Plus 35/35 Move unit tests under `contracts/tests/` (`sui move test`).
 

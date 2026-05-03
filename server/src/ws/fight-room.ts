@@ -24,6 +24,7 @@ import {
   persistItems,
 } from '../data/characters';
 import { recordRecentOutcome } from '../data/recent-outcomes';
+import { clearFightGrace } from './reconnect-grace';
 import { dbSaveFight, dbDeleteWagerInFlight } from '../data/db';
 import {
   markDisconnect as graceMarkDisconnect,
@@ -797,6 +798,13 @@ function finishFight(
   // Move to finished fights
   activeFights.delete(fight.id);
   finishedFights.set(fight.id, fight);
+
+  // Bug 1 (2026-05-03) — wipe per-wallet grace records for this
+  // fight so the next fight on the same wallets starts with a fresh
+  // 60 s cumulative budget. Without this, a wallet that consumed
+  // 40 s of grace in fight N would only have 20 s available in
+  // fight N+1.
+  clearFightGrace(fight.id);
 
   // Clean up spectators
   for (const spectatorWallet of fight.spectators) {

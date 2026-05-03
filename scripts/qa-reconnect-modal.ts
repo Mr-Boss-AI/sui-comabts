@@ -32,9 +32,10 @@ import {
   resetRecentOutcomesForTesting,
   recentOutcomeCountForTesting,
   type RecentOutcome,
+  type RecentOutcomeFight,
+  type RecentOutcomeLoot,
 } from '../server/src/data/recent-outcomes';
 import { shouldReplayOutcome } from '../frontend/src/lib/fight-outcome-ack';
-import type { FightState, LootBoxResult } from '../server/src/types';
 
 let passes = 0;
 let failures = 0;
@@ -52,25 +53,22 @@ function eq<T>(actual: T, expected: T, label: string): void {
   else fail(label, `actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`);
 }
 
-function mkFight(id: string, winner: string | null = null): FightState {
+function mkFight(id: string, winner: string | null = null): RecentOutcomeFight {
   return {
     id,
-    fightType: 'wager' as any,
-    status: 'finished' as any,
+    type: 'wager',
+    status: 'finished',
     winner,
     turn: 1,
-    turnDeadline: 0,
-    playerA: {} as any,
-    playerB: {} as any,
-    spectators: new Set(),
-  } as unknown as FightState;
+  };
 }
 
 function mkOutcome(fightId: string, xp: number, rating: number): RecentOutcome {
+  const loot: RecentOutcomeLoot = { xpGained: xp, ratingChange: rating };
   return {
     fightId,
     fight: mkFight(fightId),
-    loot: { xpGained: xp, ratingChange: rating } as LootBoxResult,
+    loot,
     settledAt: Date.now(),
   };
 }

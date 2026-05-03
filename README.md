@@ -158,13 +158,14 @@ cd server
 for f in qa-xp qa-marketplace qa-treasury-queue qa-character-mint \
          qa-orphan-sweep qa-reconnect-grace qa-fight-pause \
          qa-stat-points qa-wager-register qa-equip-picker \
-         qa-combat-stats qa-wager-form qa-reconnect-modal; do
+         qa-combat-stats qa-wager-form qa-reconnect-modal \
+         qa-grace-budget; do
   echo "=== $f ==="
   npx tsx ../scripts/$f.ts | tail -3
 done
 ```
 
-Total: **685 / 685 PASS** across 13 gauntlets. See [`STATUS.md`](STATUS.md)
+Total: **731 / 731 PASS** across 14 gauntlets. See [`STATUS.md`](STATUS.md)
 for what each one covers.
 
 Plus on-chain smoke tests: `npx tsx ../scripts/qa-chain-gauntlet.ts`

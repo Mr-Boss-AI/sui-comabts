@@ -18,15 +18,34 @@
  * In-memory only. Cleared on server restart — acceptable for testnet
  * polish; mainnet can promote to Supabase if persistence matters.
  */
-import type { FightState, LootBoxResult } from '../types';
+/**
+ * Wire-format snapshot of a fight at settlement. The server passes
+ * `Record<string, any>` (the output of `buildFightStatePayload`)
+ * around as the canonical fight wire payload, so this cache mirrors
+ * that loose shape rather than the strict `FightState` domain type
+ * — pinning the strict type would force a structural conversion on
+ * every record/replay path. The frontend's discriminated `FightState`
+ * shape is what actually validates this on receipt.
+ */
+export type RecentOutcomeFight = Record<string, any>;
+
+/** Per-wallet loot for one settled fight. Shape mirrors `fight_end`'s
+ *  `loot` object — `{ xpGained, ratingChange, item? }`. Loose so a
+ *  future field (e.g. `wagerPayoutMist`) drops in without churning
+ *  this type. */
+export type RecentOutcomeLoot = {
+  xpGained: number;
+  ratingChange: number;
+  item?: unknown;
+};
 
 export interface RecentOutcome {
   /** `fight.id` — used by the frontend dedupe to decide replay. */
   fightId: string;
-  /** Snapshot of `FightState` at settlement (status='finished'). */
-  fight: FightState;
+  /** Snapshot of the wire fight payload (status='finished'). */
+  fight: RecentOutcomeFight;
   /** Per-wallet loot: each wallet records its own xp / rating delta. */
-  loot: LootBoxResult;
+  loot: RecentOutcomeLoot;
   /** ms since epoch — surfaced for diagnostics, not yet acted on (a
    *  future TTL eviction could use this). */
   settledAt: number;
