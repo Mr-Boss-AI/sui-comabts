@@ -81,11 +81,16 @@ canonical id to the frontend.
 
 ---
 
-## What works (live-tested 2026-05-02)
+## What works (live-tested 2026-05-03)
 
 - ✅ **Wager fights end-to-end** — create on-chain → lobby visible to
   opponent → accept → fight → 95/5 settle with `settleWagerOnChain` →
-  WagerMatch SETTLED, escrow=0, on-chain balance changes match.
+  WagerMatch SETTLED, escrow=0, on-chain balance changes match. 12-test
+  arena gauntlet (2026-05-03 day session) covered happy path,
+  cancel-vs-accept race, low-balance UI gating, reconnect within
+  grace, forfeit-while-offline, both-players-offline, high-value
+  precision (1.0 SUI), spam create/cancel, refresh during wager,
+  back-to-back fights, walk-away-forever, no-opponent-ever.
 - ✅ **Marketplace** — kiosk create / list / buy / delist / withdraw,
   2.5 % royalty, atomic delist (delist + take + transfer in one PTB so
   NFTs never get stuck unlisted in a kiosk).
@@ -104,10 +109,14 @@ canonical id to the frontend.
   treasury-queue drain. After successful tx, frontend dispatches
   `LOCAL_ALLOCATE` immediately so stats render correctly even if the
   WS sync arrives during a reconnect window.
-- ✅ **Reconnect grace** — 60 s window from socket drop; turn timer
-  pauses; opponent sees a persistent banner with countdown; on
-  reconnect the rejoining client receives `fight_resumed` with full
-  state and can lock choices on the next turn (closes BUG C1.c).
+- ✅ **Reconnect grace — cumulative per-fight budget** — 60 s window
+  is now spent across the whole fight (not per disconnect cycle).
+  Three-cycle abuse confirmed forfeiting correctly: cycles burned
+  through 60 s → 14 s → 9 s remaining, then forfeit fired (Bug 1
+  retest, 2026-05-03 evening). Honest wifi blips still get the full
+  window; abusers who ping-pong now run out. Turn timer pauses, opponent
+  sees a persistent banner with countdown, rejoining client receives
+  `fight_resumed` with full state.
 - ✅ **Treasury sequencing** — single-flight FIFO queue serializes
   every admin tx so two settlements never compete for the same gas
   coin. Concurrency knob via `TREASURY_QUEUE_CONCURRENCY` env.
@@ -133,6 +142,85 @@ canonical id to the frontend.
 - ✅ **Shield 3-block-zone** — `getOffhandType` falls back to
   `itemType` for chain items where `offhand_type` isn't carried;
   `validateTurnAction` accepts 3 zones forming an adjacent line.
+- ✅ **Slot picker shows level-locked items dimmed** — clicking an
+  empty doll slot lists every slot-compatible item the player owns;
+  items above the player's level render dimmed/grayscaled with a
+  red `Lv N` badge instead of being silently filtered out. Closes
+  the "where did my Epic weapon go?" cliff.
+- ✅ **Character page consistency with combat math** — server's
+  rebalanced LEVEL_HP / LEVEL_WEAPON_DAMAGE tables mirrored on the
+  frontend element-by-element; STR / DEX / INT / END bars all
+  render with their literal `bg-…` colors (Tailwind v4 JIT can't
+  see `replace("text-", "bg-")` derivations). Mr_Boss page reads
+  the same HP/ATK numbers combat actually uses.
+- ✅ **Wager stake input clearable** — the create-wager field is
+  bound to a string, validation runs on submit, empty / partial
+  ("0.") keystrokes don't snap back to 0.1. Below-min and
+  non-numeric inputs surface a named error inline. Verified 2026-05-03
+  evening: field fully clearable, "Minimum stake is 0.1 SUI"
+  displays correctly.
+- ✅ **Outcome modal replays on rejoin** — server caches the
+  per-wallet `RecentOutcome` at settle time; on the next
+  `auth_ok` for that wallet, emits `recent_fight_settled` so a
+  player who was disconnected at settle time (forfeit, closed tab,
+  network drop) sees Victory/Defeat once when they come back.
+  Frontend dedupes via localStorage. Verified live 2026-05-03
+  evening: Mr_Boss closed tab → forfeited offline → reconnected →
+  full Defeat modal with XP/rating/wager breakdown; Sx got mirrored
+  Victory.
+- ✅ **Lv5 progression** — verified 2026-05-03 evening:
+  - Tap-to-equip auto-unequips the previous item + equips the new
+    one in a single click. HP 113→116, ATK 26→29.5, Crit 2.5→7.5,
+    Evasion 6.5→13.5 on Mr_Boss's Epic Cursed Greatsword swap.
+  - `allocate_points` regression stays fixed across two characters
+    + two level-ups: Mr_Boss Lv4→Lv5 (day), Sx Lv5 (evening). Slush
+    approved both, no MoveAbort code 2.
+  - Lv5 vs Lv5 wager (0.4 SUI): Sx evasion build (Twin Stilettos +
+    Wooden Buckler + Magic Ring) beat Mr_Boss crit build (Cursed
+    Greatsword + Ornate Mithril Breastplate + Copper Band) in
+    2 turns. 95/5 settle clean, XP +43/+100, ELO ±17. Dual-wield +
+    shield combo did not crash the contract.
+
+---
+
+## Known polish backlog (low-priority, non-blocking)
+
+These are non-blocking issues observed during the 2026-05-03 live
+sessions. Tracked here so they don't get lost; none are mainnet
+blockers and none warrant their own commit until we batch them.
+
+1. **Level-up popup** — when a character crosses a level threshold,
+   no celebratory toast/modal fires. Stats update silently in the
+   character panel; the player has to notice the new "Lv.N" badge.
+   Add a one-shot modal/toast on `level_up` WS event.
+2. **Inventory auto-refresh after rapid equip swaps** — minor sync
+   lag between the doll panel and the inventory list when the
+   player swaps gear quickly. Hard refresh fixes. Likely a missing
+   `dispatch` in the equip-action hook after the optimistic local
+   update.
+3. **HP decimal display** — combat math is fractional; "0.25 HP"
+   currently renders as "0/90" when actual_hp > 0. Round display up
+   to 1 when actual is non-zero so the bar never reads "dead but
+   alive" (carry-over from prior session).
+4. **Equipped items invisible at fight start** — race between
+   fight-room render and DOF hydration. Refresh fixes. Hold the
+   render behind the hydration promise (carry-over).
+5. **Stat-allocate modal preset to 0/0/0/0** — pre-populate with
+   current allocations so the player only has to nudge the deltas
+   (carry-over).
+
+---
+
+## Game balance — content tuning, not code work
+
+Lv5 vs Lv5 wager fight (2026-05-03 evening) ended in 2 turns with
+high-rarity gear. Combat math correctness is verified by `qa-xp.ts`,
+`qa-combat-stats.ts`, and the live counter-triangle observation;
+this is a content/data tuning concern, not a contract or frontend
+bug. Likely needs an armor/HP scaling pass for higher levels +
+rarities so end-game fights aren't decided in the first exchange.
+No action in contracts/frontend until we have a tuning plan; logged
+here so it isn't forgotten.
 
 ---
 
@@ -162,7 +250,7 @@ upgrades don't retire bytecode, see `MAINNET_PREP.md`).
 
 ---
 
-## Mainnet readiness — 5/8 original blockers + 5 hotfixes closed
+## Mainnet readiness — 5/8 original blockers + 8 hotfixes closed
 
 The 8 mainnet blockers we entered the v5 hardening pass with:
 
@@ -177,7 +265,7 @@ The 8 mainnet blockers we entered the v5 hardening pass with:
 | 7 | Marketplace coldSync no boot retry | ✅ Closed — `withChainRetry` per page |
 | 8 | Duplicate-Character mint during auth flicker | ✅ Closed for layers 1+2; layer 3 deferred to v5.1 republish |
 
-Plus five hotfixes from live testing:
+Plus eight hotfixes from live testing:
 
 | Tag | Issue | State |
 |---|---|---|
@@ -186,6 +274,15 @@ Plus five hotfixes from live testing:
 | BUG C | Naked-stats gap on chain-restore | ✅ Closed — DOF hydration before `character_created` |
 | BUG D | `auth_ok` character payload ignored | ✅ Closed — game-provider dispatches SET_CHARACTER on receipt |
 | BUG E | Frontend reading wrong Character NFT | ✅ Closed — server pin in wire payload |
+| Bug 1 (2026-05-03) | Reconnect grace timer abuse — fresh 60 s every cycle let an abuser stall a wager forever | ✅ Closed — grace window now interpreted as a per-fight cumulative budget; verified live with 3-cycle 60s→14s→9s sequence forfeiting on cycle 3 |
+| Bug 2 (2026-05-03) | Wager stake input snapped back to 0.1 on every keystroke | ✅ Closed — string-bound input + submit-time validation; verified live |
+| Bug 3 (2026-05-03) | Outcome modal silent for player who reconnects after settle | ✅ Closed — server caches per-wallet outcome, replays via `recent_fight_settled`; localStorage dedupes. Verified live (Mr_Boss / Sx mirror) |
+
+`allocate_points` regression (the v4-era / 2026-05-02 MoveAbort
+code 2) **stays fixed** across multiple characters and multiple
+level-ups. Verified post-fix on Mr_Boss Lv3→Lv4 (2026-05-02),
+Mr_Boss Lv4→Lv5 (2026-05-03 day), Sx Lv5 (2026-05-03 evening). No
+abort, no MoveCall failure on Slush dry-run.
 
 Net assessment: **everything we know about is fixed except (a) Block 2's
 end-to-end live test (gated on Supabase provisioning), and (b) the v5.1
@@ -278,6 +375,71 @@ a wager fight, wait for `[Wager] dbInsertWagerInFlight` log, run
 ---
 
 ## Recent session log (most recent first)
+
+### 2026-05-03 (evening) — Browser QA, 3 polish bugs verified, Lv5 progression
+
+Live two-wallet QA pass. Restarted servers (the post-Fix-3
+`reconnect-grace` rewrite needed a fresh boot — ts-node had been
+running on the pre-fix module). After restart + browser hard-
+refresh, all three polish bugs from the day's commits verified:
+
+- **Bug 1 (cumulative grace)** — 3 disconnect/reconnect cycles in a
+  single fight. Banner countdowns: 60 s → 14 s → 9 s, then forfeit
+  fired on cycle 3. Honest wifi blips still get the full 60 s on
+  cycle 1; abusers who ping-pong now run out.
+- **Bug 2 (stake input)** — field fully clearable, validation on
+  submit, "Minimum stake is 0.1 SUI" displays inline. No more
+  snap-back.
+- **Bug 3 (rejoin modal)** — Mr_Boss closed tab → forfeited offline
+  → reopened tab → full Defeat modal with XP/rating/wager
+  breakdown. Sx (still online when settle hit) got the mirrored
+  Victory modal in real time.
+
+Plus Lv5 progression end-to-end:
+
+- Tap-to-equip auto-unequips old + equips new in a single action.
+  Stat updates verified on Mr_Boss's Cursed Greatsword (Epic Lv5)
+  swap: HP 113→116, ATK 26→29.5, Crit 2.5→7.5, Evasion 6.5→13.5.
+- `allocate_points` regression stays fixed across two characters
+  and two level-ups (Mr_Boss Lv4→Lv5 in the day session,
+  Sx Lv5 in the evening). Slush approved both, no MoveAbort.
+- Lv5 vs Lv5 wager (0.4 SUI) — Sx evasion build beat Mr_Boss crit
+  build in 2 turns. 95/5 settle clean, XP +43/+100, ELO ±17. The
+  dual-wield + shield combo did not crash the contract.
+
+Two new low-priority polish items logged: level-up popup missing,
+inventory auto-refresh after rapid swaps. Plus a content-tuning
+note: Lv5 vs Lv5 fights end too fast at high rarity. Tracked under
+"Known polish backlog" and "Game balance"; no code work this
+session.
+
+Commits already on origin: `fd56b4a` (slot picker),
+`fe9c883` (char-page consistency),
+`a26535e` (Bug 2),
+`20f3750` (Bug 3),
+`9d7dd19` (Bug 1).
+
+### 2026-05-03 (afternoon) — Slot picker + character-page consistency
+
+Three bug fixes, all live-verified the same day:
+
+- **Slot picker hides locked items** — `equipment-picker.ts` (NEW)
+  `buildSlotPickerEntries` returns every slot-compatible item with
+  a `locked` flag instead of filtering out level-locked NFTs. Card
+  renders dimmed + grayscaled with a red "Lv N" badge top-right.
+  Closes Mr_Boss "where did my Epic weapon go?" cliff. Commit
+  `fd56b4a`.
+- **Character-page HP/ATK consistency** — frontend's `LEVEL_HP` and
+  `LEVEL_WEAPON_DAMAGE` mirrors had drifted from server's
+  rebalanced "chunky-progression" curve. Mr_Boss page reported
+  HP 178 / Lv4; combat used HP 93. Tables synced element-by-
+  element; new `qa-combat-stats.ts` pins parity. GDD §3.3
+  rewritten to match server-canonical math.
+- **Stat bars STR/DEX/INT render** — Tailwind v4 JIT can't see
+  `color.replace("text-", "bg-")` derived classes. END worked only
+  because `bg-amber-400` happened to be a literal elsewhere; the
+  others had no literal anywhere → invisible bars. Fix: carry the
+  literal `bg-…` token in the `statRows` tuple. Commit `fe9c883`.
 
 ### 2026-05-03 — Repo cleanup + push to GitHub
 
@@ -450,6 +612,13 @@ Move unit tests passing.
 ## Recent commits — `feature/v5-redeploy`
 
 ```
+9d7dd19 fix(v5): grace timer is a cumulative per-fight budget, not per-cycle (Bug 1)
+20f3750 fix(v5): replay outcome modal on reconnect after settle-while-offline (Bug 3)
+a26535e fix(v5): wager stake input is clearable, validates on submit (Bug 2)
+fe9c883 fix(v5): character page consistency — HP/ATK table parity + stat bar Tailwind v4
+fd56b4a fix(v5): slot picker keeps locked items, dimmed with Lv N badge
+08340ea docs: sync gitnexus index counts after cleanup
+88a4288 v5 testnet hardening + repo cleanup
 dc28eff fix(v5): publish server-pinned chain id to frontend (BUG E)
 413593e fix(v5): post-allocate UX + naked-stats gap + auth_ok wiring
 6871df0 fix(v5): close silent-WS-loss orphan-wager class
@@ -470,28 +639,36 @@ Plus the cleanup commit immediately after this STATUS.md write.
 
 ---
 
-## Next-session pickup
+## Next-session pickup — Bucket 1 remaining
 
-1. **Provision Supabase + run kill-mid-fight test** — closes Block B's
-   live validation (the only mainnet-readiness item NOT marked ✅).
-2. **Live regression of Bug 1 + BUG E together** — finish a fight,
-   open Allocate within 5 s. Should see amber "catching up" hint, then
-   correct chain-truth value once update_after_fight lands. For
-   mr_boss: Slush popup must show `0x9b294d7d…` (Mr_Boss_v5.1) NOT
-   `0xec6fbbcf…` (mee).
-3. **Pre-v5.1 republish design** — finalise
-   `settle_wager_attested` signature scheme, `CharacterRegistry`
-   shape, `burn_character` admin path, and on-chain loot-mint flow.
-   Spec out the Move-side test gauntlet for the new code.
-4. **Polish bugs from prior sessions:**
-   - HP decimal display quirk (combat math uses fractional HP; round
-     up displayed HP when actual_hp > 0 so "0.25 HP" doesn't render
-     as "0/90")
-   - Equipped items not visible at fight start (refresh fixes — race
-     between fight-room render and DOF hydration)
-   - Stat-allocate modal preset to 0/0/0/0 (user has to manually
-     redistribute; could pre-pop with current stats and let them
-     adjust)
+The Character + Arena rooms have been walked end-to-end on testnet
+with two real wallets. What's left of Bucket 1 (pre-v5.1
+mainnet-readiness QA), in priority order:
+
+1. **Market room** — Kiosk list / buy / cancel / royalty math /
+   cross-wallet browse. Royalty enforcement (2.5 % to TREASURY) is
+   already covered by `qa-marketplace.ts` (63 assertions); live
+   browser pass needs to confirm the buy/list/delist UX flows and
+   that gap-fill recovery handles a real reconnect.
+2. **Tavern** — chat, presence, whispers, profile clicks. Currently
+   a black box live-wise; gauntlet doesn't cover chat at all.
+3. **Hall of Fame** — sort, filter, profile click-throughs. Minimal
+   prior verification; deeper test pending.
+4. **Multi-day stability** — overnight uptime test. Surfaces any
+   leak / silent-fail / orphan-wager case in idle conditions.
+5. **Fresh user onboarding** — wipe localStorage, full
+   create-character flow from a never-seen wallet. Catches any
+   regression in the Block A duplicate-mint guard or the
+   `auth_phase` state machine.
+
+After Bucket 1 is green, Bucket 2 (the 3 polish bugs from the day's
+arena gauntlet) is already ✅ DONE — see "Mainnet readiness" table
+above.
+
+The polish backlog above ("Known polish backlog") can land any time
+and is non-blocking. The v5.1 republish (player-signed settlement,
+`CharacterRegistry`, `burn_character`, on-chain loot mint) remains
+out of scope until Bucket 1 is fully cleared.
 
 ---
 

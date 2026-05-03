@@ -8,13 +8,12 @@
 
 ---
 
-## Current state — 2026-05-03
+## Current state — 2026-05-03 (evening)
 
-**v5 is the testnet codename.** Branch `feature/v5-redeploy`, commit
-`dc28eff` (final code) + the cleanup commit immediately after. v5 is
-a fresh `sui client publish` of the entire package — not an upgrade
-of any prior package. Per section A below, that's the only valid
-mainnet path too.
+**v5 is the testnet codename.** Branch `feature/v5-redeploy`, latest
+commit `9d7dd19`. v5 is a fresh `sui client publish` of the entire
+package — not an upgrade of any prior package. Per section A below,
+that's the only valid mainnet path too.
 
 **v5.1 is the planned mainnet republish.** It bundles every Move-side
 change still pending so we never re-publish for a single fix:
@@ -26,13 +25,43 @@ change still pending so we never re-publish for a single fix:
 | `burn_character` | admin-gated entry to retire a Character object | Cleanup for legacy mr_boss + sx multi-Character residue |
 | Admin-signed loot mint | reuse existing `item::mint_item` with rarity + stat-roll math from `server/src/game/loot.ts` | Replace the v5 disabled "fake loot" path with real on-chain Item NFTs |
 
-**Mainnet readiness:** 5/8 original blockers + 5 hotfixes closed (see
+**Mainnet readiness:** 5/8 original blockers + 8 hotfixes closed (see
 `STATUS.md` → "Mainnet readiness"). The only ⚠️ items are (a) Block 2
 end-to-end validation gated on Supabase provisioning, and (b) the
-v5.1 republish above.
+v5.1 republish above. Three additional polish bugs from the
+2026-05-03 arena gauntlet (cumulative grace budget, clearable stake
+input, outcome-modal-on-rejoin) closed and live-verified the same
+day.
 
-**Test gauntlet:** 9 suites, 475/475 PASS. Plus 35/35 Move unit tests
-in `contracts/tests/`. See `STATUS.md` → "Test totals".
+**`allocate_points` regression watch.** The v4-era / 2026-05-02
+MoveAbort code 2 (`ENotEnoughPoints`) was the canonical mainnet
+blocker for stat allocation. Post-fix verification:
+
+- Mr_Boss Lv3 → Lv4 (2026-05-02) — clean
+- Mr_Boss Lv4 → Lv5 (2026-05-03 day) — clean
+- Sx Lv5 (2026-05-03 evening) — clean
+
+Three Slush approvals across two characters and two level-ups, no
+abort, no MoveCall failure on dry-run. Treats the bug as
+**confirmed fixed**; Bucket 1 mainnet-readiness item stays closed.
+
+**Test gauntlet:** 14 suites, 731/731 PASS. Plus 35/35 Move unit
+tests in `contracts/tests/`. See `STATUS.md` → "Test totals".
+
+**Bucket 1 (live testnet QA) progress.**
+
+- ✅ Character room — equip/unequip, slot picker, save loadout,
+  stat allocate, fight history.
+- ✅ Arena room — friendly, ranked, wager (12-test gauntlet pass);
+  Lv5 vs Lv5 wager + dual-wield + shield + epic loadout verified.
+- ⏳ Market room — code covered by gauntlets, live UX walkthrough
+  pending.
+- ⏳ Tavern — chat / presence / whispers / profile clicks not yet
+  live-walked.
+- ⏳ Hall of Fame — minimal; deeper sort/filter test pending.
+- ⏳ Multi-day stability — no overnight uptime test yet.
+- ⏳ Fresh user onboarding — wipe localStorage + full create-flow
+  not yet verified.
 
 ---
 

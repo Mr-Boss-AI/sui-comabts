@@ -1,102 +1,106 @@
-# Session Handoff — 2026-05-03
+# Session Handoff — 2026-05-03 (evening)
 
-> Single-page summary of the v5 testnet hardening session that wrapped
-> with this commit. Branch `feature/v5-redeploy`, force-pushed to
-> origin (the upstream `main` is at the v4-era `08ff991` Phase 0.5;
-> our branch is the canonical v5 state).
+> Single-page summary of today's three sessions (afternoon code,
+> evening browser QA, evening doc sync). Branch `feature/v5-redeploy`,
+> latest commit `9d7dd19` on origin. Upstream `main` stays at the
+> v4-era `08ff991`; **do not merge until v5.1 republish lands**.
 
 ---
 
-## What shipped
+## What shipped today
 
-Eight bug fixes + a repo cleanup. All chain-side stayed on the same v5
-package — no Move republish.
+### Five code commits + this docs commit
 
-| # | Bug | Commit | Notes |
-|---|---|---|---|
-| 1 | `allocate_points` MoveAbort code 2 (server-chain unallocated drift) | `b39202d` | New leaf `frontend/src/lib/stat-points.ts` — `effectiveUnallocatedPoints(server, chain) = min(server, chain)`. Modal can't stage doomed txs during the post-fight treasury-queue drain. |
-| 2 | Save-loadout fight-lock race after fight | `b39202d` | Reordered `finishFight` so `set_fight_lock(0)` fires FIRST in the queue. Locks clear in ~5 s instead of ~25 s. |
-| 3 | Off-chain "fake loot" drops violated NFT-only rule | `b39202d` | `rollLoot` removed from `finishFight`. Math survives in `game/loot.ts` for v5.1's on-chain loot mint. |
-| Orphan | 0.8 SUI orphan wager + WS-loss orphan class | `6871df0` | Refunded mr_boss via `/api/admin/cancel-wager` (tx `f1okCdAi5R7p8hpVXVnaKHEKAoPNbN8vLUisigF1WLv`). New leaf `wager-register.ts` adds a 7 s ACK timeout + REST `adopt-wager` fallback. WS-send-returns-true-but-actually-lost is now self-healing. |
-| B | "Not authenticated" toast after allocate | `413593e` | `LOCAL_ALLOCATE` reducer action — frontend reflects truth immediately, regardless of WS state. game-provider suppresses the auth-pending toast. |
-| C | Naked-stats gap on chain-restore | `413593e` | Extracted `hydrateDOFsForCharacter` helper, called from BOTH auth and chain-restore paths. Equipment lands in the same payload as the character. |
-| D | `auth_ok` carrying character payload was ignored | `413593e` | Added `case "auth_ok"` → `SET_CHARACTER` in game-provider. Auth gate releases with full equipment in one step. |
-| E | Frontend reading wrong Character NFT | `dc28eff` | `sanitizeCharacter` includes `onChainObjectId`; frontend's `fetchCharacterNFT` accepts a `pinnedObjectId` hint and skips the descending event scan. Multi-char wallets (mr_boss has 3 NFTs on chain) now read chain truth from the same NFT the server uses. |
+| Commit | Bug | One-liner |
+|---|---|---|
+| `fd56b4a` | Slot picker hides locked items | `equipment-picker.ts` (NEW) keeps locked items in the picker, dimmed with a red `Lv N` badge. 53-test gauntlet. |
+| `fe9c883` | Character page HP/ATK + stat bars | Frontend `LEVEL_HP` / `LEVEL_WEAPON_DAMAGE` synced element-by-element with server's rebalanced tables. STR/DEX/INT bars compile (Tailwind v4 JIT). GDD §3.3 rewritten. 79-test parity gauntlet. |
+| `a26535e` | Wager stake input clearable (Bug 2) | New `wager-input.ts` parses string-state input; clearable, validates on submit. 47-test gauntlet. |
+| `20f3750` | Outcome modal on rejoin (Bug 3) | Server caches per-wallet outcome; replays via `recent_fight_settled` on reconnect. localStorage dedupes. 31-test gauntlet. |
+| `9d7dd19` | Grace timer cumulative budget (Bug 1) | 60 s window is now per-fight cumulative, not per-cycle. Abuser ping-pong now forfeits. 46-test gauntlet. |
 
-All retested live in the browser. Slush popups confirm correct
-`objectId` targeting on the canonical Character. Settlement math, XP,
-rating, stat allocation, equipment hydration, save-loadout-after-fight
-— all verified working.
+### Browser QA pass (evening)
+
+All three polish bugs verified live with two-wallet testing on Sui
+testnet:
+
+- **Bug 1 cumulative grace** — 3 disconnect/reconnect cycles in a
+  single fight. Banner countdowns: 60 s → 14 s → 9 s, then forfeit.
+  Initial confusion was a stale ts-node build serving old code; hard
+  server restart + browser refresh fixed it. Working as designed.
+- **Bug 2 stake input** — fully clearable, validation on submit,
+  "Minimum stake is 0.1 SUI" inline.
+- **Bug 3 rejoin modal** — Mr_Boss closed tab → forfeited offline →
+  reopened tab → full Defeat modal (XP / rating / wager). Sx (still
+  online) saw mirrored Victory in real time.
+
+### Lv5 progression verified
+
+- **Tap-to-equip auto-swap** — auto-unequips old + equips new in a
+  single click. HP 113→116, ATK 26→29.5, Crit 2.5→7.5, Evasion
+  6.5→13.5 on Mr_Boss's Cursed Greatsword (Epic Lv5) swap.
+- **`allocate_points` regression stays fixed** — verified on
+  Mr_Boss Lv4→Lv5 (day) and Sx Lv5 (evening). Slush approved both,
+  no MoveAbort code 2. Three approvals total across two characters
+  + two level-ups since the b39202d clamp.
+- **Lv5 vs Lv5 wager (0.4 SUI)** — Sx evasion build (Twin Stilettos
+  + Wooden Buckler + Magic Ring) beat Mr_Boss crit build (Cursed
+  Greatsword Epic + Ornate Mithril Breastplate Rare + Copper Band)
+  in 2 turns. 95/5 settle clean, XP +43/+100, ELO ±17. Dual-wield
+  + shield combo did not crash the contract.
 
 ---
 
 ## Tests
 
-Nine gauntlets, **475 / 475 PASS**. New ones added this session:
+14 gauntlets, **731 / 731 PASS**. New today:
 
-- `qa-character-mint.ts` — 63 (auth-phase state machine + duplicate-mint predicate)
-- `qa-orphan-sweep.ts` — 30 (sweepOne branches with mocked deps)
-- `qa-reconnect-grace.ts` — 35 (markDisconnect/markReconnect roundtrip)
-- `qa-fight-pause.ts` — 46 (pause/resume math, locked-choice preservation)
-- `qa-stat-points.ts` — 45 (clamp + applyLocalAllocate)
-- `qa-wager-register.ts` — 25 (ACK timeout + REST recovery)
+- `qa-equip-picker.ts` — 53 (slot picker rules + sort order)
+- `qa-combat-stats.ts` — 79 (HP/ATK table parity + sample stats)
+- `qa-wager-form.ts` — 47 (parseWagerInput edge cases)
+- `qa-reconnect-modal.ts` — 31 (recent-outcomes cache + dedupe)
+- `qa-grace-budget.ts` — 46 (cumulative grace semantics)
 
-Existing gauntlets still green (qa-xp 143, qa-marketplace 63,
-qa-treasury-queue 25). 35/35 Move unit tests under
-`contracts/tests/`.
+Existing gauntlets unchanged. Frontend + server `tsc --noEmit`
+clean. 35/35 Move unit tests still passing.
 
 ---
 
-## Repo cleanup (this commit)
+## New polish backlog (this session)
 
-**Deleted (53 files):**
+Tracked in `STATUS.md` → "Known polish backlog". Non-blocking:
 
-- 44 `chunk_*.txt` files (Gemini code-dump from a one-shot snapshot
-  that has since rotted with the source) + `split_code.py` (the
-  generator).
-- `Gemini.md` — old audit notes; findings all addressed in commits.
-- `ai-bot.mjs`, `test-e2e.mjs`, `test-full.mjs` — pre-v5 testing
-  helpers superseded by the qa-* gauntlets.
-- `FRONTEND_FUNCTIONS.md` (April 18, references "Marketplace UI
-  partial" / "No Display registered" / etc. — all now done).
-- `ARCHITECTURE_MAP.md` (April 21, references v4 packages and
-  `feature/loadout-save` — superseded by STATUS.md).
-- `frontend/README.md` (Next.js boilerplate — replaced).
-- `test-wallets/` (empty dir).
-- `supabase/` (only contained `.temp/` scratch state, already
-  gitignored).
-- `FULL_PROJECT_STATUS.md` (consolidated into the new STATUS.md +
-  README.md).
+1. **Level-up popup** — no celebratory toast on level-up. Stats
+   update silently; player has to notice the new badge.
+2. **Inventory auto-refresh after rapid swaps** — minor sync lag
+   between doll panel and inventory list. Hard refresh fixes.
 
-**Renamed:**
-
-- `STATUS_v5.md` → `STATUS.md` (canonical name). Git history preserved
-  via `git mv`.
-
-**Refreshed:**
-
-- `README.md` — current project overview, v5 deployment IDs, run
-  instructions (kill+start flow), repo layout, quick start, contracts
-  build, test gauntlets, Walrus, MIT.
-- `STATUS.md` — single canonical state. v5 deployment, wallet roles,
-  what works (live-tested), what's deferred to v5.1, mainnet
-  readiness checklist (5/8 + 5 hotfixes closed), test totals, recent
-  session log.
-- `frontend/README.md` — project-specific run instructions.
-- `MAINNET_PREP.md` — refreshed v4 references; current state at top
-  with v5.1 republish protocol below the existing threat-model
-  content.
-
-**Created:**
-
-- This file — `SESSION_HANDOFF.md`.
+Carry-over polish from prior sessions still open: HP decimal
+display, equipped items invisible at fight start, stat-allocate
+modal preset.
 
 ---
 
-## Server status when this commit lands
+## Game balance (content tuning, not code)
 
-Both ports running on commit `dc28eff` immediately before the cleanup
-commit. After this commit you may want to restart for sanity:
+Lv5 vs Lv5 fights end in 2 turns at high rarity. Combat math
+correctness is verified by `qa-xp.ts`, `qa-combat-stats.ts`, and
+the live counter-triangle observation; this is content/data
+tuning. Likely needs an armor/HP scaling pass for higher levels +
+rarities. No action in contracts/frontend until we have a tuning
+plan.
+
+---
+
+## Server status
+
+Both servers running on commit `9d7dd19` post-restart:
+
+- **3001:** clean boot — `[OrphanWager] No stale in-flight rows`,
+  marketplace stream active, 2 wallets connected.
+- **3000:** Next.js 16.2.3 ready, `HTTP 200`.
+
+To rerun:
 
 ```bash
 kill $(lsof -t -i:3001) 2>/dev/null
@@ -107,47 +111,38 @@ sleep 6
 curl -s localhost:3001/health | python3 -m json.tool
 ```
 
-Expected boot log:
-
-```
-[OrphanWager] No stale in-flight rows — clean boot
-[Marketplace] Cold sync complete: 0 active listings, 2 kiosks indexed
-[Marketplace] Live stream active (first checkpoint seq=…)
-```
-
 Supabase still OPTIONAL (running in-memory). To enable, see
 `STATUS.md` → "Optional — Supabase".
 
 ---
 
-## Next-session pickup
+## Next-session pickup — Bucket 1 remaining
 
-1. **Provision Supabase + run kill-mid-fight test** — closes Block B's
-   live validation (the only mainnet-readiness item NOT marked ✅).
-2. **Live regression of Bug 1 + BUG E together** — finish a fight,
-   open Allocate within 5 s of fight_end. Should see amber "catching
-   up" hint, then correct chain-truth value once `update_after_fight`
-   lands. For mr_boss: Slush popup must show `0x9b294d7d…`
-   (Mr_Boss_v5.1) NOT `0xec6fbbcf…` (mee).
-3. **Pre-v5.1 republish design** — finalise:
-   - `settle_wager_attested` signature scheme
-   - `CharacterRegistry` shape (closes layer 3 of duplicate-mint bug)
-   - `burn_character` admin path (cleanup legacy mr_boss/sx artifacts)
-   - On-chain admin-signed loot Item NFT mint
-   Spec out the Move-side test gauntlet for the new code BEFORE
-   running `sui client publish`.
-4. **Polish bugs:** HP decimal display, equipped items invisible at
-   fight start, stat-allocate modal preset.
+In priority order:
+
+1. **Market room** — Kiosk list / buy / cancel / royalty math /
+   cross-wallet browse (live UX walk; `qa-marketplace.ts`'s 63
+   assertions cover the math).
+2. **Tavern** — chat, presence, whispers, profile clicks. Currently
+   uncovered live; gauntlet has nothing on chat.
+3. **Hall of Fame** — sort, filter, profile click-throughs.
+4. **Multi-day stability** — overnight uptime test.
+5. **Fresh user onboarding** — wipe localStorage, full
+   create-character flow from a never-seen wallet.
+
+After Bucket 1 is green, the v5.1 republish design (player-signed
+settlement, `CharacterRegistry`, `burn_character`, on-chain loot
+mint) can begin.
 
 ---
 
 ## Branch state
 
-- Local `feature/v5-redeploy` is canonical.
-- Origin `feature/v5-redeploy` will be force-pushed to match (history
-  matters — every commit is named, scoped, and tested).
-- Origin `main` stays at `08ff991` (Phase 0.5). DO NOT merge to main
-  until v5.1 republish is confirmed working on testnet.
+- Local `feature/v5-redeploy` and `origin/feature/v5-redeploy` in
+  sync at `9d7dd19` (post-doc commit will advance both).
+- `main` untouched (still at v4-era `08ff991`).
+- **Standing rule:** no merge to main until v5.1 republish is
+  confirmed working on testnet.
 
 ---
 
