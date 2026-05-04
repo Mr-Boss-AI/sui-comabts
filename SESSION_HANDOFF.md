@@ -1,5 +1,14 @@
 # Session Handoff — 2026-05-03 (evening)
 
+> ⚠️ **SUPERSEDED — see [`STATE_OF_PROJECT_2026-05-04.md`](STATE_OF_PROJECT_2026-05-04.md)
+> for current state.** This file is a point-in-time snapshot from the
+> 2026-05-03 evening QA pass. Bucket 2 (the 3 polish bugs noted below
+> as "DONE for next session") plus the silent-accept / two-handed /
+> multi-queue / WS readyState / level-up modal work all closed during
+> the 2026-05-04 sessions. Latest commit on `feature/v5-redeploy`:
+> see `git log --oneline -1` (was `dcf7e3f` at the end of the
+> 2026-05-04 wrap; see `CHANGELOG.md` for the day-by-day delta).
+
 > Single-page summary of today's three sessions (afternoon code,
 > evening browser QA, evening doc sync). Branch `feature/v5-redeploy`,
 > latest commit `9d7dd19` on origin. Upstream `main` stays at the
