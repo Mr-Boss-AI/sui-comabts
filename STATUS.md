@@ -185,14 +185,18 @@ canonical id to the frontend.
 
 ## Known polish backlog (low-priority, non-blocking)
 
-These are non-blocking issues observed during the 2026-05-03 live
-sessions. Tracked here so they don't get lost; none are mainnet
-blockers and none warrant their own commit until we batch them.
+These are non-blocking issues observed during live sessions. Tracked
+here so they don't get lost; none are mainnet blockers and none
+warrant their own commit until we batch them.
 
-1. **Level-up popup** — when a character crosses a level threshold,
-   no celebratory toast/modal fires. Stats update silently in the
-   character panel; the player has to notice the new "Lv.N" badge.
-   Add a one-shot modal/toast on `level_up` WS event.
+1. ~~**Level-up popup** — silent level-up.~~ ✅ **CLOSED 2026-05-04**
+   (Bucket 2 Fix 3, commit `97369ff`). Server emits
+   `character_leveled_up` after `update_after_fight` confirms; new
+   `LevelUpModal` celebrates with "Allocate Stat Points" CTA.
+   Multi-level merges into a single "Level Up xN!" celebration.
+   Pure-predicate decision tree locked at the unit-test layer
+   (44/44 PASS). Live verification deferred to a future session
+   (Lv6→Lv7 ~3000 XP grind too long for any single test session).
 2. **Inventory auto-refresh after rapid equip swaps** — minor sync
    lag between the doll panel and the inventory list when the
    player swaps gear quickly. Hard refresh fixes. Likely a missing
@@ -277,6 +281,12 @@ Plus eight hotfixes from live testing:
 | Bug 1 (2026-05-03) | Reconnect grace timer abuse — fresh 60 s every cycle let an abuser stall a wager forever | ✅ Closed — grace window now interpreted as a per-fight cumulative budget; verified live with 3-cycle 60s→14s→9s sequence forfeiting on cycle 3 |
 | Bug 2 (2026-05-03) | Wager stake input snapped back to 0.1 on every keystroke | ✅ Closed — string-bound input + submit-time validation; verified live |
 | Bug 3 (2026-05-03) | Outcome modal silent for player who reconnects after settle | ✅ Closed — server caches per-wallet outcome, replays via `recent_fight_settled`; localStorage dedupes. Verified live (Mr_Boss / Sx mirror) |
+| Bucket 2 — silent-accept (Fix A, 2026-05-04) | Player with own open wager could click Accept on another's wager → chain accept silently succeeded → both wagers stuck ACTIVE | ✅ Closed — frontend `canAcceptWager` predicate disables button + early-returns before signing. Verified live (commit `6512e10`) |
+| Bucket 2 — silent-accept server (Fix B, 2026-05-04) | If chain accept slipped past Fix A, server's late-firing check just returned a toast and left the chain stuck ACTIVE | ✅ Closed — `decideAcceptOutcome` predicate's autoRollback path admin-cancels both wagers. 28-test gauntlet (commit `20feb72`) |
+| Bucket 2 — two-handed weapons (Path A, 2026-05-04) | Could equip dual two-handed weapons (Maul + Greatsword) for stacked damage | ✅ Closed — frontend `TWO_HANDED_NAMES` set + `evaluateTwoHandedConflict` predicate. Both directions covered: 2H→mainhand requires offhand empty; 2H→offhand always blocked. 78-test gauntlet (commits `3319628` + `09934a6`) |
+| Bucket 2 — multi-queue isolation (Fix 1, 2026-05-04) | Player could be in own wager AND ranked queue simultaneously, stranding SUI if ranked matched first | ✅ Closed — `computeBusyState` predicate (frontend) + `evaluateServerBusy` (server) gate every queue/wager entry point. Cross-cleanup in `handleWagerAccepted` proceed branch removes both players from matchmaking queue. 60-test gauntlet (commit `6e2f2d3`) |
+| Bucket 2 — WS readyState (Fix 2, 2026-05-04) | Polling effects fired during reconnect window printed `[WS] DROPPED outbound` errors | ✅ Closed — `useGameSocket.send()` queues messages when `readyState !== OPEN`; drains on reconnect; stale (>30 s) entries discarded; queue capped at 200. 37-test gauntlet (commit `f0358d5`) |
+| Bucket 2 — level-up modal (Fix 3, 2026-05-04) | Silent level-up — Lv badge updated without celebration | ✅ Code complete — server emits `character_leveled_up` post `update_after_fight`; `LevelUpModal` celebrates with Allocate CTA; multi-level merges via `mergeLevelUpEvent`. 44-test gauntlet (commit `97369ff`). Live verification deferred (XP grind requirement) |
 
 `allocate_points` regression (the v4-era / 2026-05-02 MoveAbort
 code 2) **stays fixed** across multiple characters and multiple
@@ -291,7 +301,7 @@ burn_character + on-chain loot mint).**
 
 ---
 
-## Test totals — 14 gauntlets / 731 assertions
+## Test totals — 19 gauntlets / 1172 assertions
 
 Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 
@@ -306,12 +316,17 @@ Run from `server/`: `npx tsx ../scripts/qa-<name>.ts`.
 | `qa-fight-pause.ts` | `pauseFightTimer` / `resumeFightTimer` math — captures exact remaining ms, idempotent, single onTimeout fire across roundtrip, locked-choice preservation | 46 |
 | `qa-stat-points.ts` | `effectiveUnallocatedPoints(server, chain)` clamp, `isAwaitingChainCatchup`, NaN/negative sanitization, `applyLocalAllocate` reducer helper | 45 |
 | `qa-wager-register.ts` | WS ACK happy path, silent-WS-loss → adopt-wager recovery, other-player's lobby_added doesn't false-ACK, both-paths-fail, throw handling, race resolution | 25 |
-| `qa-equip-picker.ts` | `buildSlotPickerEntries` — locked items kept + annotated, sort order (unlocked alpha → locked asc level), kiosk + pending-equipped exclusion, slot-type matching across all 10 slots, dedup with on-chain wins, boundary `levelReq === level` is unlocked | 53 |
 | `qa-combat-stats.ts` | Element-by-element parity of LEVEL_HP + LEVEL_WEAPON_DAMAGE between server config and frontend mirror, maxHp formula at every level, equipment hpBonus added flat, server `deriveCombatStats` agrees with frontend `computeDerivedStats` for the live-test Mr_Boss / Sx fixtures | 79 |
 | `qa-wager-form.ts` | `parseWagerInput` — clearable input (empty/whitespace/lone-dot rejected without snap-back), below-min floor named in error, decimal-precision cap at SUI's 9 places, non-numeric / scientific / signed / hex / comma all rejected, whitespace trimmed, defensive null/undefined, full live-repro keystroke sequence | 47 |
 | `qa-reconnect-modal.ts` | Server `recent-outcomes.ts` (record / get / clear / multi-wallet isolation / overwrite / empty-wallet defense) + frontend `shouldReplayOutcome` pure dedupe (no ack → replay, matching ack → skip, newer fight than ack → replay) + full live-bug repro (forfeit-during-disconnect → reconnect-replay → ack-write → no double-pop) | 31 |
 | `qa-grace-budget.ts` | Cumulative grace budget per (wallet, fight) — first cycle gets full budget, second cycle gets only `budget - usedMs`, three cycles totaling 70s forfeit on the third, exhausted budget → synchronous forfeit (no banner / no new timer), over-budget single cycle caps at budgetMs, different fightId resets, `clearFightGrace` wipes per-fight records, multi-wallet independent budgets in same fight | 46 |
-| **Total** | | **731 / 731 PASS** |
+| `qa-mint-catalog.ts` (NEW 2026-05-04) | Lv6-Lv8 v5.1 catalog static gauntlet — item_type / rarity enum mapping, MAX_BONUS / MAX_LEVEL_REQ asserts, weapon-vs-non-weapon damage rules, bonus-key whitelist, duplicate-shield invariant, filename uniqueness, suiToMist round-trip, listing fee parity, deployment.json + env alignment, cost envelope sanity, Move-call-target shape, per-item price spec | 236 |
+| `qa-wager-accept-gate.ts` (NEW 2026-05-04, extended) | Frontend `canAcceptWager` predicate (happy / own-open / self-target / no-wallet / case-insensitive / empty lobby) + server `decideAcceptOutcome` decision tree (proceed / stale-chain / autoRollback / client-gated / self-target / missing-target / chain-SETTLED) + Fix 1 cross-mode extension (3 callerInMatchmakingQueue cases) | 39 |
+| `qa-equip-picker.ts` (extended 2026-05-04) | Original 53 + 25 two-handed enforcement assertions in section 12.5: backward-compat when arg omitted; weapon-slot 2H locking when offhand has shield/weapon; offhand-slot 2H always-locked rule (regardless of mainhand state); level-lock precedence over 2H lock | 78 |
+| `qa-multi-queue-isolation.ts` (NEW 2026-05-04) | Frontend `computeBusyState` predicate (idle / no-wallet / fight-priority / ownWager / fightQueue / pendingWagerAccept / canCancelOwnState) + server `evaluateServerBusy` mirror + cross-check on 6 canonical scenarios where frontend and server outputs must agree | 60 |
+| `qa-ws-readystate.ts` (NEW 2026-05-04) | `drainPendingMessages` (empty / all-fresh FIFO / stale discard / boundary age / send-fails-mid-drain bail / mixed stale-fresh) + `capPendingQueue` (under-cap / boundary / oldest-dropped) + integration (simulated reconnect + runaway-producer overflow) | 37 |
+| `qa-level-up-modal.ts` (NEW 2026-05-04) | `shouldRenderLevelUp` gating (no event / active fight / idle), `formatLevelUpHeadline` (single + multi-level + same-level defensive), formatBody / formatPointsLine (simple + with-prior-unspent + singular form), `isValidLevelUpEvent` defensive validator, `mergeLevelUpEvent` multi-burst + fightId fallback, integration scenarios | 44 |
+| **Total** | | **1172 / 1172 PASS** |
 
 Plus 35/35 Move unit tests under `contracts/tests/` (`sui move test`).
 
@@ -612,6 +627,18 @@ Move unit tests passing.
 ## Recent commits — `feature/v5-redeploy`
 
 ```
+97369ff feat(v5): level-up celebration modal (Bucket 2 Fix 3)
+f0358d5 fix(v5): WebSocket readyState gate — queue and drain (Bucket 2 Fix 2)
+6e2f2d3 fix(v5): multi-queue state isolation (Bucket 2 Fix 1)
+09934a6 fix(v5): two-handed gate — second direction (2H into offhand always blocks)
+3319628 fix(v5): two-handed weapon enforcement (frontend hardcoded list — Path A)
+4d73d53 docs: sync gitnexus index counts after wager-accept-gate fixes
+20feb72 fix(v5): server self-heals if silent-accept slips past client (Fix B)
+6512e10 fix(v5): close silent-accept wager bug at the client gate (Fix A)
+db58941 data(v5.1): mint 9-item Lv6-Lv8 catalog to TREASURY kiosk on testnet
+c8b8ec2 feat(v5.1): Lv6-Lv8 NFT catalog mint+list script + 236-test gauntlet
+89c989f docs: sync gitnexus index counts after evening QA commit
+452cc65 docs: 2026-05-03 evening QA pass — Bucket 2 closed, Lv5 verified
 9d7dd19 fix(v5): grace timer is a cumulative per-fight budget, not per-cycle (Bug 1)
 20f3750 fix(v5): replay outcome modal on reconnect after settle-while-offline (Bug 3)
 a26535e fix(v5): wager stake input is clearable, validates on submit (Bug 2)
@@ -639,36 +666,54 @@ Plus the cleanup commit immediately after this STATUS.md write.
 
 ---
 
-## Next-session pickup — Bucket 1 remaining
+## Bucket status — closed through Bucket 2
 
-The Character + Arena rooms have been walked end-to-end on testnet
-with two real wallets. What's left of Bucket 1 (pre-v5.1
-mainnet-readiness QA), in priority order:
+**Bucket 1 (live testnet QA)** — ✅ closed 2026-05-04.
+- Character + Arena ✅
+- Market room ✅ (12-test browser pass + 9-item Lv6-Lv8 catalog
+  minted to TREASURY kiosk for cross-build buy testing)
+- Cross-build marketplace flow ✅ (Sx evasion buys Shadowstep
+  Wraps, Mr_Boss crit equips Skullcrusher Maul + Bloodletter
+  Gauntlets)
+- Counter-triangle live-test ✅ (Lv6 Crit vs Lv6 Evasion, 12/8
+  over 20 fights — closer to 50/50 expected post Two-Handed Path A)
+- Stat-allocation regression ✅ (4 clean Slush approvals across
+  two wallets and three level-ups)
 
-1. **Market room** — Kiosk list / buy / cancel / royalty math /
-   cross-wallet browse. Royalty enforcement (2.5 % to TREASURY) is
-   already covered by `qa-marketplace.ts` (63 assertions); live
-   browser pass needs to confirm the buy/list/delist UX flows and
-   that gap-fill recovery handles a real reconnect.
-2. **Tavern** — chat, presence, whispers, profile clicks. Currently
-   a black box live-wise; gauntlet doesn't cover chat at all.
-3. **Hall of Fame** — sort, filter, profile click-throughs. Minimal
-   prior verification; deeper test pending.
-4. **Multi-day stability** — overnight uptime test. Surfaces any
+**Bucket 2 (polish-bug close-out)** — ✅ shipped 2026-05-04.
+Six commits, each with its own qa gauntlet:
+- `6512e10` Wager Fix A — frontend silent-accept gate
+- `20feb72` Wager Fix B — server auto-rollback (28-test gauntlet)
+- `3319628` Two-Handed Path A — first direction
+- `09934a6` Two-Handed Path A — second direction (78 PASS)
+- `6e2f2d3` Multi-queue isolation (60 PASS)
+- `f0358d5` WebSocket readyState gate (37 PASS)
+- `97369ff` Level-up celebration modal (44 PASS — live verification
+  deferred to a future session due to XP grind requirement)
+
+**Bucket 3 (pre-mainnet hardening)** — pending. Open items in
+priority order:
+
+1. **Tavern** — chat, presence, whispers, profile clicks.
+   Currently a black box live-wise; gauntlet doesn't cover chat at
+   all.
+2. **Hall of Fame** — sort, filter, profile click-throughs.
+   Minimal prior verification; deeper test pending.
+3. **Multi-day stability** — overnight uptime test. Surfaces any
    leak / silent-fail / orphan-wager case in idle conditions.
-5. **Fresh user onboarding** — wipe localStorage, full
+4. **Fresh user onboarding** — wipe localStorage, full
    create-character flow from a never-seen wallet. Catches any
    regression in the Block A duplicate-mint guard or the
    `auth_phase` state machine.
 
-After Bucket 1 is green, Bucket 2 (the 3 polish bugs from the day's
-arena gauntlet) is already ✅ DONE — see "Mainnet readiness" table
-above.
-
 The polish backlog above ("Known polish backlog") can land any time
 and is non-blocking. The v5.1 republish (player-signed settlement,
 `CharacterRegistry`, `burn_character`, on-chain loot mint) remains
-out of scope until Bucket 1 is fully cleared.
+out of scope until Bucket 3 is cleared. Memory-tracked seeds
+(see `~/.claude/projects/-home-shakalis-sui-comabts/memory/`)
+include `slot_type_seed`, `tournament_seed`, `mutual_ko_seed`,
+`opponent_scout_seed`, `multi_queue_isolation` (now closed by
+Bucket 2 Fix 1).
 
 ---
 
