@@ -48,6 +48,7 @@ import {
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint } from '../utils/sui-settle';
+import { decideAcceptOutcome } from './wager-accept-gate';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
@@ -1227,48 +1228,103 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
   }
   processingWagerAccepts.add(wagerMatchId);
   try {
-    const entry = wagerLobby.get(wagerMatchId);
-    if (!entry) {
-      sendError(client, 'Wager not found in lobby (may have been cancelled or accepted by someone else)');
-      return;
-    }
-
-    if (client.walletAddress === entry.creatorWallet) {
-      sendError(client, 'You cannot accept your own wager');
-      return;
-    }
-
-    // Prevent accepting while in a fight
+    // Prevent accepting while in a fight (orthogonal to the open-wager
+    // gate; checked separately so the 'in a fight' message survives any
+    // future reshuffle of the accept-decision predicate).
     if (client.currentFightId) {
       sendError(client, 'Cannot accept a wager while in a fight');
       return;
     }
 
-    // Prevent accepting if player has an active open wager in the lobby
-    for (const lobbyEntry of wagerLobby.values()) {
-      if (lobbyEntry.creatorWallet === client.walletAddress) {
-        sendError(client, 'You have an open wager. Cancel it first before accepting another.');
-        return;
-      }
-    }
-
-    // Verify on-chain that the wager is now ACTIVE (status=1)
-    const status = await getWagerStatus(wagerMatchId);
-    if (status !== 1) {
-      sendError(client, `Wager not active on-chain (status: ${status}). Did the accept_wager transaction succeed?`);
+    if (!client.walletAddress) {
+      sendError(client, 'Authenticate first');
       return;
     }
 
-    // Persist a recovery row BEFORE we drop the wager from the in-memory
-    // lobby. If the server crashes between this point and `settle_wager`
-    // landing, the boot sweeper will see the row, confirm chain status =
-    // ACTIVE, and call `admin_cancel_wager` for a 50/50 refund. Fire-and-
-    // forget — a Supabase write blip should not block the fight; the
-    // chain's 10-min `cancel_expired_wager` is the fallback safety net.
+    const targetEntry = wagerLobby.get(wagerMatchId);
+
+    // Caller's own open wager (if any) — used by the decision predicate
+    // to detect the silent-accept bug path (Fix B, 2026-05-04). Iterate
+    // the lobby once and pick the first match; players are limited to one
+    // open wager at a time so there should never be more than one.
+    let callerOwnWager: { creatorWallet: string; wagerMatchId: string } | undefined;
+    for (const lobbyEntry of wagerLobby.values()) {
+      if (lobbyEntry.creatorWallet === client.walletAddress) {
+        callerOwnWager = {
+          creatorWallet: lobbyEntry.creatorWallet,
+          wagerMatchId: lobbyEntry.wagerMatchId,
+        };
+        break;
+      }
+    }
+
+    // Single chain probe — checks `arena.move::WagerMatch.status`.
+    // Returns null on RPC failure or missing object; treat both as
+    // "can't determine" and reject so we don't accidentally proceed.
+    const targetChainStatus = await getWagerStatus(wagerMatchId);
+    if (targetChainStatus === null) {
+      sendError(client, 'Could not read wager status from chain. Try again in a moment.');
+      return;
+    }
+
+    const outcome = decideAcceptOutcome({
+      callerWallet: client.walletAddress,
+      targetWagerId: wagerMatchId,
+      targetChainStatus,
+      callerOwnWagerInLobby: callerOwnWager,
+      targetInLobby: targetEntry
+        ? { creatorWallet: targetEntry.creatorWallet, wagerMatchId: targetEntry.wagerMatchId }
+        : undefined,
+    });
+
+    if (outcome.kind === 'reject') {
+      sendError(client, outcome.reason);
+      return;
+    }
+
+    if (outcome.kind === 'autoRollback') {
+      // The 2026-05-04 silent-accept bug: caller has their own open wager
+      // AND the chain says the target is now ACTIVE — i.e. the chain tx
+      // landed despite the client-side gate. Drop both lobby entries and
+      // admin-cancel both wagers so neither side stays stuck.
+      //
+      // admin_cancel_wager refunds 50/50 for ACTIVE (the target — escrow
+      // holds 2× stake) and refund-to-creator for WAITING (the caller's
+      // own — escrow holds 1× stake). Fire-and-forget; failures are
+      // non-blocking and recoverable via `/api/admin/cancel-wager`.
+      console.warn(
+        `[Wager] Auto-rollback fired: caller=${client.walletAddress} ` +
+        `target=${outcome.targetWagerId} ownWager=${outcome.callerOwnWagerId}`,
+      );
+      // Drop the target from the lobby (it's ACTIVE now, not browseable).
+      if (targetEntry) {
+        wagerLobby.delete(outcome.targetWagerId);
+        broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: outcome.targetWagerId });
+      }
+      // Drop the caller's own.
+      if (callerOwnWager) {
+        wagerLobby.delete(outcome.callerOwnWagerId);
+        broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: outcome.callerOwnWagerId });
+      }
+      adminCancelWagerOnChain(outcome.targetWagerId).catch((err) => {
+        console.error('[Wager] Auto-rollback admin_cancel(target) failed:', err?.message || err);
+      });
+      adminCancelWagerOnChain(outcome.callerOwnWagerId).catch((err) => {
+        console.error('[Wager] Auto-rollback admin_cancel(callerOwn) failed:', err?.message || err);
+      });
+      sendError(client, outcome.userMessage);
+      return;
+    }
+
+    // outcome.kind === 'proceed'  — happy path below mirrors the original
+    // handler: persist recovery row, drop from lobby, start fight, sweep
+    // any remaining stragglers for either player.
+    const entry = targetEntry!; // proceed guarantees targetInLobby was defined
+
     dbInsertWagerInFlight({
       wager_match_id: wagerMatchId,
       player_a: entry.creatorWallet,
-      player_b: client.walletAddress!,
+      player_b: client.walletAddress,
       accepted_at_ms: Date.now(),
     }).catch((err) => {
       console.error('[Wager] dbInsertWagerInFlight failed:', err?.message || err);
@@ -1280,7 +1336,7 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
 
     // Get characters and start the fight
     const charA = getCharacterByWallet(entry.creatorWallet);
-    const charB = getCharacterByWallet(client.walletAddress!);
+    const charB = getCharacterByWallet(client.walletAddress);
 
     if (!charA || !charB) {
       sendError(client, 'Character not found');
