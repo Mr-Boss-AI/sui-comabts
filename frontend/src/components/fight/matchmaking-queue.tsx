@@ -12,7 +12,7 @@ import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/li
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager } from "@/lib/wager-accept-gate";
-import { computeBusyState } from "@/lib/busy-state";
+import { computeBusyState, decideMatchmakingRender } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
@@ -142,15 +142,23 @@ export function MatchmakingQueue() {
   const ownLobbyEntry = wagerLobby.find(e => e.creatorWallet === walletAddress);
 
   // Cross-mode busy state — gates Friendly/Ranked/Wager-create simultaneously
-  // (Fix 1 of Bucket 2 close-out, 2026-05-04). When busy, all queue entry
-  // points are disabled with a single explanatory banner. The cancel/leave
-  // affordances remain enabled so the player can always exit.
+  // (Fix 1 of Bucket 2 close-out, 2026-05-04). The render-slot predicate
+  // (Bucket 2 polish, same date) translates the busy kind into which UI
+  // sections to mount: when the player has an open wager, only the lobby
+  // surfaces (with their wager + Cancel button); when idle, the full
+  // selector + create + browse flow. The server-side gate stays as
+  // defense in depth — every queue/wager handler in `handleQueueFight`
+  // re-validates regardless of what the client renders.
   const busy = computeBusyState({
     callerWallet: walletAddress || null,
     ownLobbyEntry: ownLobbyEntry ?? null,
     activeFight: state.fight,
     fightQueue,
     pendingWagerAccept: state.pendingWagerAccept,
+  });
+  const slots = decideMatchmakingRender({
+    busyKind: busy.kind,
+    selectedFightType: selectedType,
   });
 
   const handleQueue = useCallback(async () => {
@@ -411,28 +419,18 @@ export function MatchmakingQueue() {
         <span className="font-semibold">Find a Fight</span>
       </CardHeader>
       <CardBody className="space-y-3">
-        {/* Cross-mode busy banner — surfaces the single reason all queue
-            entry points are disabled (Fix 1, 2026-05-04). The reason is
-            populated by computeBusyState above (ownWager / fight /
-            fightQueue / pendingWagerAccept). */}
-        {busy.busy && busy.kind !== "fightQueue" && (
-          <div
-            role="status"
-            className="rounded-lg border border-amber-700/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-300"
-          >
-            {busy.reason}
-          </div>
-        )}
-
-        {/* Fight type selector */}
-        {FIGHT_TYPES.map(({ type, label, desc, minLevel }) => {
+        {/* Fight type selector — hidden when the player is busy in
+            another mode (Bucket 2 polish, 2026-05-04). The active state
+            (open wager, queue panel, fight) is self-explanatory and
+            cluttering the UI with greyed-out cards adds noise without
+            information. */}
+        {slots.showFightTypes && FIGHT_TYPES.map(({ type, label, desc, minLevel }) => {
           const locked = level < minLevel;
           return (
             <button
               key={type}
-              disabled={locked || signing || busy.busy}
+              disabled={locked || signing}
               onClick={() => setSelectedType(type)}
-              title={busy.busy ? busy.reason ?? undefined : undefined}
               className={`w-full text-left rounded-lg border p-3 transition-all ${
                 selectedType === type
                   ? "border-emerald-600 bg-emerald-900/20"
@@ -450,11 +448,17 @@ export function MatchmakingQueue() {
           );
         })}
 
-        {/* Wager lobby */}
-        {selectedType === "wager" && (
+        {/* Wager UI — driven by `slots.showWagerCreate` /
+            `slots.showWagerLobby` (Bucket 2 polish, 2026-05-04). When
+            the player has an open wager (`busy.kind === "ownWager"`),
+            only the lobby surfaces — fight-type cards + create form
+            stay hidden until they Cancel out. */}
+        {(slots.showWagerCreate || slots.showWagerLobby) && (
           <div className="space-y-3 mt-2">
-            {/* Create wager form */}
-            {!ownLobbyEntry && (
+            {/* Create wager form — hidden once the player has their own
+                wager open (their own wager renders in the lobby below
+                with a Cancel button). */}
+            {slots.showWagerCreate && !ownLobbyEntry && (
               <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                 <div className="flex items-center gap-2">
                   <label className="text-sm text-zinc-400">Stake (SUI):</label>
@@ -491,8 +495,7 @@ export function MatchmakingQueue() {
                 <Button
                   onClick={handleQueue}
                   className="w-full"
-                  disabled={signing || !parsedWager.ok || insufficientFunds || busy.busy}
-                  title={busy.busy ? busy.reason ?? undefined : undefined}
+                  disabled={signing || !parsedWager.ok || insufficientFunds}
                 >
                   {signing
                     ? "Signing transaction..."
@@ -500,69 +503,68 @@ export function MatchmakingQueue() {
                       ? "Enter a valid stake"
                       : insufficientFunds
                         ? "Insufficient SUI"
-                        : busy.busy
-                          ? "Busy elsewhere"
-                          : "Create Wager & Lock SUI"}
+                        : "Create Wager & Lock SUI"}
                 </Button>
               </div>
             )}
 
-            {/* Open wagers list */}
-            <div>
-              <div className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-2">
-                Open Wagers ({wagerLobby.length})
-              </div>
-              {wagerLobby.length === 0 ? (
-                <p className="text-sm text-zinc-600 text-center py-4">
-                  No open wagers. Create one to challenge others!
-                </p>
-              ) : (
-                <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                  {wagerLobby.map((entry) => {
-                    const isOwn = entry.creatorWallet === walletAddress;
-                    // Disable Accept when:
-                    //   - the caller has their own open wager (covered by
-                    //     `busy.kind === 'ownWager'` here), OR
-                    //   - the caller is in any other busy state — fight,
-                    //     queue, or pending accept (Fix 1 cross-mode gate).
-                    // ownWager keeps its specific reason ("Cancel your own
-                    // first") since it's a distinct action; other busy
-                    // kinds get the generic busy reason.
-                    const disableAccept = !isOwn && busy.busy;
-                    const disableReason =
-                      disableAccept
-                        ? busy.kind === "ownWager"
-                          ? "Cancel your own open wager first before accepting another."
-                          : (busy.reason ?? "You are busy in another mode.")
-                        : undefined;
-                    return (
-                      <WagerLobbyCard
-                        key={entry.wagerMatchId}
-                        entry={entry}
-                        isOwn={isOwn}
-                        onAccept={() => handleAcceptWager(entry)}
-                        onCancel={() => handleCancelWager(entry)}
-                        signing={signing}
-                        disableAccept={disableAccept}
-                        disableReason={disableReason}
-                      />
-                    );
-                  })}
+            {/* Open wagers list — surfaces both the player's own wager
+                (with Cancel button, in `ownWager` busy state) and
+                browseable other-player wagers (in idle state). */}
+            {slots.showWagerLobby && (
+              <div>
+                <div className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-2">
+                  Open Wagers ({wagerLobby.length})
                 </div>
-              )}
-            </div>
+                {wagerLobby.length === 0 ? (
+                  <p className="text-sm text-zinc-600 text-center py-4">
+                    No open wagers. Create one to challenge others!
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {wagerLobby.map((entry) => {
+                      const isOwn = entry.creatorWallet === walletAddress;
+                      // Accept gate (Fix A silent-accept + Fix 1 cross-mode):
+                      //   - own wager → Cancel only, no Accept
+                      //   - busy in any mode → Accept disabled
+                      // ownWager keeps its specific reason; other busy
+                      // kinds get the generic busy reason.
+                      const disableAccept = !isOwn && busy.busy;
+                      const disableReason =
+                        disableAccept
+                          ? busy.kind === "ownWager"
+                            ? "Cancel your own open wager first before accepting another."
+                            : (busy.reason ?? "You are busy in another mode.")
+                          : undefined;
+                      return (
+                        <WagerLobbyCard
+                          key={entry.wagerMatchId}
+                          entry={entry}
+                          isOwn={isOwn}
+                          onAccept={() => handleAcceptWager(entry)}
+                          onCancel={() => handleCancelWager(entry)}
+                          signing={signing}
+                          disableAccept={disableAccept}
+                          disableReason={disableReason}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Non-wager: Enter Queue button */}
-        {selectedType !== "wager" && (
+        {/* Non-wager: Enter Queue button — only visible in idle state
+            with a non-wager fight type selected (Bucket 2 polish). */}
+        {slots.showEnterQueueButton && (
           <Button
             onClick={handleQueue}
             className="w-full"
-            disabled={signing || busy.busy}
-            title={busy.busy ? busy.reason ?? undefined : undefined}
+            disabled={signing}
           >
-            {busy.busy ? "Busy elsewhere" : "Enter Queue"}
+            Enter Queue
           </Button>
         )}
       </CardBody>

@@ -110,3 +110,87 @@ export function canCancelOwnState(state: BusyState, target: BusyKind): boolean {
   // enabled. Same for "Leave Queue" targeting "fightQueue".
   return state.busy && state.kind === target;
 }
+
+// ============================================================================
+// Matchmaking render-slot predicate (Bucket 2 polish, 2026-05-04)
+//
+// Live-test feedback: greying out the 3 fight-mode cards + showing a
+// banner when the player is busy felt cluttered. The active state
+// (their open wager, the "Finding opponent…" panel) is self-explanatory.
+// Hide the irrelevant cards entirely; show only what the player can act
+// on right now.
+// ============================================================================
+
+/** What the matchmaking-queue card should render given the current state. */
+export interface MatchmakingRenderSlots {
+  /** The 3 fight-type cards (Friendly / Ranked / Wager selector). */
+  showFightTypes: boolean;
+  /** The "stake amount + Create Wager" form. */
+  showWagerCreate: boolean;
+  /** The "Open Wagers (N)" list — surfaces the player's own wager
+   *  (with Cancel button) when they have one. */
+  showWagerLobby: boolean;
+  /** The "Enter Queue" button (non-wager modes). */
+  showEnterQueueButton: boolean;
+}
+
+/**
+ * Decide which matchmaking-queue UI slots to render given the current
+ * busy state and the selected fight type.
+ *
+ * Routing layers:
+ *   - `kind === "fight"` is unreachable in MatchmakingQueue (game-screen
+ *     routes to FightArena). Predicate returns all-false defensively.
+ *   - `kind === "fightQueue"` is short-circuited by MatchmakingQueue's
+ *     early return (the "Finding opponent…" panel). Predicate returns
+ *     all-false defensively.
+ *   - `kind === "ownWager"` shows ONLY the wager lobby — no other modes
+ *     can be entered while a wager is in flight.
+ *   - `kind === "pendingWagerAccept"` hides everything; the
+ *     ChallengePopup is modal on top of the screen.
+ *   - `kind === "none"` is the idle UX: fight-type selector + the
+ *     selected mode's affordances.
+ *
+ * `selectedFightType` is widened to `string` so the predicate accepts
+ * the full `FightType` union (`"friendly" | "ranked" | "wager" |
+ * "item_stake"`) without cycling busy-state.ts back through types/game.
+ * Anything other than `"wager"` is treated as the "non-wager" branch —
+ * matches the matchmaking UI which only surfaces friendly / ranked /
+ * wager (item_stake is a server-side-only fight type today).
+ *
+ * Pure: no React, no chain calls. Tested in `qa-busy-state-render.ts`.
+ */
+export function decideMatchmakingRender(args: {
+  busyKind: BusyKind;
+  selectedFightType: string;
+}): MatchmakingRenderSlots {
+  switch (args.busyKind) {
+    case "ownWager":
+      return {
+        showFightTypes: false,
+        showWagerCreate: false,
+        showWagerLobby: true,
+        showEnterQueueButton: false,
+      };
+    case "fight":
+    case "fightQueue":
+    case "pendingWagerAccept":
+      // Parent layer handles these — render nothing in the matchmaking
+      // card body so we don't double-paint.
+      return {
+        showFightTypes: false,
+        showWagerCreate: false,
+        showWagerLobby: false,
+        showEnterQueueButton: false,
+      };
+    case "none": {
+      const isWager = args.selectedFightType === "wager";
+      return {
+        showFightTypes: true,
+        showWagerCreate: isWager,
+        showWagerLobby: isWager,
+        showEnterQueueButton: !isWager,
+      };
+    }
+  }
+}
