@@ -300,6 +300,65 @@
         "mintDigest": "9sJ5bz2NdXsX5sJhjBojuuCyBUGnCAEQBiYejkjdCodF",
         "listDigest": "7rjJJBvaUbuZgk3k4yYNntYe64riz9asp6DdL6WzhXcs"
       }
-    ]
+    ],
+    "salesAudit": {
+      "capturedAt": "2026-05-04T20:00:00.000Z",
+      "note": "Mint-time state is preserved in `items` above; this audit is a point-in-time snapshot of post-mint chain ownership. For live ownership, query the chain directly.",
+      "stillInTreasuryKiosk": [
+        {
+          "index": 3,
+          "name": "Skullsplitter Helm",
+          "objectId": "0x502d173d5937cf3da920d3a93cc9d4afc0bef3ddbb13366438c5b67da720bdb5"
+        },
+        {
+          "index": 4,
+          "name": "Hunter's Hood",
+          "objectId": "0xfcbbaf2c642c0842f1bb891060adabbb8e95ecefbb5cb5ce5da36a1a967caa6c"
+        },
+        {
+          "index": 5,
+          "name": "Pendant of Wrath",
+          "objectId": "0xe709cd8458df88e6e84c75849126dbd56729909f6e1c4b9b7e659747b195326b"
+        },
+        {
+          "index": 6,
+          "name": "Whisperwind Amulet",
+          "objectId": "0xd711f58cdf390ceacca02b06c52cc520cba2cafa90438c77a581b390377316b0"
+        }
+      ],
+      "transferredOut": [
+        {
+          "index": 1,
+          "name": "Bloodletter Gauntlets",
+          "objectId": "0xc15a78f77b9f0ef477413fca526753d1d21ee04f5076021f3022a96f9a4a421c",
+          "currentOwner": "Mr_Boss (AddressOwner)"
+        },
+        {
+          "index": 2,
+          "name": "Shadowstep Wraps",
+          "objectId": "0x5829b09f0e8db81a4c5abb9c0e06858baf7a9579ccfc9b637172b8783f3d9221",
+          "currentOwner": "DOF of 0x45f5e48efc02\u2026 (likely a Character or Sx kiosk)"
+        },
+        {
+          "index": 7,
+          "name": "Dancer's Aegis (A)",
+          "objectId": "0xa896034d84e4b0386b11d3889215499557c6b8d64c2d430e70fb3fc36577691a",
+          "currentOwner": "Mr_Boss (AddressOwner)"
+        },
+        {
+          "index": 8,
+          "name": "Dancer's Aegis (B)",
+          "objectId": "0x1d31c953095d8f90202217d10d1334bf1accce1867efa4194be25a50b6859cee",
+          "currentOwner": "DOF of 0xc1f3528748c5\u2026 (likely a Character or kiosk)"
+        },
+        {
+          "index": 9,
+          "name": "Skullcrusher Maul",
+          "objectId": "0x9fa6626d5b713a0a9bc06f4ed84d26cc0f8d44abbfb5ef263ada04bf82d396d2",
+          "currentOwner": "Mr_Boss (AddressOwner)"
+        }
+      ],
+      "summary": "5/9 sold (3 confirmed in Mr_Boss wallet, 2 DOFs); 4/9 still listed in TREASURY kiosk."
+    }
   }
 }
