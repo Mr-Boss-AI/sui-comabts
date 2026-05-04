@@ -164,8 +164,14 @@ export function CharacterProfile({ character, compact }: { character: Character;
       state.onChainItems,
       equippedPendingIds,
       effectiveLevel,
+      // Pending loadout — unlocks the 2H conflict check inside the
+      // picker (Bug 2 Path A, 2026-05-04). The picker now greys out
+      // candidates that would create a two-handed conflict (e.g. trying
+      // to add an off-hand while a Skullcrusher Maul is in `weapon`)
+      // with the same locked + reason UX as level-locked items.
+      eq,
     );
-  }, [selectedSlot, state.inventory, state.onChainItems, equippedPendingIds, effectiveLevel]);
+  }, [selectedSlot, state.inventory, state.onChainItems, equippedPendingIds, effectiveLevel, eq]);
 
   function handleEquip(item: Item) {
     if (!selectedSlot) return;

@@ -303,6 +303,92 @@ function main(): void {
      'serverInventory order preserved (sort happens on internal buffer only)');
 
   // ===========================================================================
+  // 12.5 — Two-handed enforcement (Bug 2 Path A, 2026-05-04)
+  //
+  // Cursed Greatsword + Skullcrusher Maul + Steel Greatsword are 2H —
+  // equipping one in `weapon` should grey out the offhand picker; equipping
+  // anything in offhand should grey out 2H candidates in the weapon picker.
+  // Same locked + reason UX as level-locked items.
+  // ===========================================================================
+  console.log('\n[12.5] Two-handed conflict locking');
+
+  const EMPTY_EQ: EquipmentSlots = {
+    weapon: null, offhand: null, helmet: null, chest: null, gloves: null,
+    boots: null, belt: null, ring1: null, ring2: null, necklace: null,
+  };
+  const greatsword = mkItem({ id: '0xCursed', name: 'Cursed Greatsword', itemType: WEAPON, levelReq: 5 });
+  const maul       = mkItem({ id: '0xMaul',   name: 'Skullcrusher Maul', itemType: WEAPON, levelReq: 6 });
+  const steelGS    = mkItem({ id: '0xSteel',  name: 'Steel Greatsword',  itemType: WEAPON, levelReq: 5 });
+  const oneHand    = mkItem({ id: '0x1H',     name: 'Longsword',         itemType: WEAPON, levelReq: 1 });
+  const buckler    = mkItem({ id: '0xBuck',   name: 'Wooden Buckler',    itemType: SHIELD, levelReq: 1 });
+  const dirk       = mkItem({ id: '0xDirk',   name: 'Parrying Dirk',     itemType: WEAPON, levelReq: 1 });
+
+  // a) weapon picker, no pendingEquipment passed → backward-compat: 2H rule ignored.
+  const noPending = buildSlotPickerEntries('weapon', [greatsword, oneHand], [], new Set(), 9);
+  eq(noPending.length, 2, 'no pendingEquipment arg → 2H rule ignored, both candidates returned');
+  eq(noPending.filter((e) => e.locked).length, 0, 'nothing locked when arg omitted');
+
+  // b) weapon picker, pending.offhand empty → 2H candidate is unlocked.
+  const wp1 = buildSlotPickerEntries('weapon', [greatsword, oneHand], [], new Set(), 9, EMPTY_EQ);
+  const cgEntry = wp1.find((e) => e.item.id === '0xCursed')!;
+  eq(cgEntry.locked, false, 'weapon slot, no offhand → Cursed Greatsword unlocked');
+
+  // c) weapon picker, pending.offhand has a buckler → 2H candidates LOCKED.
+  const wp2 = buildSlotPickerEntries('weapon', [greatsword, maul, steelGS, oneHand], [], new Set(), 9, {
+    ...EMPTY_EQ, offhand: buckler,
+  });
+  eq(wp2.find((e) => e.item.id === '0xCursed')!.locked, true,  'Cursed Greatsword locked when offhand=Buckler');
+  eq(wp2.find((e) => e.item.id === '0xMaul')!.locked,   true,  'Skullcrusher Maul locked when offhand=Buckler');
+  eq(wp2.find((e) => e.item.id === '0xSteel')!.locked,  true,  'Steel Greatsword locked when offhand=Buckler');
+  eq(wp2.find((e) => e.item.id === '0x1H')!.locked,     false, '1-handed Longsword still unlocked');
+  const lockedReason = wp2.find((e) => e.item.id === '0xCursed')!.lockedReason ?? '';
+  if (lockedReason.toLowerCase().includes('off-hand') || lockedReason.toLowerCase().includes('offhand')) {
+    ok(`weapon-slot lockedReason mentions off-hand: "${lockedReason}"`);
+  } else {
+    fail('weapon-slot lockedReason mentions off-hand', `got: "${lockedReason}"`);
+  }
+
+  // d) weapon picker, pending.offhand has a 2nd weapon (dual-wield case) → still locks 2H.
+  const wp3 = buildSlotPickerEntries('weapon', [greatsword, oneHand], [], new Set(), 9, {
+    ...EMPTY_EQ, offhand: dirk,
+  });
+  eq(wp3.find((e) => e.item.id === '0xCursed')!.locked, true,
+    'dual-wield offhand also blocks 2H mainhand candidates');
+
+  // e) offhand picker, pending.weapon is 2H → ALL candidates locked (both shields + weapons).
+  const oh1 = buildSlotPickerEntries('offhand', [buckler, oneHand, dirk], [], new Set(), 9, {
+    ...EMPTY_EQ, weapon: maul,
+  });
+  eq(oh1.length, 3, 'offhand candidates still surface (locked, not hidden)');
+  eq(oh1.every((e) => e.locked), true, 'all offhand candidates locked when weapon=2H');
+  const ohReason = oh1[0].lockedReason ?? '';
+  if (ohReason.toLowerCase().includes('two-handed') || ohReason.toLowerCase().includes('2h') || ohReason.toLowerCase().includes('off-hand')) {
+    ok(`offhand-slot lockedReason mentions two-handed: "${ohReason}"`);
+  } else {
+    fail('offhand-slot lockedReason mentions two-handed', `got: "${ohReason}"`);
+  }
+
+  // f) offhand picker, pending.weapon is 1-handed → all unlocked.
+  const oh2 = buildSlotPickerEntries('offhand', [buckler, dirk], [], new Set(), 9, {
+    ...EMPTY_EQ, weapon: oneHand,
+  });
+  eq(oh2.every((e) => !e.locked), true, 'offhand unlocked when weapon=1H');
+
+  // g) Level lock takes precedence over 2H lock when both apply.
+  const wp4 = buildSlotPickerEntries('weapon', [greatsword], [], new Set(), 4, {
+    ...EMPTY_EQ, offhand: buckler,
+  });
+  eq(wp4[0].locked, true, 'level + 2H both apply → still locked');
+  eq(wp4[0].lockedReason?.startsWith('Requires Level'), true,
+    'level reason wins (player\'s mental model: "level up first")');
+
+  // h) Other slots unaffected by 2H rule.
+  const helmetPick = buildSlotPickerEntries('helmet', [
+    mkItem({ id: '0xHelm', name: 'A Helmet', itemType: HELMET, levelReq: 1 }),
+  ], [], new Set(), 9, { ...EMPTY_EQ, weapon: maul });
+  eq(helmetPick[0].locked, false, 'helmet slot ignores 2H weapon in `weapon` slot');
+
+  // ===========================================================================
   // 13 — large input perf sanity (1000 items resolve in <100 ms locally)
   // ===========================================================================
   console.log('\n[13] Large-input sanity (1000 items)');

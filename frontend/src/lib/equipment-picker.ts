@@ -33,20 +33,32 @@
  */
 import type { EquipmentSlots, Item } from "../types/game";
 import { SLOT_TO_ITEM_TYPE } from "../types/game";
+import { evaluateTwoHandedConflict } from "./two-handed-weapons";
 
 export interface PickerEntry {
   item: Item;
   locked: boolean;
-  /** Present iff `locked === true`. Format: "Requires Level N". */
+  /** Present iff `locked === true`. One of:
+   *   - "Requires Level N"                         (level-gated)
+   *   - "Two-handed — unequip your off-hand first." (2H weapon → weapon slot)
+   *   - "Two-handed weapon equipped — …"           (anything → offhand slot)
+   */
   lockedReason?: string;
 }
 
+/**
+ * `pendingEquipment` is optional for backward-compatibility with older
+ * call sites. When provided, two-handed conflicts are surfaced as locked
+ * entries (same UX as level-locked items). When omitted, the function
+ * falls back to the pre-2026-05-04 behaviour of ignoring the 2H rule.
+ */
 export function buildSlotPickerEntries(
   slot: keyof EquipmentSlots,
   serverInventory: readonly Item[],
   onChainItems: readonly Item[],
   equippedPendingIds: ReadonlySet<string>,
   effectiveLevel: number,
+  pendingEquipment?: EquipmentSlots,
 ): PickerEntry[] {
   const byId = new Map<string, Item>();
   for (const item of serverInventory) byId.set(item.id, item);
@@ -62,16 +74,35 @@ export function buildSlotPickerEntries(
     if (equippedPendingIds.has(item.id)) continue;
     if (!compatibleTypes.includes(item.itemType)) continue;
 
-    const locked = item.levelReq > effectiveLevel;
-    if (locked) {
+    // Level lock takes precedence — the chain would `ELevelTooLow` an
+    // equip before any 2H consideration, and the player's mental model
+    // is "I need to level up first" rather than "I need to swap gear".
+    const levelLocked = item.levelReq > effectiveLevel;
+    if (levelLocked) {
       entries.push({
         item,
         locked: true,
         lockedReason: `Requires Level ${item.levelReq}`,
       });
-    } else {
-      entries.push({ item, locked: false });
+      continue;
     }
+
+    // Two-handed conflict — only consulted when pendingEquipment is
+    // supplied. Same locked + reason UX as level-locked items so the
+    // player sees what they'd need to do to make the item equippable.
+    if (pendingEquipment) {
+      const twoHanded = evaluateTwoHandedConflict({
+        slot,
+        candidate: item,
+        pending: pendingEquipment,
+      });
+      if (twoHanded.conflict) {
+        entries.push({ item, locked: true, lockedReason: twoHanded.reason });
+        continue;
+      }
+    }
+
+    entries.push({ item, locked: false });
   }
 
   entries.sort(comparePickerEntries);

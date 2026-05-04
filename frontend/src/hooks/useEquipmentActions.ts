@@ -10,6 +10,7 @@ import {
   isOnChainItem,
   EMPTY_EQUIPMENT,
 } from "@/lib/loadout";
+import { evaluateTwoHandedConflict } from "@/lib/two-handed-weapons";
 import type { EquipmentSlots, Item } from "@/types/game";
 
 // Maps equipment.move abort codes to user-facing strings. These codes are
@@ -128,6 +129,24 @@ export function useEquipmentActions() {
     slot: keyof EquipmentSlots,
     _currentSlotItem: Item | null = null,
   ): void {
+    // Two-handed weapon gate (Bug 2 Path A, 2026-05-04). The picker
+    // already greys out conflicting candidates with a locked + reason
+    // UX — this is defence in depth against keyboard / programmatic
+    // paths that bypass the disabled card. Same shape as the
+    // canAcceptWager guard in handleAcceptWager (Fix A, silent-accept).
+    const twoHanded = evaluateTwoHandedConflict({
+      slot,
+      candidate: item,
+      pending,
+    });
+    if (twoHanded.conflict) {
+      dispatch({
+        type: "SET_ERROR",
+        message: twoHanded.reason ?? "Two-handed conflict — adjust your loadout first.",
+      });
+      return;
+    }
+
     // Server-only NPC item — no chain representation, no staging. Send the
     // legacy WS message immediately so the server + UI reflect the change.
     if (!isOnChainItem(item)) {
