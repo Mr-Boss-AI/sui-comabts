@@ -1,12 +1,17 @@
 # SUI Combats — Project Status
 
-> Single canonical status. Updated 2026-05-03 after the v5 testnet
-> hardening + repo cleanup pass (commit `dc28eff` + the cleanup commit
-> immediately after).
+> Single canonical status. **Updated 2026-05-04 — Bucket 2 closed.**
 >
-> Branch `feature/v5-redeploy`. Sui testnet only. Mainnet deferred to v5.1
-> republish (player-signed settlement attestation + Move
-> CharacterRegistry).
+> Branch `feature/v5-redeploy` at `443e02d`, **not pushed**. Mainline
+> `main` still at the v4-era `08ff991`; **do not merge until v5.1
+> republish lands**. Sui testnet only. Mainnet deferred to v5.1.
+>
+> **For the comprehensive end-of-Bucket-2 snapshot — bug ledger,
+> v5.1 contract bundle, parking lot, files-modified-this-session, full
+> commit log, what's-NOT-in-the-codebase — see
+> [`STATE_OF_PROJECT_2026-05-04.md`](./STATE_OF_PROJECT_2026-05-04.md).**
+> This STATUS.md keeps the high-level shape; that doc is the deep
+> dive.
 
 ---
 
