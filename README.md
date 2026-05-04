@@ -9,10 +9,16 @@ the winner.
 Inspired by the Russian browser MMORPG *combats.ru / oldbk.ru*
 (Бойцовский Клуб). First open-source RPG combat framework for Sui.
 
-> **Status:** v5 testnet hardened. Branch `feature/v5-redeploy`.
-> Mainnet deploy gated on the v5.1 republish (player-signed settlement
-> + Move `CharacterRegistry`). Full state in [`STATUS.md`](STATUS.md);
-> deploy protocol in [`MAINNET_PREP.md`](MAINNET_PREP.md).
+> **Status (2026-05-04):** v5 testnet hardened — Bucket 2 closed.
+> Branch `feature/v5-redeploy`. Mainnet deploy gated on the v5.1
+> republish bundle (player-signed settlement, `CharacterRegistry`,
+> `OpenWagerRegistry`, `slot_type` Item field, `burn_character`,
+> draws counter, on-chain loot mint). Latest comprehensive snapshot
+> (bug ledger, parking lot, what's-NOT-in-the-codebase, full commit
+> log) lives in [`STATE_OF_PROJECT_2026-05-04.md`](STATE_OF_PROJECT_2026-05-04.md);
+> high-level state in [`STATUS.md`](STATUS.md); deploy protocol in
+> [`MAINNET_PREP.md`](MAINNET_PREP.md); session-by-session
+> [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -26,20 +32,45 @@ Inspired by the Russian browser MMORPG *combats.ru / oldbk.ru*
   to the Character via Sui dynamic-object-fields (10 slots: weapon,
   offhand, helmet, chest, gloves, boots, belt, ring × 2, necklace).
   Save-loadout is one atomic PTB across all dirty slots.
+  Two-handed weapons (Cursed Greatsword, Skullcrusher Maul, Steel
+  Greatsword) take both weapon + offhand slots; the picker greys
+  out invalid combinations both directions and the action gate
+  refuses any keyboard / dev-tools bypass.
 - **Real-SUI wager fights.** `arena::create_wager` locks player A's
   stake on chain; `accept_wager` matches it; `settle_wager` splits
   95 % to winner / 5 % to treasury. 10-minute auto-expiry safety net
   (`cancel_expired_wager` is anyone-callable). Boot-time orphan
-  sweeper auto-recovers wagers stuck across server crashes.
+  sweeper auto-recovers wagers stuck across server crashes. Multi-
+  queue isolation gate prevents a player from being in a wager AND
+  the matchmaking queue simultaneously (which could strand SUI
+  if ranked matched first); silent-accept gate at both client and
+  server layers refuses an Accept click when the caller has their
+  own open wager.
 - **Kiosk marketplace.** List, browse, buy, delist, withdraw — all
   PTB-driven from the player's wallet. 2.5 % `royalty_rule` enforced
   on every buy via the v5 `TransferPolicy<Item>`. Atomic delist
   (delist + take + transfer in one PTB) so NFTs never get stuck
-  unlisted in a kiosk.
+  unlisted in a kiosk. v5 starter catalog (22 items) plus a v5.1
+  Lv6–Lv8 epic / legendary catalog (9 items) minted to TREASURY's
+  kiosk for cross-build buy testing.
 - **5-zone turn combat.** 20 s turn timer, server-authoritative
   resolution, deterministic roll math, anti-cheat fight-lock DOF
   prevents equipment swaps mid-fight. Reconnect-grace window pauses
-  the fight on disconnect so a wifi blip doesn't cost real SUI.
+  the fight on disconnect (cumulative per-fight budget — abusers
+  who ping-pong run out, honest wifi blips get the full window) so
+  a wifi blip doesn't cost real SUI. Outcome modal replays on
+  rejoin if the player was offline at settle time.
+- **Hardened WebSocket transport.** Outbound messages fired during
+  reconnect windows queue and drain on reconnect (stale > 30 s
+  discarded; queue capped at 200) instead of erroring. JWT
+  auth-resume across reconnects; dapp-kit signed-personal-message
+  challenge on first connect.
+- **Level-up celebration modal.** Server emits `character_leveled_up`
+  after `update_after_fight` confirms a level threshold crossing;
+  frontend pops a one-shot modal with an "Allocate Stat Points"
+  CTA. Multi-level gains merge into a single "Level Up xN!"
+  celebration; modal queues during active fights and surfaces
+  post-settle.
 
 ---
 
@@ -83,14 +114,19 @@ sui-comabts/
 │       └── types/           #   game, ws-messages
 ├── scripts/                 # QA gauntlets (qa-*.ts) + setup-display + mint-*
 ├── nft/                     # 22 starter-NFT PNGs (also pinned to IPFS)
-├── deployment.testnet-v5.json   # v5 deploy artefact (package id + catalog)
-├── STATUS.md                # Canonical project state
+├── deployment.testnet-v5.json   # v5 deploy artefact (package id +
+│                                #   22-item starter + 9-item v5.1 catalog)
+├── STATUS.md                # High-level state (points to STATE_OF_PROJECT)
+├── STATE_OF_PROJECT_2026-05-04.md   # Comprehensive end-of-Bucket-2 snapshot
+│                                #   (bug ledger, v5.1 bundle, parking lot,
+│                                #    full commit log, what's-NOT-built)
+├── CHANGELOG.md             # Session-by-session change log
 ├── MAINNET_PREP.md          # Mainnet deploy protocol
 ├── LOADOUT_DESIGN.md        # D1-D5 loadout-save design
 ├── SUI_COMBATS_GDD.md       # Game design — combat math, XP curve, economy
 ├── DESIGN_BRIEF.md          # Visual aesthetic brief (for redesign)
 ├── GRANT_APPLICATION.md     # Sui Foundation grant draft
-├── SESSION_HANDOFF.md       # Latest session's-work handoff
+├── SESSION_HANDOFF.md       # Latest session's-work handoff (point-in-time)
 └── CLAUDE.md / AGENTS.md    # GitNexus integration for AI tooling
 ```
 
@@ -151,25 +187,36 @@ sui client publish --gas-budget 500000000
 
 ## Test gauntlets
 
-Pure unit tests; no chain or DB calls. Run from `server/`:
+Pure unit tests; no chain or DB calls. Run from repo root with
+`NODE_PATH=server/node_modules` (or `cd server` and use relative
+paths — most gauntlets work either way; `qa-mint-catalog` and
+`qa-chain-gauntlet` need NODE_PATH for the `dotenv` resolve):
 
 ```bash
-cd server
-for f in qa-xp qa-marketplace qa-treasury-queue qa-character-mint \
-         qa-orphan-sweep qa-reconnect-grace qa-fight-pause \
-         qa-stat-points qa-wager-register qa-equip-picker \
-         qa-combat-stats qa-wager-form qa-reconnect-modal \
-         qa-grace-budget; do
-  echo "=== $f ==="
-  npx tsx ../scripts/$f.ts | tail -3
+cd ~/sui-comabts
+for f in scripts/qa-*.ts; do
+  echo "=== $(basename $f) ==="
+  NODE_PATH=server/node_modules ./server/node_modules/.bin/tsx "$f" | tail -3
 done
 ```
 
-Total: **731 / 731 PASS** across 14 gauntlets. See [`STATUS.md`](STATUS.md)
-for what each one covers.
+**Total: 1195 / 1195 PASS across 20 gauntlets.** Coverage by area:
 
-Plus on-chain smoke tests: `npx tsx ../scripts/qa-chain-gauntlet.ts`
-(requires `server/.env` populated; uses real chain RPC).
+| Area | Gauntlets |
+|---|---|
+| Combat / XP / stats | qa-xp, qa-combat-stats, qa-stat-points, qa-character-mint |
+| Arena / wagers | qa-treasury-queue, qa-orphan-sweep, qa-wager-register, qa-wager-form, qa-wager-accept-gate |
+| Reconnect / grace / outcome | qa-reconnect-grace, qa-fight-pause, qa-reconnect-modal, qa-grace-budget |
+| Equipment | qa-equip-picker (78 — covers level-locked + 2H both directions) |
+| Marketplace | qa-marketplace, qa-mint-catalog (236 — Lv6-Lv8 catalog spec) |
+| Cross-mode busy state | qa-multi-queue-isolation, qa-busy-state-render |
+| WebSocket transport | qa-ws-readystate |
+| Level-up celebration | qa-level-up-modal |
+
+Plus the on-chain smoke gauntlet `qa-chain-gauntlet.ts` (real RPC)
+and **35 / 35 Move unit tests** (`cd contracts && sui move test`).
+See [`STATE_OF_PROJECT_2026-05-04.md`](STATE_OF_PROJECT_2026-05-04.md)
+§ Test Suite State for the full list with assertion counts.
 
 ---
 
@@ -187,9 +234,19 @@ TREASURY (publisher)
                  0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d
 ```
 
-The full deploy artefact (with the 22-NFT starter catalog) is in
-[`deployment.testnet-v5.json`](deployment.testnet-v5.json). NFT artwork
-on Pinata: CID `bafybeiarz5gk3selzpjclugdl2odmvdtbtvi7gtky65m7chkyjymci3yfy`.
+The full deploy artefact lives in
+[`deployment.testnet-v5.json`](deployment.testnet-v5.json):
+- **22-item starter catalog** (split across mr_boss + sx) — minted
+  2026-04-27 from Pinata CID
+  `bafybeiarz5gk3selzpjclugdl2odmvdtbtvi7gtky65m7chkyjymci3yfy`.
+- **9-item v5.1 Lv6-Lv8 catalog** (Bloodletter Gauntlets,
+  Shadowstep Wraps, Skullsplitter Helm, Hunter's Hood, Pendant
+  of Wrath, Whisperwind Amulet, Dancer's Aegis ×2 duplicate,
+  Skullcrusher Maul) minted to TREASURY's kiosk 2026-05-04 from
+  Pinata CID
+  `bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i`.
+  Cross-build buy testing exercised the marketplace flow during
+  Bucket 1 / 2 close-out.
 
 ---
 
@@ -228,7 +285,8 @@ wallet's Walrus browser.
   `feature/v5-redeploy` branch is canonical for v5 work; `main` on
   origin is at the v4-era `08ff991` (pre-Phase-0.5).
 - **Test before shipping.** Every gauntlet must be green
-  (`475/475 PASS`).
+  (`1195/1195 PASS` across 20 static gauntlets, plus `35/35 PASS`
+  on Move unit tests).
 - **Search before building.** GitNexus index in `.gitnexus/` —
   see [`CLAUDE.md`](CLAUDE.md) for the AI tooling integration.
 - **Treat testnet as production.** Real SUI is locked in wager
