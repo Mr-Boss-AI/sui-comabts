@@ -11,6 +11,7 @@ import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
+import { canAcceptWager } from "@/lib/wager-accept-gate";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
@@ -43,15 +44,30 @@ function timeAgo(timestamp: number): string {
   return `${Math.floor(secs / 60)}m ago`;
 }
 
-function WagerLobbyCard({ entry, isOwn, onAccept, onCancel, signing }: {
+function WagerLobbyCard({
+  entry,
+  isOwn,
+  onAccept,
+  onCancel,
+  signing,
+  disableAccept = false,
+  disableReason,
+}: {
   entry: WagerLobbyEntry;
   isOwn: boolean;
   onAccept: () => void;
   onCancel: () => void;
   signing: boolean;
+  /** When true, the Accept button is hard-disabled regardless of `signing`.
+   *  Set by the parent when the caller has their own open wager — closes the
+   *  silent-accept bug (2026-05-04, see lib/wager-accept-gate.ts header). */
+  disableAccept?: boolean;
+  /** Tooltip shown on hover of the disabled Accept button. */
+  disableReason?: string;
 }) {
   const archetype = getArchetypeLabel(entry.creatorStats);
   const color = getArchetypeColor(archetype);
+  const acceptBlocked = disableAccept || signing;
 
   return (
     <div className={`rounded-lg border p-3 transition-all ${
@@ -79,7 +95,12 @@ function WagerLobbyCard({ entry, isOwn, onAccept, onCancel, signing }: {
               Cancel
             </Button>
           ) : (
-            <Button size="sm" onClick={onAccept} disabled={signing}>
+            <Button
+              size="sm"
+              onClick={onAccept}
+              disabled={acceptBlocked}
+              title={disableAccept ? disableReason : undefined}
+            >
               {signing ? "Signing..." : "Accept"}
             </Button>
           )}
@@ -248,6 +269,31 @@ export function MatchmakingQueue() {
   }, [state.socket]);
 
   const handleAcceptWager = useCallback(async (entry: WagerLobbyEntry) => {
+    // Defence in depth — the Accept button is already disabled in the
+    // render path when the caller has their own open wager (Fix A,
+    // 2026-05-04). This catches any keyboard / programmatic / dev-tools
+    // override BEFORE we sign and lock SUI on chain.
+    //
+    // Without this guard, the chain `accept_wager` succeeds (it has no
+    // "no own open wager" check) and the wager flips to STATUS_ACTIVE.
+    // The server's WS check then rejects the follow-up message but the
+    // chain state is already mutated — `cancel_wager` aborts with
+    // `EMatchNotWaiting (1)`. See lib/wager-accept-gate.ts header for
+    // the full chain-evidenced trace.
+    const gate = canAcceptWager({
+      callerWallet: walletAddress,
+      targetWagerId: entry.wagerMatchId,
+      lobby: wagerLobby,
+    });
+    if (!gate.allow) {
+      console.warn(
+        "[Wager] Accept gate refused:",
+        gate.reason,
+        gate.ownWagerId ? `(own=${gate.ownWagerId})` : "",
+      );
+      dispatch({ type: "SET_ERROR", message: gate.reason ?? "Cannot accept this wager." });
+      return;
+    }
     setSigning(true);
     try {
       const stakeAmountMist = BigInt(Math.round(entry.wagerAmount * 1_000_000_000));
@@ -270,7 +316,7 @@ export function MatchmakingQueue() {
     } finally {
       setSigning(false);
     }
-  }, [dAppKit, state.socket, dispatch]);
+  }, [dAppKit, state.socket, dispatch, walletAddress, wagerLobby]);
 
   const handleCancelWager = useCallback(async (entry: WagerLobbyEntry) => {
     setSigning(true);
@@ -412,16 +458,30 @@ export function MatchmakingQueue() {
                 </p>
               ) : (
                 <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                  {wagerLobby.map((entry) => (
-                    <WagerLobbyCard
-                      key={entry.wagerMatchId}
-                      entry={entry}
-                      isOwn={entry.creatorWallet === walletAddress}
-                      onAccept={() => handleAcceptWager(entry)}
-                      onCancel={() => handleCancelWager(entry)}
-                      signing={signing}
-                    />
-                  ))}
+                  {wagerLobby.map((entry) => {
+                    const isOwn = entry.creatorWallet === walletAddress;
+                    // Hard-disable Accept whenever the caller has their own
+                    // open wager. Tooltip explains why (also surfaced as a
+                    // toast if anything tries to fire onAccept anyway —
+                    // see canAcceptWager in handleAcceptWager).
+                    const disableAccept = !isOwn && !!ownLobbyEntry;
+                    return (
+                      <WagerLobbyCard
+                        key={entry.wagerMatchId}
+                        entry={entry}
+                        isOwn={isOwn}
+                        onAccept={() => handleAcceptWager(entry)}
+                        onCancel={() => handleCancelWager(entry)}
+                        signing={signing}
+                        disableAccept={disableAccept}
+                        disableReason={
+                          disableAccept
+                            ? "Cancel your own open wager first before accepting another."
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
                 </div>
               )}
             </div>
