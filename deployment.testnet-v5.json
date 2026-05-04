@@ -20,27 +20,286 @@
     "sx": "0xd05ae8e26e9c239b4888822c83046fe7adaac243f46888ea430d852dafb6e92b"
   },
   "starterItemIds": [
-    { "index": 1,  "name": "Short Rusty Sword",         "recipient": "mr_boss", "objectId": "0x7ebc815ddcdf165843c414014bf7a57eab2523293846f92fef1e49706db157dd" },
-    { "index": 2,  "name": "Longsword",                 "recipient": "mr_boss", "objectId": "0x745be01c1057e5cc70cb71faa36fe1b56bdcc4c0f18bae4d9d527cbc7772bb6f" },
-    { "index": 3,  "name": "Steel Greatsword",          "recipient": "mr_boss", "objectId": "0x5bf3cb025057a4ca3a642639ab0ab119933d0380d44ead4ab57dffcd76ec0280" },
-    { "index": 4,  "name": "Cursed Greatsword",         "recipient": "mr_boss", "objectId": "0xc497c152541a277b2e94ce46cbc07b0e3715fa24a58aa8fca83098c1f871f88c" },
-    { "index": 5,  "name": "Leather Jerkin",            "recipient": "mr_boss", "objectId": "0x268d7ed58629e1f75688801479a2968035d4f4c2a28b581f443dda27f5782734" },
-    { "index": 6,  "name": "Chainmail Shirt",           "recipient": "mr_boss", "objectId": "0x26675516d6606905c42ebaa01a9eb970a6a6d904204147e4b3cf1b1b9f9b4c4a" },
-    { "index": 7,  "name": "Ornate Mithril Breastplate", "recipient": "mr_boss", "objectId": "0xf17aba4bfb64dc871c0c7da04944d67298d86f2826f97b7460924aa5292e5a8b" },
-    { "index": 8,  "name": "Copper Band",               "recipient": "mr_boss", "objectId": "0xdf3ca145902e2bc5bef53f19139accafe43a4a23ea555db0dc5ee6912a57e562" },
-    { "index": 9,  "name": "Silver Signet",             "recipient": "mr_boss", "objectId": "0x4c043674f969cdf9ae8085975e710bfab288a2273c6c7a8c382a6ab052ee988f" },
-    { "index": 10, "name": "Magic Ring",                "recipient": "mr_boss", "objectId": "0x9115818dc22216576db6055659884b590ef39812c72b0501e313dc00d1cf0f48" },
-    { "index": 11, "name": "Wooden Buckler",            "recipient": "mr_boss", "objectId": "0x4c123b8d05361f4ccdc4f38862958fe183fe2f123d646a177f2bab7ebd095a18" },
-    { "index": 12, "name": "Rusty Dagger",              "recipient": "sx",      "objectId": "0x36f5916c920afec92d31e5591b954e570a7f7b236b04d2cd0b934377ba56fc37" },
-    { "index": 13, "name": "Hunter's Knife",            "recipient": "sx",      "objectId": "0xc6923bf93f783d2419c1e5799d43f5d20e02c2128c980dc415cb825d0d0b5659" },
-    { "index": 14, "name": "Twin Stilettos",            "recipient": "sx",      "objectId": "0x9ce1012c9df30a6a804d7b182fcff7b6a79b1244d06a0a2cda756eb23bb2a29b" },
-    { "index": 15, "name": "Shadow Kris",               "recipient": "sx",      "objectId": "0xae802514c4c17dee8bb7470b376898e36abe2f0b3c0f812dc2e889f56cb7950e" },
-    { "index": 16, "name": "Tattered Cloth Vest",       "recipient": "sx",      "objectId": "0x6469f86136794770576c9eb9296bf4ab2c91ad517a5062dab1408c4d28250b2a" },
-    { "index": 17, "name": "Studded Leather",           "recipient": "sx",      "objectId": "0xdf143f100e95e9ca490d1fb6fd0b47f11f6ae51dfd782a65b7c7a7e2c7e56ee3" },
-    { "index": 18, "name": "Assassin's Garb",           "recipient": "sx",      "objectId": "0x054b01b45c83e6a57d3917affaa32e2df0ed8805d5d095d7e290dc9a272a6f22" },
-    { "index": 19, "name": "Bone Ring",                 "recipient": "sx",      "objectId": "0xf0b4880599f42a3ae245cacdd1667be6786378ede7f95ef42c5e1abd9f0dad42" },
-    { "index": 20, "name": "Wind Band",                 "recipient": "sx",      "objectId": "0xe00f602c4e90cb9255d35d98b67de4a61c8e9b2136f6547f6ed513e95797fb1d" },
-    { "index": 21, "name": "Phantom Loop",              "recipient": "sx",      "objectId": "0x0c7ef4bc7c3d43f6819e55bf402a033357ab3c59d177d96e4a89480f1cefd9d4" },
-    { "index": 22, "name": "Parrying Dirk",             "recipient": "sx",      "objectId": "0x5322c3a095c467f898e79e2921c0b61379105b96414a1fd344d3b7f5370d5f27" }
-  ]
+    {
+      "index": 1,
+      "name": "Short Rusty Sword",
+      "recipient": "mr_boss",
+      "objectId": "0x7ebc815ddcdf165843c414014bf7a57eab2523293846f92fef1e49706db157dd"
+    },
+    {
+      "index": 2,
+      "name": "Longsword",
+      "recipient": "mr_boss",
+      "objectId": "0x745be01c1057e5cc70cb71faa36fe1b56bdcc4c0f18bae4d9d527cbc7772bb6f"
+    },
+    {
+      "index": 3,
+      "name": "Steel Greatsword",
+      "recipient": "mr_boss",
+      "objectId": "0x5bf3cb025057a4ca3a642639ab0ab119933d0380d44ead4ab57dffcd76ec0280"
+    },
+    {
+      "index": 4,
+      "name": "Cursed Greatsword",
+      "recipient": "mr_boss",
+      "objectId": "0xc497c152541a277b2e94ce46cbc07b0e3715fa24a58aa8fca83098c1f871f88c"
+    },
+    {
+      "index": 5,
+      "name": "Leather Jerkin",
+      "recipient": "mr_boss",
+      "objectId": "0x268d7ed58629e1f75688801479a2968035d4f4c2a28b581f443dda27f5782734"
+    },
+    {
+      "index": 6,
+      "name": "Chainmail Shirt",
+      "recipient": "mr_boss",
+      "objectId": "0x26675516d6606905c42ebaa01a9eb970a6a6d904204147e4b3cf1b1b9f9b4c4a"
+    },
+    {
+      "index": 7,
+      "name": "Ornate Mithril Breastplate",
+      "recipient": "mr_boss",
+      "objectId": "0xf17aba4bfb64dc871c0c7da04944d67298d86f2826f97b7460924aa5292e5a8b"
+    },
+    {
+      "index": 8,
+      "name": "Copper Band",
+      "recipient": "mr_boss",
+      "objectId": "0xdf3ca145902e2bc5bef53f19139accafe43a4a23ea555db0dc5ee6912a57e562"
+    },
+    {
+      "index": 9,
+      "name": "Silver Signet",
+      "recipient": "mr_boss",
+      "objectId": "0x4c043674f969cdf9ae8085975e710bfab288a2273c6c7a8c382a6ab052ee988f"
+    },
+    {
+      "index": 10,
+      "name": "Magic Ring",
+      "recipient": "mr_boss",
+      "objectId": "0x9115818dc22216576db6055659884b590ef39812c72b0501e313dc00d1cf0f48"
+    },
+    {
+      "index": 11,
+      "name": "Wooden Buckler",
+      "recipient": "mr_boss",
+      "objectId": "0x4c123b8d05361f4ccdc4f38862958fe183fe2f123d646a177f2bab7ebd095a18"
+    },
+    {
+      "index": 12,
+      "name": "Rusty Dagger",
+      "recipient": "sx",
+      "objectId": "0x36f5916c920afec92d31e5591b954e570a7f7b236b04d2cd0b934377ba56fc37"
+    },
+    {
+      "index": 13,
+      "name": "Hunter's Knife",
+      "recipient": "sx",
+      "objectId": "0xc6923bf93f783d2419c1e5799d43f5d20e02c2128c980dc415cb825d0d0b5659"
+    },
+    {
+      "index": 14,
+      "name": "Twin Stilettos",
+      "recipient": "sx",
+      "objectId": "0x9ce1012c9df30a6a804d7b182fcff7b6a79b1244d06a0a2cda756eb23bb2a29b"
+    },
+    {
+      "index": 15,
+      "name": "Shadow Kris",
+      "recipient": "sx",
+      "objectId": "0xae802514c4c17dee8bb7470b376898e36abe2f0b3c0f812dc2e889f56cb7950e"
+    },
+    {
+      "index": 16,
+      "name": "Tattered Cloth Vest",
+      "recipient": "sx",
+      "objectId": "0x6469f86136794770576c9eb9296bf4ab2c91ad517a5062dab1408c4d28250b2a"
+    },
+    {
+      "index": 17,
+      "name": "Studded Leather",
+      "recipient": "sx",
+      "objectId": "0xdf143f100e95e9ca490d1fb6fd0b47f11f6ae51dfd782a65b7c7a7e2c7e56ee3"
+    },
+    {
+      "index": 18,
+      "name": "Assassin's Garb",
+      "recipient": "sx",
+      "objectId": "0x054b01b45c83e6a57d3917affaa32e2df0ed8805d5d095d7e290dc9a272a6f22"
+    },
+    {
+      "index": 19,
+      "name": "Bone Ring",
+      "recipient": "sx",
+      "objectId": "0xf0b4880599f42a3ae245cacdd1667be6786378ede7f95ef42c5e1abd9f0dad42"
+    },
+    {
+      "index": 20,
+      "name": "Wind Band",
+      "recipient": "sx",
+      "objectId": "0xe00f602c4e90cb9255d35d98b67de4a61c8e9b2136f6547f6ed513e95797fb1d"
+    },
+    {
+      "index": 21,
+      "name": "Phantom Loop",
+      "recipient": "sx",
+      "objectId": "0x0c7ef4bc7c3d43f6819e55bf402a033357ab3c59d177d96e4a89480f1cefd9d4"
+    },
+    {
+      "index": 22,
+      "name": "Parrying Dirk",
+      "recipient": "sx",
+      "objectId": "0x5322c3a095c467f898e79e2921c0b61379105b96414a1fd344d3b7f5370d5f27"
+    }
+  ],
+  "nft_catalog_v5_1": {
+    "mintedAt": "2026-05-04T12:22:35.339Z",
+    "pinataCid": "bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i",
+    "recipient": "treasury",
+    "treasuryAddress": "0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d",
+    "kiosk": {
+      "kioskId": "0x47a5072dced689cf20a401faca4e117b24fbb8c8cd8b9d1b0ccd76dbf7d4d5db",
+      "capId": "0x7e70a13d5a7371e8f1b03cf42ad9b1db651e5a2ed60be83cd6e411f0f1c8d010",
+      "createdThisRun": true,
+      "createDigest": "9PXKbkg1k4ikmW4jecAwjQXFLdJzet1TtRDnGsuCqWwP"
+    },
+    "items": [
+      {
+        "index": 1,
+        "variantTag": "",
+        "name": "Bloodletter Gauntlets",
+        "itemType": 5,
+        "rarity": 4,
+        "levelReq": 6,
+        "filename": "Bloodletter_Gauntlets.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Bloodletter_Gauntlets.png",
+        "priceSui": 0.12,
+        "priceMist": "120000000",
+        "objectId": "0xc15a78f77b9f0ef477413fca526753d1d21ee04f5076021f3022a96f9a4a421c",
+        "mintDigest": "AXo7ABQdX4cyRPZBGqMs5ZqKoK2W73pgwJWHCTJiuM6G",
+        "listDigest": "Ei1DHAjuMSCyTqsh1za6fNb1G7ye4zKtsMEiat6uaH3E"
+      },
+      {
+        "index": 2,
+        "variantTag": "",
+        "name": "Shadowstep Wraps",
+        "itemType": 5,
+        "rarity": 4,
+        "levelReq": 6,
+        "filename": "Shadowstep_Wraps.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Shadowstep_Wraps.png",
+        "priceSui": 0.08,
+        "priceMist": "80000000",
+        "objectId": "0x5829b09f0e8db81a4c5abb9c0e06858baf7a9579ccfc9b637172b8783f3d9221",
+        "mintDigest": "82x1bnJFAbPkAJ7oq2mWZ78WuM75Hem5hnzZzSQkNZbu",
+        "listDigest": "DUk9aUWK1go4UXTtTcWqMunWSdhukxjoxmXza5kQDnAj"
+      },
+      {
+        "index": 3,
+        "variantTag": "",
+        "name": "Skullsplitter Helm",
+        "itemType": 3,
+        "rarity": 4,
+        "levelReq": 7,
+        "filename": "Skullsplitter_Helm.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Skullsplitter_Helm.png",
+        "priceSui": 0.22,
+        "priceMist": "220000000",
+        "objectId": "0x502d173d5937cf3da920d3a93cc9d4afc0bef3ddbb13366438c5b67da720bdb5",
+        "mintDigest": "2i72Q7hGZuyAq9QRrYv2G4751QXANxkVHob7jLLdVGcE",
+        "listDigest": "FFtMApPtH5oTxtLPmpVyDLx2Jxm2M6XNCJxmY1qSB3yN"
+      },
+      {
+        "index": 4,
+        "variantTag": "",
+        "name": "Hunter's Hood",
+        "itemType": 3,
+        "rarity": 4,
+        "levelReq": 7,
+        "filename": "Hunters_Hood.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Hunters_Hood.png",
+        "priceSui": 0.18,
+        "priceMist": "180000000",
+        "objectId": "0xfcbbaf2c642c0842f1bb891060adabbb8e95ecefbb5cb5ce5da36a1a967caa6c",
+        "mintDigest": "PLUskFjR6JNYtQ1r6SL7D3qmD7HBoWFSBmUijGCqJD2",
+        "listDigest": "CZJPacyA56GcQgooFohUmBUhDEmqXgxbM2Gh8AFLtMGG"
+      },
+      {
+        "index": 5,
+        "variantTag": "",
+        "name": "Pendant of Wrath",
+        "itemType": 9,
+        "rarity": 5,
+        "levelReq": 8,
+        "filename": "Pendant_of_Wrath.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Pendant_of_Wrath.png",
+        "priceSui": 0.3,
+        "priceMist": "300000000",
+        "objectId": "0xe709cd8458df88e6e84c75849126dbd56729909f6e1c4b9b7e659747b195326b",
+        "mintDigest": "5ZazJz2jSCRKFyJhqWcGewr5Li8dv9kWvo4N96Di4FjA",
+        "listDigest": "7TFhWpH4n87ezynTkRwecuzgqvumi2ffKFJBvXcFXUVo"
+      },
+      {
+        "index": 6,
+        "variantTag": "",
+        "name": "Whisperwind Amulet",
+        "itemType": 9,
+        "rarity": 5,
+        "levelReq": 8,
+        "filename": "Whisperwind_Amulet.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Whisperwind_Amulet.png",
+        "priceSui": 0.3,
+        "priceMist": "300000000",
+        "objectId": "0xd711f58cdf390ceacca02b06c52cc520cba2cafa90438c77a581b390377316b0",
+        "mintDigest": "5czYHwcz88KYvVo9PNr7zqugf7LC2PWUtvQouz6ZcGCT",
+        "listDigest": "EZGtZGWxQFrKtReFqYbMg1Ag1jGRVv89oThDwo92ySaJ"
+      },
+      {
+        "index": 7,
+        "variantTag": "(A)",
+        "name": "Dancer's Aegis",
+        "itemType": 2,
+        "rarity": 4,
+        "levelReq": 6,
+        "filename": "Dancers_Aegis.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Dancers_Aegis.png",
+        "priceSui": 0.15,
+        "priceMist": "150000000",
+        "objectId": "0xa896034d84e4b0386b11d3889215499557c6b8d64c2d430e70fb3fc36577691a",
+        "mintDigest": "BV2KoC8bFsvSsojJoJ9V1dcb1fDYBgWLqWmQFjb731tP",
+        "listDigest": "GUEUm1ZR2sEPVf5v59XW3eTcnhpjRRKEo1iJf58DTxzH"
+      },
+      {
+        "index": 8,
+        "variantTag": "(B)",
+        "name": "Dancer's Aegis",
+        "itemType": 2,
+        "rarity": 4,
+        "levelReq": 6,
+        "filename": "Dancers_Aegis.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Dancers_Aegis.png",
+        "priceSui": 0.17,
+        "priceMist": "170000000",
+        "objectId": "0x1d31c953095d8f90202217d10d1334bf1accce1867efa4194be25a50b6859cee",
+        "mintDigest": "Auo8Z2MXCcehuiLtCYd7rKoW8FA4b4uGi3grivV7Kj6P",
+        "listDigest": "AxxVn1tKtw8sBNjErimnyAU6JS2BfwrvjxgAihRDs5uX"
+      },
+      {
+        "index": 9,
+        "variantTag": "",
+        "name": "Skullcrusher Maul",
+        "itemType": 1,
+        "rarity": 4,
+        "levelReq": 6,
+        "filename": "Skullcrusher_Maul.png",
+        "imageUrl": "https://gateway.pinata.cloud/ipfs/bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i/Skullcrusher_Maul.png",
+        "priceSui": 0.5,
+        "priceMist": "500000000",
+        "objectId": "0x9fa6626d5b713a0a9bc06f4ed84d26cc0f8d44abbfb5ef263ada04bf82d396d2",
+        "mintDigest": "9sJ5bz2NdXsX5sJhjBojuuCyBUGnCAEQBiYejkjdCodF",
+        "listDigest": "7rjJJBvaUbuZgk3k4yYNntYe64riz9asp6DdL6WzhXcs"
+      }
+    ]
+  }
 }
