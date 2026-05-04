@@ -12,6 +12,7 @@ import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/li
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager } from "@/lib/wager-accept-gate";
+import { computeBusyState } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
@@ -140,12 +141,42 @@ export function MatchmakingQueue() {
   // Check if current player has an open wager in the lobby
   const ownLobbyEntry = wagerLobby.find(e => e.creatorWallet === walletAddress);
 
+  // Cross-mode busy state — gates Friendly/Ranked/Wager-create simultaneously
+  // (Fix 1 of Bucket 2 close-out, 2026-05-04). When busy, all queue entry
+  // points are disabled with a single explanatory banner. The cancel/leave
+  // affordances remain enabled so the player can always exit.
+  const busy = computeBusyState({
+    callerWallet: walletAddress || null,
+    ownLobbyEntry: ownLobbyEntry ?? null,
+    activeFight: state.fight,
+    fightQueue,
+    pendingWagerAccept: state.pendingWagerAccept,
+  });
+
   const handleQueue = useCallback(async () => {
     // Note: we no longer include an onChainEquipment payload. Per D3-strict
     // (LOADOUT_DESIGN.md), the server re-reads DOFs at fight start via
     // fight-room.ts::createFight — any client-sent equipment claim is
     // ignored and could only lie. The hook's Save Loadout flow puts the
     // truth on-chain in DOFs; the server reads those.
+
+    // Cross-mode busy gate (Fix 1 of Bucket 2 close-out, 2026-05-04).
+    // Defence-in-depth against any keyboard / dev-tools / programmatic
+    // path that bypasses the disabled button. Same shape as the
+    // `canAcceptWager` gate in `handleAcceptWager` (Fix A silent-accept).
+    const busyNow = computeBusyState({
+      callerWallet: walletAddress || null,
+      ownLobbyEntry: state.wagerLobby.find((e) => e.creatorWallet === walletAddress) ?? null,
+      activeFight: state.fight,
+      fightQueue: state.fightQueue,
+      pendingWagerAccept: state.pendingWagerAccept,
+    });
+    if (busyNow.busy) {
+      console.warn("[Queue] Busy gate refused:", busyNow.kind, busyNow.reason);
+      dispatch({ type: "SET_ERROR", message: busyNow.reason ?? "Cannot queue right now." });
+      return;
+    }
+
     if (selectedType === "wager") {
       // Authoritative validation gate. The button is disabled when the
       // parsed input is invalid, but a determined user could still get
@@ -262,7 +293,19 @@ export function MatchmakingQueue() {
       fightType: selectedType,
       wagerAmount: undefined,
     });
-  }, [selectedType, wagerAmount, state.socket, dAppKit, dispatch]);
+  }, [
+    selectedType,
+    wagerAmount,
+    state.socket,
+    state.wagerLobby,
+    state.fight,
+    state.fightQueue,
+    state.pendingWagerAccept,
+    walletAddress,
+    parsedWager,
+    dAppKit,
+    dispatch,
+  ]);
 
   const handleCancel = useCallback(() => {
     state.socket.send({ type: "cancel_queue" });
@@ -368,14 +411,28 @@ export function MatchmakingQueue() {
         <span className="font-semibold">Find a Fight</span>
       </CardHeader>
       <CardBody className="space-y-3">
+        {/* Cross-mode busy banner — surfaces the single reason all queue
+            entry points are disabled (Fix 1, 2026-05-04). The reason is
+            populated by computeBusyState above (ownWager / fight /
+            fightQueue / pendingWagerAccept). */}
+        {busy.busy && busy.kind !== "fightQueue" && (
+          <div
+            role="status"
+            className="rounded-lg border border-amber-700/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-300"
+          >
+            {busy.reason}
+          </div>
+        )}
+
         {/* Fight type selector */}
         {FIGHT_TYPES.map(({ type, label, desc, minLevel }) => {
           const locked = level < minLevel;
           return (
             <button
               key={type}
-              disabled={locked || signing}
+              disabled={locked || signing || busy.busy}
               onClick={() => setSelectedType(type)}
+              title={busy.busy ? busy.reason ?? undefined : undefined}
               className={`w-full text-left rounded-lg border p-3 transition-all ${
                 selectedType === type
                   ? "border-emerald-600 bg-emerald-900/20"
@@ -434,7 +491,8 @@ export function MatchmakingQueue() {
                 <Button
                   onClick={handleQueue}
                   className="w-full"
-                  disabled={signing || !parsedWager.ok || insufficientFunds}
+                  disabled={signing || !parsedWager.ok || insufficientFunds || busy.busy}
+                  title={busy.busy ? busy.reason ?? undefined : undefined}
                 >
                   {signing
                     ? "Signing transaction..."
@@ -442,7 +500,9 @@ export function MatchmakingQueue() {
                       ? "Enter a valid stake"
                       : insufficientFunds
                         ? "Insufficient SUI"
-                        : "Create Wager & Lock SUI"}
+                        : busy.busy
+                          ? "Busy elsewhere"
+                          : "Create Wager & Lock SUI"}
                 </Button>
               </div>
             )}
@@ -460,11 +520,21 @@ export function MatchmakingQueue() {
                 <div className="space-y-2 max-h-[400px] overflow-y-auto">
                   {wagerLobby.map((entry) => {
                     const isOwn = entry.creatorWallet === walletAddress;
-                    // Hard-disable Accept whenever the caller has their own
-                    // open wager. Tooltip explains why (also surfaced as a
-                    // toast if anything tries to fire onAccept anyway —
-                    // see canAcceptWager in handleAcceptWager).
-                    const disableAccept = !isOwn && !!ownLobbyEntry;
+                    // Disable Accept when:
+                    //   - the caller has their own open wager (covered by
+                    //     `busy.kind === 'ownWager'` here), OR
+                    //   - the caller is in any other busy state — fight,
+                    //     queue, or pending accept (Fix 1 cross-mode gate).
+                    // ownWager keeps its specific reason ("Cancel your own
+                    // first") since it's a distinct action; other busy
+                    // kinds get the generic busy reason.
+                    const disableAccept = !isOwn && busy.busy;
+                    const disableReason =
+                      disableAccept
+                        ? busy.kind === "ownWager"
+                          ? "Cancel your own open wager first before accepting another."
+                          : (busy.reason ?? "You are busy in another mode.")
+                        : undefined;
                     return (
                       <WagerLobbyCard
                         key={entry.wagerMatchId}
@@ -474,11 +544,7 @@ export function MatchmakingQueue() {
                         onCancel={() => handleCancelWager(entry)}
                         signing={signing}
                         disableAccept={disableAccept}
-                        disableReason={
-                          disableAccept
-                            ? "Cancel your own open wager first before accepting another."
-                            : undefined
-                        }
+                        disableReason={disableReason}
                       />
                     );
                   })}
@@ -490,8 +556,13 @@ export function MatchmakingQueue() {
 
         {/* Non-wager: Enter Queue button */}
         {selectedType !== "wager" && (
-          <Button onClick={handleQueue} className="w-full" disabled={signing}>
-            Enter Queue
+          <Button
+            onClick={handleQueue}
+            className="w-full"
+            disabled={signing || busy.busy}
+            title={busy.busy ? busy.reason ?? undefined : undefined}
+          >
+            {busy.busy ? "Busy elsewhere" : "Enter Queue"}
           </Button>
         )}
       </CardBody>

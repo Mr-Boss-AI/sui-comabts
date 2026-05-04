@@ -49,6 +49,7 @@ import {
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint } from '../utils/sui-settle';
 import { decideAcceptOutcome } from './wager-accept-gate';
+import { evaluateServerBusy } from './busy-state';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
@@ -739,8 +740,26 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
     return;
   }
 
-  if (client.currentFightId) {
-    sendError(client, 'Already in a fight');
+  // Cross-mode busy gate (Fix 1, 2026-05-04). Mirrors the frontend
+  // `computeBusyState` predicate so the WS rejection always agrees with
+  // the disabled-button rendering. Catches: already-in-fight, has open
+  // wager in lobby, or already in matchmaking queue. Surfaced as a
+  // single `sendError` toast — no chain tx fires (no SUI locked, no
+  // gas spent).
+  let ownWagerId: string | null = null;
+  for (const entry of wagerLobby.values()) {
+    if (entry.creatorWallet === client.walletAddress) {
+      ownWagerId = entry.wagerMatchId;
+      break;
+    }
+  }
+  const busy = evaluateServerBusy({
+    hasFight: !!client.currentFightId,
+    ownWagerId,
+    inMatchmakingQueue: getMatchmaking().isInQueue(client.walletAddress!),
+  });
+  if (busy.busy) {
+    sendError(client, busy.reason);
     return;
   }
 
@@ -776,13 +795,9 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
       return;
     }
 
-    // Check if player already has a wager in the lobby
-    for (const entry of wagerLobby.values()) {
-      if (entry.creatorWallet === client.walletAddress) {
-        sendError(client, 'You already have an open wager. Cancel it first.');
-        return;
-      }
-    }
+    // Own-wager / fight / queue cross-mode check is handled by the
+    // `evaluateServerBusy` gate at the top of `handleQueueFight` (Fix 1,
+    // 2026-05-04). No redundant per-branch loop needed.
 
     const entry: WagerLobbyEntry = {
       wagerMatchId,
@@ -1258,6 +1273,12 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
       }
     }
 
+    // Cross-mode busy state — caller in matchmaking queue is the new
+    // Fix 1 (2026-05-04) flavour. The decision predicate handles the
+    // autoRollback when the chain accept somehow landed despite the
+    // client gate.
+    const callerInMatchmakingQueue = getMatchmaking().isInQueue(client.walletAddress);
+
     // Single chain probe — checks `arena.move::WagerMatch.status`.
     // Returns null on RPC failure or missing object; treat both as
     // "can't determine" and reject so we don't accidentally proceed.
@@ -1275,6 +1296,7 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
       targetInLobby: targetEntry
         ? { creatorWallet: targetEntry.creatorWallet, wagerMatchId: targetEntry.wagerMatchId }
         : undefined,
+      callerInMatchmakingQueue,
     });
 
     if (outcome.kind === 'reject') {
@@ -1283,10 +1305,11 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     }
 
     if (outcome.kind === 'autoRollback') {
-      // The 2026-05-04 silent-accept bug: caller has their own open wager
-      // AND the chain says the target is now ACTIVE — i.e. the chain tx
-      // landed despite the client-side gate. Drop both lobby entries and
-      // admin-cancel both wagers so neither side stays stuck.
+      // The 2026-05-04 silent-accept bug AND its Fix 1 cross-mode
+      // extension: caller had a busy state (own wager OR matchmaking
+      // queue) AND the chain accept landed despite the client-side
+      // gate. Roll back the chain target + any own wager + drop the
+      // queue entry so nothing stays stuck.
       //
       // admin_cancel_wager refunds 50/50 for ACTIVE (the target — escrow
       // holds 2× stake) and refund-to-creator for WAITING (the caller's
@@ -1294,24 +1317,31 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
       // non-blocking and recoverable via `/api/admin/cancel-wager`.
       console.warn(
         `[Wager] Auto-rollback fired: caller=${client.walletAddress} ` +
-        `target=${outcome.targetWagerId} ownWager=${outcome.callerOwnWagerId}`,
+        `target=${outcome.targetWagerId} ownWager=${outcome.callerOwnWagerId ?? '(none)'} ` +
+        `queueDrop=${outcome.removeFromMatchmakingQueue}`,
       );
       // Drop the target from the lobby (it's ACTIVE now, not browseable).
       if (targetEntry) {
         wagerLobby.delete(outcome.targetWagerId);
         broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: outcome.targetWagerId });
       }
-      // Drop the caller's own.
-      if (callerOwnWager) {
+      // Drop the caller's own wager if any.
+      if (outcome.callerOwnWagerId && callerOwnWager) {
         wagerLobby.delete(outcome.callerOwnWagerId);
         broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: outcome.callerOwnWagerId });
+      }
+      // Drop the caller from the matchmaking queue if applicable.
+      if (outcome.removeFromMatchmakingQueue) {
+        getMatchmaking().removeFromQueue(client.walletAddress);
       }
       adminCancelWagerOnChain(outcome.targetWagerId).catch((err) => {
         console.error('[Wager] Auto-rollback admin_cancel(target) failed:', err?.message || err);
       });
-      adminCancelWagerOnChain(outcome.callerOwnWagerId).catch((err) => {
-        console.error('[Wager] Auto-rollback admin_cancel(callerOwn) failed:', err?.message || err);
-      });
+      if (outcome.callerOwnWagerId) {
+        adminCancelWagerOnChain(outcome.callerOwnWagerId).catch((err) => {
+          console.error('[Wager] Auto-rollback admin_cancel(callerOwn) failed:', err?.message || err);
+        });
+      }
       sendError(client, outcome.userMessage);
       return;
     }
@@ -1363,6 +1393,17 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
         });
       }
     }
+
+    // Cross-mode safety net (Fix 1, 2026-05-04). If either player happens
+    // to be in the matchmaking queue when this wager fight starts, drop
+    // them. Pre-Fix-1 they could legitimately have been in both states;
+    // post-fix the gate at the top of `handleQueueFight` prevents new
+    // entries, but legacy state from before the fix lands or any future
+    // race could still leave a stale queue entry. Idempotent — `removeFromQueue`
+    // returns null if they aren't in the queue.
+    const mm = getMatchmaking();
+    mm.removeFromQueue(entry.creatorWallet);
+    mm.removeFromQueue(client.walletAddress);
   } finally {
     processingWagerAccepts.delete(wagerMatchId);
   }

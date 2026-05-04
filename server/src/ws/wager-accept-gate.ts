@@ -49,6 +49,12 @@ export interface DecideAcceptOutcomeArgs {
   callerOwnWagerInLobby: LobbyWagerLike | undefined;
   /** The target wager's lobby entry, or `undefined` if not in lobby. */
   targetInLobby: LobbyWagerLike | undefined;
+  /** True when the caller is currently in the matchmaking queue
+   *  (friendly / ranked). Defaults to `false` for backward compat with
+   *  pre-Fix-1 callers. When true and the chain shows the target as
+   *  STATUS_ACTIVE, the autoRollback also instructs the handler to
+   *  drop the caller from the matchmaking queue. */
+  callerInMatchmakingQueue?: boolean;
 }
 
 export type DecideAcceptOutcome =
@@ -57,7 +63,15 @@ export type DecideAcceptOutcome =
   | {
       kind: 'autoRollback';
       targetWagerId: string;
-      callerOwnWagerId: string;
+      /** Non-null when the caller had an open wager that also needs an
+       *  admin_cancel. Null for the "caller was in matchmaking queue"
+       *  flavour (Fix 1) — there's no own wager to cancel, but the
+       *  target chain wager still needs rolling back. */
+      callerOwnWagerId: string | null;
+      /** True when the caller was in the matchmaking queue at the time
+       *  of the gate trip — handler should also call
+       *  `removeFromQueue(callerWallet)` after the admin_cancels. */
+      removeFromMatchmakingQueue: boolean;
       userMessage: string;
     };
 
@@ -66,11 +80,11 @@ export type DecideAcceptOutcome =
  *
  *   1. Target not in lobby           → reject ("not found …")
  *   2. Caller is creator of target   → reject (self-accept defence-in-depth)
- *   3. Caller has own open wager
- *        AND chain status == ACTIVE  → autoRollback (the silent-accept bug
- *                                       — admin-cancel BOTH so nothing
- *                                       stays stuck)
- *        AND chain status != ACTIVE  → reject ("open wager — cancel first")
+ *   3. Caller has own wager OR is in matchmaking queue (BUSY)
+ *        AND chain status == ACTIVE  → autoRollback (silent-accept slipped
+ *                                       past — admin-cancel target +
+ *                                       any own wager + drop from queue)
+ *        AND chain status != ACTIVE  → reject (busy reason)
  *   4. Chain status != ACTIVE        → reject ("not active on-chain …")
  *   5. Else                          → proceed (lobby cleanup + fight start)
  */
@@ -89,26 +103,42 @@ export function decideAcceptOutcome(args: DecideAcceptOutcomeArgs): DecideAccept
     return { kind: 'reject', reason: 'You cannot accept your own wager' };
   }
 
-  // 3. Caller has their own open wager — the BUG path branches here.
-  if (args.callerOwnWagerInLobby) {
+  // 3. Caller is busy in another mode — the BUG path branches here.
+  //    Two flavours: (a) own open wager (Fix B silent-accept), (b) in
+  //    matchmaking queue (Fix 1 cross-mode isolation, 2026-05-04).
+  const callerInQueue = args.callerInMatchmakingQueue === true;
+  const hasOwnWager = !!args.callerOwnWagerInLobby;
+
+  if (hasOwnWager || callerInQueue) {
     if (args.targetChainStatus === STATUS_ACTIVE) {
-      // The silent-accept landed on chain. Auto-rollback both: 50/50 for
-      // the target (it's ACTIVE, escrow=2× stake), refund-to-creator for
-      // the caller's own (still WAITING, escrow=1× stake).
+      // Chain accept already landed despite the busy state. Auto-rollback:
+      //   - target wager (ACTIVE, escrow=2× stake) → 50/50 admin_cancel
+      //   - caller's own wager (if any, WAITING) → admin_cancel refund
+      //   - caller's matchmaking queue entry (if any) → drop
+      const ownTag = hasOwnWager
+        ? 'You had your own open wager'
+        : 'You were already in the matchmaking queue';
       return {
         kind: 'autoRollback',
         targetWagerId: args.targetWagerId,
-        callerOwnWagerId: args.callerOwnWagerInLobby.wagerMatchId,
+        callerOwnWagerId: args.callerOwnWagerInLobby?.wagerMatchId ?? null,
+        removeFromMatchmakingQueue: callerInQueue,
         userMessage:
-          'Auto-rolled back — both stakes refunded. ' +
-          'You had your own open wager; the chain accept slipped past the client gate. ' +
-          'Cancel your own wager first before accepting another.',
+          'Auto-rolled back — stakes refunded. ' +
+          `${ownTag}; the chain accept slipped past the client gate. ` +
+          'Resolve your existing state first before accepting another wager.',
       };
     }
-    // Chain didn't flip → Fix A worked, plain reject.
+    // Chain didn't flip → Fix A / Fix 1 client gate held. Plain reject.
+    if (hasOwnWager) {
+      return {
+        kind: 'reject',
+        reason: 'You have an open wager. Cancel it first before accepting another.',
+      };
+    }
     return {
       kind: 'reject',
-      reason: 'You have an open wager. Cancel it first before accepting another.',
+      reason: 'You are queued for a fight. Leave the queue before accepting a wager.',
     };
   }
 

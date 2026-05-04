@@ -207,6 +207,7 @@ function testDecideAcceptOutcomeAutoRollback(): void {
   if (r.kind === 'autoRollback') {
     eq(r.targetWagerId, M_W, 'target wager id surfaced for admin_cancel');
     eq(r.callerOwnWagerId, S_W, 'caller own wager id surfaced for admin_cancel');
+    eq(r.removeFromMatchmakingQueue, false, 'no queue drop needed (own wager case)');
     truthy(r.userMessage.includes('rolled back') || r.userMessage.toLowerCase().includes('refund'),
       `user message explains the rollback: ${r.userMessage}`);
   }
@@ -262,6 +263,68 @@ function testDecideAcceptOutcomeMissingTarget(): void {
     `reason mentions "not found": ${r.kind === 'reject' ? r.reason : ''}`);
 }
 
+function testDecideAcceptOutcomeQueuedAutoRollback(): void {
+  section('decideAcceptOutcome — caller in matchmaking queue + chain ACTIVE (Fix 1 cross-mode)');
+
+  // Sx is in ranked queue (no own wager) and somehow signed accept_wager.
+  // The chain is now ACTIVE; we must auto-rollback the target AND drop
+  // the caller from the queue.
+  const r = decideAcceptOutcome({
+    callerWallet: SX,
+    targetWagerId: M_W,
+    targetChainStatus: 1,
+    callerOwnWagerInLobby: undefined,
+    targetInLobby: { creatorWallet: MR_BOSS, wagerMatchId: M_W },
+    callerInMatchmakingQueue: true,
+  });
+  eq(r.kind, 'autoRollback', 'in queue + chain ACTIVE → autoRollback');
+  if (r.kind === 'autoRollback') {
+    eq(r.targetWagerId, M_W, 'target wager surfaced for admin_cancel');
+    eq(r.callerOwnWagerId, null, 'no own wager to cancel');
+    eq(r.removeFromMatchmakingQueue, true, 'handler must drop from queue');
+    truthy(r.userMessage.toLowerCase().includes('queue') || r.userMessage.toLowerCase().includes('matchmaking'),
+      `user message mentions queue/matchmaking: ${r.userMessage}`);
+  }
+}
+
+function testDecideAcceptOutcomeQueuedClientGated(): void {
+  section('decideAcceptOutcome — caller in queue + chain WAITING (Fix 1 client gate held)');
+
+  const r = decideAcceptOutcome({
+    callerWallet: SX,
+    targetWagerId: M_W,
+    targetChainStatus: 0, // WAITING — Fix 1 frontend gate worked
+    callerOwnWagerInLobby: undefined,
+    targetInLobby: { creatorWallet: MR_BOSS, wagerMatchId: M_W },
+    callerInMatchmakingQueue: true,
+  });
+  eq(r.kind, 'reject', 'in queue + chain not ACTIVE → plain reject');
+  if (r.kind === 'reject') {
+    truthy(r.reason.toLowerCase().includes('queue'),
+      `reason mentions queue: ${r.reason}`);
+  }
+}
+
+function testDecideAcceptOutcomeBothBusy(): void {
+  section('decideAcceptOutcome — caller has own wager AND is in queue (extreme legacy)');
+
+  // A pre-Fix-1 player could have both states. The autoRollback must
+  // unwind both: admin-cancel both wagers + drop from queue.
+  const r = decideAcceptOutcome({
+    callerWallet: SX,
+    targetWagerId: M_W,
+    targetChainStatus: 1,
+    callerOwnWagerInLobby: { creatorWallet: SX, wagerMatchId: S_W },
+    targetInLobby: { creatorWallet: MR_BOSS, wagerMatchId: M_W },
+    callerInMatchmakingQueue: true,
+  });
+  eq(r.kind, 'autoRollback', 'both busy + chain ACTIVE → autoRollback');
+  if (r.kind === 'autoRollback') {
+    eq(r.callerOwnWagerId, S_W, 'own wager id present');
+    eq(r.removeFromMatchmakingQueue, true, 'queue drop required');
+  }
+}
+
 function testDecideAcceptOutcomeChainSettled(): void {
   section('decideAcceptOutcome — chain status is SETTLED (already cancelled/finished)');
 
@@ -301,6 +364,10 @@ function run(): void {
   testDecideAcceptOutcomeAcceptingOwn();
   testDecideAcceptOutcomeMissingTarget();
   testDecideAcceptOutcomeChainSettled();
+  // Fix 1 cross-mode (2026-05-04) — caller-in-queue extension
+  testDecideAcceptOutcomeQueuedAutoRollback();
+  testDecideAcceptOutcomeQueuedClientGated();
+  testDecideAcceptOutcomeBothBusy();
 
   const total = passes + failures;
   console.log('\n──────────────────────────────────────────────────');
