@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
@@ -84,7 +84,7 @@ function EquipSlot({
 }
 
 export function CharacterProfile({ character, compact }: { character: Character; compact?: boolean }) {
-  const { state } = useGame();
+  const { state, dispatch } = useGame();
   const {
     stageEquip,
     stageUnequip,
@@ -96,6 +96,18 @@ export function CharacterProfile({ character, compact }: { character: Character;
   } = useEquipmentActions();
   const [showAllocate, setShowAllocate] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(null);
+
+  // Bridge from `LevelUpModal` "Allocate Stat Points" CTA → this
+  // component's existing modal-controller boolean (Fix 3, 2026-05-04).
+  // When the level-up modal flips `pendingStatAllocate`, mount the
+  // StatAllocateModal automatically and clear the flag so subsequent
+  // navigations to the Character area don't re-pop it.
+  useEffect(() => {
+    if (state.pendingStatAllocate) {
+      setShowAllocate(true);
+      dispatch({ type: "SET_PENDING_STAT_ALLOCATE", pending: false });
+    }
+  }, [state.pendingStatAllocate, dispatch]);
 
   // Saving is blocked while combat is resolving (fight-lock DF on chain would
   // abort the PTB anyway — this pre-empts the wallet popup). Wagered fights

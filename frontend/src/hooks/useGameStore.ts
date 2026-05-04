@@ -19,6 +19,7 @@ import type { FightHistoryEntry } from "@/types/ws-messages";
 import { EMPTY_EQUIPMENT, cloneEquipment } from "@/lib/loadout";
 import type { AuthPhase } from "@/lib/auth-phase";
 import { applyLocalAllocate } from "@/lib/stat-points";
+import { mergeLevelUpEvent } from "@/lib/level-up-display";
 export type { AuthPhase } from "@/lib/auth-phase";
 
 export interface GameState {
@@ -105,6 +106,28 @@ export interface GameState {
     expiresAt: number;
     graceMs: number;
   } | null;
+
+  // Level-up celebration state (Fix 3, 2026-05-04). Server emits
+  // `character_leveled_up` after `update_after_fight` confirms a level
+  // threshold crossing on chain. The `LevelUpModal` consumes this slice
+  // and renders a one-shot celebration with an "Allocate Stat Points"
+  // CTA. The modal queues itself when an active fight is present
+  // (don't disrupt combat UI) — `LevelUpController` reads
+  // `state.fight === null` before rendering.
+  levelUpEvent: {
+    oldLevel: number;
+    newLevel: number;
+    pointsGranted: number;
+    newTotalUnallocated: number;
+    fightId?: string;
+  } | null;
+
+  // Bridge from LevelUpModal "Allocate" CTA → CharacterProfile's
+  // local `showAllocate` state. When true, the next render of
+  // CharacterProfile pops its existing StatAllocateModal and the flag
+  // is cleared. Avoids hoisting the modal-controller boolean into the
+  // store while still letting the level-up flow open it directly.
+  pendingStatAllocate: boolean;
 }
 
 export const initialGameState: GameState = {
@@ -134,6 +157,8 @@ export const initialGameState: GameState = {
   errorSticky: false,
   onChainRefreshTrigger: 0,
   opponentDisconnect: null,
+  levelUpEvent: null,
+  pendingStatAllocate: false,
 };
 
 export type GameAction =
@@ -169,6 +194,9 @@ export type GameAction =
   | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
   | { type: "SET_AUTH_PHASE"; phase: AuthPhase }
   | { type: "SET_OPPONENT_DISCONNECT"; payload: GameState["opponentDisconnect"] }
+  | { type: "SET_LEVEL_UP_EVENT"; payload: GameState["levelUpEvent"] }
+  | { type: "CLEAR_LEVEL_UP_EVENT" }
+  | { type: "SET_PENDING_STAT_ALLOCATE"; pending: boolean }
   | { type: "SET_TURN_PAUSE"; paused: boolean; remainingMs: number | null; deadline: number | null }
   | { type: "LOCAL_ALLOCATE"; strength: number; dexterity: number; intuition: number; endurance: number }
   | { type: "BUMP_ONCHAIN_REFRESH" }
@@ -403,6 +431,26 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
     case "BUMP_ONCHAIN_REFRESH":
       return { ...state, onChainRefreshTrigger: state.onChainRefreshTrigger + 1 };
+    case "SET_LEVEL_UP_EVENT": {
+      // Multi-level: if a level-up event lands while one is already
+      // pending (rare — would require two fights settling before the
+      // first modal renders), merge via `mergeLevelUpEvent` so we
+      // celebrate the full jump in one modal rather than stacking.
+      // The merge logic lives in `lib/level-up-display.ts` so the QA
+      // gauntlet can test it without dragging in the full reducer.
+      if (action.payload === null) {
+        return { ...state, levelUpEvent: null };
+      }
+      return {
+        ...state,
+        levelUpEvent: mergeLevelUpEvent(state.levelUpEvent, action.payload),
+      };
+    }
+    case "CLEAR_LEVEL_UP_EVENT":
+      return { ...state, levelUpEvent: null };
+    case "SET_PENDING_STAT_ALLOCATE":
+      if (state.pendingStatAllocate === action.pending) return state;
+      return { ...state, pendingStatAllocate: action.pending };
     default:
       return state;
   }

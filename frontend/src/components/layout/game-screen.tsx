@@ -21,6 +21,7 @@ import { MarketplaceBrowser } from "@/components/marketplace/marketplace-browser
 import { MyKioskPanel } from "@/components/marketplace/my-kiosk-panel";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorToast } from "@/components/ui/error-toast";
+import { LevelUpModal } from "@/components/character/level-up-modal";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 
@@ -333,6 +334,7 @@ export function GameScreen() {
     <div className="flex flex-col flex-1">
       <Navbar />
       <ErrorToast />
+      <LevelUpModal />
       <div className="max-w-7xl mx-auto w-full px-4 py-4 space-y-3">
         <div className="bg-amber-900/30 border border-amber-700/40 rounded-lg px-4 py-2 text-xs text-amber-300/80 text-center">
           Testnet demo — characters and items reset on server restart

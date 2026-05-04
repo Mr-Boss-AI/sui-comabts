@@ -159,6 +159,25 @@ export type ServerMessage =
   | { type: "wager_lobby_removed"; wagerMatchId: string }
   | { type: "character_updated_onchain" }
   | { type: "character_deleted" }
+  /** Level-up celebration trigger (Fix 3, 2026-05-04). Server emits
+   *  this to the affected wallet after `update_after_fight` lands and
+   *  the chain effects confirm a level threshold was crossed. The
+   *  frontend `LevelUpModal` consumes the payload — `oldLevel` and
+   *  `newLevel` differ by `levelsGained` (≥1; multi-level is rare but
+   *  possible for big XP gains). `pointsGranted` is the per-fight
+   *  delta from `applyXp` (`STAT_POINTS_PER_LEVEL × levelsGained`),
+   *  while `newTotalUnallocated` is the post-level chain truth (may
+   *  include pre-existing unspent points). */
+  | {
+      type: "character_leveled_up";
+      oldLevel: number;
+      newLevel: number;
+      pointsGranted: number;
+      newTotalUnallocated: number;
+      /** Optional fightId — when present, the modal queues until the
+       *  fight ends rather than disrupting active combat UI. */
+      fightId?: string;
+    }
   // Reconnect grace window (Block C1, 2026-04-30 + hotfix). Server emits
   // these when a player's WebSocket drops mid-fight; the forfeit only
   // fires after `graceMs` if they don't reconnect. While at least one

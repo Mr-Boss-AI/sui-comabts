@@ -106,6 +106,24 @@ export default function GameProvider({
         case "queue_left":
           dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
           break;
+        case "character_leveled_up":
+          // Fix 3 (2026-05-04) — server emitted this after
+          // `update_after_fight` confirmed a level threshold crossing.
+          // The reducer merges with any pre-existing event (rare
+          // multi-fight burst) and the LevelUpController surfaces the
+          // modal once the active fight ends.
+          dispatch({
+            type: "SET_LEVEL_UP_EVENT",
+            payload: {
+              oldLevel: msg.oldLevel,
+              newLevel: msg.newLevel,
+              pointsGranted: msg.pointsGranted,
+              newTotalUnallocated: msg.newTotalUnallocated,
+              fightId: msg.fightId,
+            },
+          });
+          playSoundIf("level_up");
+          break;
         case "wager_accept_required":
           dispatch({
             type: "SET_PENDING_WAGER_ACCEPT",

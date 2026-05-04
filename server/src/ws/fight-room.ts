@@ -619,6 +619,14 @@ function finishFight(
         });
       }
 
+      // Capture each player's level BEFORE the chain update so we can
+      // emit `character_leveled_up` if a threshold was crossed (Fix 3,
+      // 2026-05-04). The chain `effects.leveledUp` is the source of
+      // truth — it's the post-tx Move event, not the optimistic local
+      // applyXp result.
+      const winnerLevelBefore = winnerCharRef.level;
+      const loserLevelBefore = loserCharRef.level;
+
       if (winnerObjId) {
         try {
           const effects = await updateCharacterOnChain(
@@ -635,6 +643,17 @@ function finishFight(
           }
           updateCharacter(winnerCharRef);
           sendToWallet(winnerCharRef.walletAddress, { type: 'character_updated_onchain' });
+          if (effects.leveledUp) {
+            const levelsGained = effects.newLevel - winnerLevelBefore;
+            sendToWallet(winnerCharRef.walletAddress, {
+              type: 'character_leveled_up',
+              oldLevel: winnerLevelBefore,
+              newLevel: effects.newLevel,
+              pointsGranted: GAME_CONSTANTS.STAT_POINTS_PER_LEVEL * Math.max(1, levelsGained),
+              newTotalUnallocated: effects.newUnallocatedPoints,
+              fightId: fight.id,
+            });
+          }
         } catch (err: any) {
           console.error('[Character] Winner on-chain update failed after retries:', err?.message || err);
           sendToWallet(winnerCharRef.walletAddress, {
@@ -659,6 +678,17 @@ function finishFight(
           }
           updateCharacter(loserCharRef);
           sendToWallet(loserCharRef.walletAddress, { type: 'character_updated_onchain' });
+          if (effects.leveledUp) {
+            const levelsGained = effects.newLevel - loserLevelBefore;
+            sendToWallet(loserCharRef.walletAddress, {
+              type: 'character_leveled_up',
+              oldLevel: loserLevelBefore,
+              newLevel: effects.newLevel,
+              pointsGranted: GAME_CONSTANTS.STAT_POINTS_PER_LEVEL * Math.max(1, levelsGained),
+              newTotalUnallocated: effects.newUnallocatedPoints,
+              fightId: fight.id,
+            });
+          }
         } catch (err: any) {
           console.error('[Character] Loser on-chain update failed after retries:', err?.message || err);
           sendToWallet(loserCharRef.walletAddress, {
