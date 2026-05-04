@@ -71,37 +71,60 @@ export interface TwoHandedConflict {
  * two-handed conflict given the current `pending` equipment. Pure: no
  * React state, no chain calls.
  *
- * Cases:
- *   - Equipping a 2H weapon into `weapon` while `pending.offhand` is
- *     non-null  → conflict ("Two-handed — unequip your off-hand first").
- *   - Equipping anything into `offhand` while `pending.weapon` is 2H
- *     → conflict ("Two-handed weapon equipped — can't add an off-hand").
- *   - All other combinations → no conflict.
+ * Design rule (locked, 2026-05-04): **two-handed weapons take both
+ * slots — they go in `weapon` only, and the `offhand` must be empty
+ * while one is equipped.** The three concrete conflict cases:
  *
- * Note that "equipping a 1H weapon while a 2H is in weapon slot" is fine
- * — it just replaces the 2H. The conflict only arises when the 2H stays
- * AND something tries to occupy the offhand.
+ *   1. 2H candidate → `weapon` slot, `pending.offhand` non-null
+ *      Reason: "Two-handed weapon — requires both slots empty.
+ *               Unequip your off-hand first."
+ *
+ *   2. 2H candidate → `offhand` slot (regardless of mainhand state)
+ *      Reason: "Two-handed weapon — requires both slots empty.
+ *               Equip in the weapon slot."
+ *      Why: 2H weapons don't fit in the off-hand slot. Closes the
+ *      2026-05-04 gap where Skullcrusher Maul appeared selectable
+ *      in the offhand picker even when mainhand had a 1H sword,
+ *      letting players dual-wield Longsword + Maul.
+ *
+ *   3. Anything → `offhand` slot while `pending.weapon` is 2H
+ *      Reason: "Two-handed weapon equipped — unequip it before
+ *               adding an off-hand."
+ *
+ * Replace semantics: equipping a 2H into `weapon` REPLACES the existing
+ * mainhand (1H or 2H); we don't require the mainhand to be empty.
+ * Forcing manual unequip-first there would break normal RPG flow ("I
+ * want to swap weapons"). The "feels heavy and committed" intent comes
+ * from the offhand-empty requirement + offhand-never-2H rule above —
+ * not from blocking weapon-slot replacement.
  */
 export function evaluateTwoHandedConflict(args: {
   slot: keyof EquipmentSlots;
   candidate: Pick<Item, "name" | "itemType">;
   pending: EquipmentSlots;
 }): TwoHandedConflict {
-  // Targeting the weapon slot itself replaces whatever's there — only
-  // conflict possible is if the candidate is 2H and offhand is occupied.
+  const candidateIs2H = isTwoHanded(args.candidate);
+
   if (args.slot === "weapon") {
-    if (isTwoHanded(args.candidate) && args.pending.offhand !== null) {
+    // Case 1 — 2H mainhand requires offhand empty.
+    if (candidateIs2H && args.pending.offhand !== null) {
       return {
         conflict: true,
-        reason: "Two-handed weapon — unequip your off-hand first.",
+        reason: "Two-handed weapon — requires both slots empty. Unequip your off-hand first.",
       };
     }
     return { conflict: false };
   }
 
-  // Targeting the offhand slot — conflict if the current pending weapon
-  // is two-handed.
   if (args.slot === "offhand") {
+    // Case 2 — 2H never goes in offhand, regardless of mainhand state.
+    if (candidateIs2H) {
+      return {
+        conflict: true,
+        reason: "Two-handed weapon — requires both slots empty. Equip in the weapon slot.",
+      };
+    }
+    // Case 3 — anything (1H weapon / shield) blocked while mainhand has 2H.
     const w = args.pending.weapon;
     if (w && isTwoHanded(w)) {
       return {
@@ -112,6 +135,6 @@ export function evaluateTwoHandedConflict(args: {
     return { conflict: false };
   }
 
-  // All other slots are unaffected by the two-handed rule.
+  // Helmet / chest / gloves / boots / belt / rings / necklace — unaffected.
   return { conflict: false };
 }

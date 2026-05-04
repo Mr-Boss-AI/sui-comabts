@@ -368,11 +368,57 @@ function main(): void {
     fail('offhand-slot lockedReason mentions two-handed', `got: "${ohReason}"`);
   }
 
-  // f) offhand picker, pending.weapon is 1-handed → all unlocked.
+  // f) offhand picker, pending.weapon is 1-handed → 1H + shield unlocked.
+  //    (2H candidates are filtered separately in case (i) below — case 2 of
+  //    the design rule, "2H never goes in offhand".)
   const oh2 = buildSlotPickerEntries('offhand', [buckler, dirk], [], new Set(), 9, {
     ...EMPTY_EQ, weapon: oneHand,
   });
-  eq(oh2.every((e) => !e.locked), true, 'offhand unlocked when weapon=1H');
+  eq(oh2.every((e) => !e.locked), true, 'offhand unlocked for 1H + shield when weapon=1H');
+
+  // f.i) NEW (2026-05-04 second-direction case) — offhand picker MUST lock 2H
+  //      candidates regardless of mainhand state. Closes the gap where
+  //      Skullcrusher Maul appeared selectable in the offhand picker even with
+  //      a Longsword in mainhand, letting players dual-wield Longsword + Maul.
+  const oh1H = buildSlotPickerEntries('offhand', [buckler, dirk, maul, greatsword], [], new Set(), 9, {
+    ...EMPTY_EQ, weapon: oneHand,
+  });
+  eq(oh1H.find((e) => e.item.id === '0xMaul')!.locked,   true,  'Maul locked in offhand when weapon=1H');
+  eq(oh1H.find((e) => e.item.id === '0xCursed')!.locked, true,  'Cursed Greatsword locked in offhand when weapon=1H');
+  eq(oh1H.find((e) => e.item.id === '0xBuck')!.locked,   false, 'Buckler still unlocked');
+  eq(oh1H.find((e) => e.item.id === '0xDirk')!.locked,   false, 'Parrying Dirk still unlocked');
+  const ohReason2H = oh1H.find((e) => e.item.id === '0xMaul')!.lockedReason ?? '';
+  if (ohReason2H.toLowerCase().includes('weapon slot') || ohReason2H.toLowerCase().includes('mainhand')) {
+    ok(`offhand-slot 2H lockedReason directs to weapon slot: "${ohReason2H}"`);
+  } else {
+    fail('offhand-slot 2H lockedReason directs to weapon slot', `got: "${ohReason2H}"`);
+  }
+
+  // f.ii) NEW — 2H locked in offhand even when mainhand is empty. The design
+  //       rule is "2H never goes in offhand", regardless of state.
+  const ohMainEmpty = buildSlotPickerEntries('offhand', [buckler, maul], [], new Set(), 9, EMPTY_EQ);
+  eq(ohMainEmpty.find((e) => e.item.id === '0xMaul')!.locked, true,
+    '2H locked in offhand even when mainhand empty');
+  eq(ohMainEmpty.find((e) => e.item.id === '0xBuck')!.locked, false,
+    'Buckler unlocked when mainhand empty');
+
+  // f.iii) NEW — 2H locked in offhand even when mainhand has another 2H.
+  //        (The case-3 reason "Two-handed weapon equipped — unequip it first"
+  //        applies to non-2H candidates; 2H candidates get the case-2 reason
+  //        "wrong slot, equip in weapon slot". We assert case-2 wins.)
+  const ohBoth2H = buildSlotPickerEntries('offhand', [maul, greatsword, buckler], [], new Set(), 9, {
+    ...EMPTY_EQ, weapon: maul,
+  });
+  eq(ohBoth2H.find((e) => e.item.id === '0xCursed')!.locked, true,
+    '2H candidate locked in offhand even when weapon is also 2H');
+  // The case-2 reason ("equip in the weapon slot") wins over case-3 ("unequip the 2H").
+  // Both are acceptable but case-2 is more directly actionable for the player.
+  const reason2HBoth = ohBoth2H.find((e) => e.item.id === '0xCursed')!.lockedReason ?? '';
+  if (reason2HBoth.toLowerCase().includes('weapon slot')) {
+    ok(`2H + 2H offhand reason chooses case-2 (wrong slot): "${reason2HBoth}"`);
+  } else {
+    fail('2H + 2H offhand reason chooses case-2', `got: "${reason2HBoth}"`);
+  }
 
   // g) Level lock takes precedence over 2H lock when both apply.
   const wp4 = buildSlotPickerEntries('weapon', [greatsword], [], new Set(), 4, {
