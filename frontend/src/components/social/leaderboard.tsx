@@ -1,27 +1,41 @@
 "use client";
 
 /**
- * Phase 2 v2 — Hall of Fame leaderboard.
+ * Phase 2 layout sweep — Hall of Fame composition.
  *
- * Bronze-rim panel with the title in Slackey display font. Filter row
- * uses V2Chip in tone-matched colours (level filters in steel,
- * build filters in archetype hues). Column headers in uppercase
- * weathered-bronze with sort indicators. Row hover lifts to gunmetal,
- * row click opens the v2 PlayerProfileModal.
+ * Matches design_v2/screenshopts/Screenshot from 2026-05-13 14-01-04.png
+ * (Hall of Fame variant in the design tool):
+ *
+ *   TopBanner "Hall of Fame" + "Leaderboard by ELO. Top 3 get the
+ *   podium." subtitle + V5·TESTNET red pill.
+ *
+ *   Podium row — #2 parchment · #1 bronze (with crown) · #3 blood-red,
+ *   sized respectively 180 / 240 / 140 px tall, all with chunky
+ *   tier-coloured borders.
+ *
+ *   Ladder card below — "Ladder" Slackey + "BY ELO · 7-DAY" stamp on
+ *   the right. Filter chip rows (level + build), sort-arrow column
+ *   headers, rank rows; current user's row highlighted bronze.
+ *   "Load more" footer pagination.
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useGame } from "@/hooks/useGameStore";
 import {
-  RimFrame,
-  DisplayTitle,
+  BronzeButton,
+  GhostButton,
+  SectionLabel,
   Stamp,
   V2Chip,
   V2Input,
-  SectionLabel,
-  GhostButton,
-  BronzeButton,
 } from "@/components/v2";
+import {
+  PodiumBlock,
+  ScreenLayout,
+  TopBanner,
+  SectionHeader,
+} from "@/components/v2/layout";
 import {
   DEFAULT_DIR,
   nextSortState,
@@ -46,11 +60,12 @@ import {
   formatWinRatePct,
   paginateEntries,
 } from "@/lib/hall-of-fame-display";
+import type { LeaderboardEntry } from "@/types/game";
 
 const COLUMN_LABELS: Record<SortKey, string> = {
   rank: "#",
   level: "Lv",
-  rating: "Rating",
+  rating: "ELO",
   wins: "W",
   losses: "L",
   winRate: "Win%",
@@ -85,6 +100,7 @@ function rankColorVar(rank: number): string {
 
 export function Leaderboard() {
   const { state, dispatch } = useGame();
+  const account = useCurrentAccount();
   const { leaderboard, socket } = state;
   const [loaded, setLoaded] = useState(false);
 
@@ -113,10 +129,7 @@ export function Leaderboard() {
     [levelFilter, buildFilter, search],
   );
 
-  const levelCounts = useMemo(
-    () => levelBucketCounts(leaderboard),
-    [leaderboard],
-  );
+  const levelCounts = useMemo(() => levelBucketCounts(leaderboard), [leaderboard]);
   const builds = useMemo(() => buildCounts(leaderboard), [leaderboard]);
 
   const filtered = useMemo(
@@ -136,38 +149,106 @@ export function Leaderboard() {
     dispatch({ type: "OPEN_PROFILE", walletAddress });
   }
 
+  // Top 3 by raw ELO from the entire leaderboard (regardless of
+  // filters — the podium is the "all-time" headline, not a filter
+  // result). Source is the leaderboard pre-filter sorted by rating
+  // desc, which is what `getLeaderboard` returns.
+  const top3 = useMemo(() => {
+    const sortedAll = sortLeaderboard(leaderboard, { key: "rating", dir: "desc" });
+    return sortedAll.slice(0, 3);
+  }, [leaderboard]);
+
+  const myAddr = account?.address?.toLowerCase();
   const isLoading = !loaded || (leaderboard.length === 0 && !loaded);
   const isEmptyOverall = loaded && leaderboard.length === 0;
   const isEmptyAfterFilter = !isEmptyOverall && filtered.length === 0;
 
   return (
-    <RimFrame padless>
-      {/* Header */}
+    <ScreenLayout>
+      <TopBanner
+        title="Hall of Fame"
+        subtitle="Leaderboard by ELO. Top 3 get the podium."
+        pill="testnet"
+        tone="blood"
+      />
+
+      {/* ── Podium row ────────────────────────────────────────────── */}
+      {top3.length > 0 && (
+        <div
+          style={{
+            background: "var(--sc-panel)",
+            border: "1px solid var(--sc-rim)",
+            borderRadius: "var(--r-card)",
+            boxShadow: "var(--sh-plate-lg), var(--rim-top), var(--rim-bottom)",
+            padding: "32px 24px 24px",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 18,
+              alignItems: "end",
+              maxWidth: 760,
+              margin: "0 auto",
+            }}
+          >
+            {/* Order on the row: 2nd | 1st | 3rd (per design spec). */}
+            {top3[1] && (
+              <PodiumBlock
+                rank={2}
+                name={top3[1].name}
+                level={top3[1].level}
+                rating={top3[1].rating}
+                onClick={() => openProfile(top3[1].walletAddress)}
+              />
+            )}
+            {top3[0] && (
+              <PodiumBlock
+                rank={1}
+                name={top3[0].name}
+                level={top3[0].level}
+                rating={top3[0].rating}
+                onClick={() => openProfile(top3[0].walletAddress)}
+              />
+            )}
+            {top3[2] && (
+              <PodiumBlock
+                rank={3}
+                name={top3[2].name}
+                level={top3[2].level}
+                rating={top3[2].rating}
+                onClick={() => openProfile(top3[2].walletAddress)}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Ladder card ───────────────────────────────────────────── */}
       <div
         style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--sc-rim)",
-          background: "var(--sc-panel-2)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
+          background: "var(--sc-panel)",
+          border: "1px solid var(--sc-rim)",
+          borderRadius: "var(--r-card)",
+          boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
+          padding: 22,
         }}
       >
-        <DisplayTitle size="md">Hall of Fame — Top Fighters</DisplayTitle>
-        <Stamp tone="bronze">{leaderboard.length} ranked</Stamp>
-      </div>
+        <SectionHeader
+          title="Ladder"
+          size="lg"
+          right={<Stamp tone="default" outline>By ELO · 7-Day</Stamp>}
+        />
 
-      <div style={{ padding: 14 }}>
-        {/* Filters */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+        {/* Filter strip */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
           <V2Input
             type="text"
             placeholder="Search by name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ width: "100%" }}
+            style={{ width: "100%", maxWidth: 360 }}
           />
           <div>
             <SectionLabel>Level</SectionLabel>
@@ -238,12 +319,28 @@ export function Leaderboard() {
           </div>
         )}
         {isEmptyOverall && (
-          <p style={{ color: "var(--fg-3)", fontSize: 13, textAlign: "center", padding: "32px 0", fontStyle: "italic" }}>
+          <p
+            style={{
+              color: "var(--fg-3)",
+              fontSize: 13,
+              textAlign: "center",
+              padding: "32px 0",
+              fontStyle: "italic",
+            }}
+          >
             No fighters yet — win a battle to claim your spot.
           </p>
         )}
         {isEmptyAfterFilter && (
-          <p style={{ color: "var(--fg-3)", fontSize: 13, textAlign: "center", padding: "32px 0", fontStyle: "italic" }}>
+          <p
+            style={{
+              color: "var(--fg-3)",
+              fontSize: 13,
+              textAlign: "center",
+              padding: "32px 0",
+              fontStyle: "italic",
+            }}
+          >
             No fighters match your filters.
           </p>
         )}
@@ -260,10 +357,10 @@ export function Leaderboard() {
               >
                 <thead>
                   <tr style={{ borderBottom: "2px solid var(--sc-bronze-deep)" }}>
-                    <SortHeader column="rank" sort={sort} onClick={clickHeader} align="left" width={48} />
+                    <SortHeader column="rank" sort={sort} onClick={clickHeader} align="left" width={56} />
                     <th
                       style={{
-                        padding: "8px 4px",
+                        padding: "10px 6px",
                         textAlign: "left",
                         color: "var(--fg-3)",
                         fontSize: 10,
@@ -272,12 +369,13 @@ export function Leaderboard() {
                         textTransform: "uppercase",
                       }}
                     >
-                      Name
+                      Fighter
                     </th>
                     <SortHeader column="level" sort={sort} onClick={clickHeader} align="right" />
+                    <SortHeader column="rating" sort={sort} onClick={clickHeader} align="right" />
                     <th
                       style={{
-                        padding: "8px 4px",
+                        padding: "10px 6px",
                         textAlign: "right",
                         color: "var(--fg-3)",
                         fontSize: 10,
@@ -286,127 +384,34 @@ export function Leaderboard() {
                         textTransform: "uppercase",
                       }}
                     >
-                      Build
+                      W / L
                     </th>
-                    <SortHeader column="rating" sort={sort} onClick={clickHeader} align="right" />
-                    <SortHeader column="wins" sort={sort} onClick={clickHeader} align="right" />
-                    <SortHeader column="losses" sort={sort} onClick={clickHeader} align="right" />
                     <SortHeader column="winRate" sort={sort} onClick={clickHeader} align="right" />
                   </tr>
                 </thead>
                 <tbody>
-                  {view.visible.map((entry) => {
-                    const winPct = formatWinRatePct(entry.wins, entry.losses);
-                    const build = classifyBuild(entry.stats);
-                    return (
-                      <tr
-                        key={`${entry.walletAddress}-${entry.rank}`}
-                        onClick={() => openProfile(entry.walletAddress)}
-                        title={`View ${entry.name}'s profile`}
-                        style={{
-                          borderBottom: "1px solid var(--sc-rim)",
-                          cursor: "pointer",
-                          transition: "background var(--d-fast)",
-                          fontSize: 13,
-                          color: "var(--sc-parchment)",
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = "var(--sc-panel-2)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = "transparent";
-                        }}
-                      >
-                        <td
-                          style={{
-                            padding: "8px 4px",
-                            color: rankColorVar(entry.rank),
-                            fontWeight: entry.rank <= 3 ? 800 : 700,
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {entry.rank}
-                        </td>
-                        <td style={{ padding: "8px 4px", fontWeight: 700 }}>{entry.name}</td>
-                        <td
-                          style={{
-                            padding: "8px 4px",
-                            textAlign: "right",
-                            color: "var(--fg-3)",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {entry.level}
-                        </td>
-                        <td style={{ padding: "8px 4px", textAlign: "right" }}>
-                          <span
-                            style={{
-                              fontSize: 10,
-                              fontWeight: 800,
-                              letterSpacing: ".08em",
-                              textTransform: "uppercase",
-                              color: BUILD_COLOR[build],
-                            }}
-                            title={`${build} build`}
-                          >
-                            {BUILD_LABEL[build]}
-                          </span>
-                        </td>
-                        <td
-                          style={{
-                            padding: "8px 4px",
-                            textAlign: "right",
-                            color: "var(--sc-bronze)",
-                            fontFamily: "var(--font-mono)",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {entry.rating}
-                        </td>
-                        <td
-                          style={{
-                            padding: "8px 4px",
-                            textAlign: "right",
-                            color: "var(--rarity-uncommon)",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {entry.wins}
-                        </td>
-                        <td
-                          style={{
-                            padding: "8px 4px",
-                            textAlign: "right",
-                            color: "var(--sc-blood)",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {entry.losses}
-                        </td>
-                        <td
-                          style={{
-                            padding: "8px 4px",
-                            textAlign: "right",
-                            color: "var(--sc-parchment)",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {winPct}%
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {view.visible.map((entry) => (
+                    <LadderRow
+                      key={`${entry.walletAddress}-${entry.rank}`}
+                      entry={entry}
+                      isMe={
+                        myAddr !== undefined &&
+                        entry.walletAddress.toLowerCase() === myAddr
+                      }
+                      onClick={() => openProfile(entry.walletAddress)}
+                    />
+                  ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Pagination */}
+            {/* Footer */}
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                marginTop: 12,
+                marginTop: 14,
                 fontSize: 11,
                 color: "var(--fg-3)",
               }}
@@ -428,7 +433,161 @@ export function Leaderboard() {
           </>
         )}
       </div>
-    </RimFrame>
+    </ScreenLayout>
+  );
+}
+
+function LadderRow({
+  entry,
+  isMe,
+  onClick,
+}: {
+  entry: LeaderboardEntry;
+  isMe: boolean;
+  onClick: () => void;
+}) {
+  const winPct = formatWinRatePct(entry.wins, entry.losses);
+  const build = classifyBuild(entry.stats);
+  return (
+    <tr
+      onClick={onClick}
+      title={`View ${entry.name}'s profile`}
+      style={{
+        borderBottom: "1px solid var(--sc-rim)",
+        cursor: "pointer",
+        transition: "background var(--d-fast)",
+        fontSize: 13,
+        color: "var(--sc-parchment)",
+        background: isMe ? "rgba(200,154,63,0.18)" : "transparent",
+      }}
+      onMouseEnter={(e) => {
+        if (!isMe) e.currentTarget.style.background = "var(--sc-panel-2)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = isMe ? "rgba(200,154,63,0.18)" : "transparent";
+      }}
+    >
+      <td
+        style={{
+          padding: "10px 6px",
+          color: rankColorVar(entry.rank),
+          fontWeight: entry.rank <= 3 ? 800 : 700,
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        #{entry.rank}
+      </td>
+      <td style={{ padding: "10px 6px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{
+              width: 28,
+              height: 28,
+              background: "var(--sc-panel-2)",
+              border: "1px solid var(--sc-rim-2)",
+              borderRadius: 2,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "var(--font-display)",
+              color: BUILD_COLOR[build],
+              fontSize: 13,
+              flexShrink: 0,
+            }}
+            aria-hidden
+          >
+            {entry.name.charAt(0)}
+          </span>
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
+            <span style={{ fontWeight: 700, color: "var(--sc-parchment)" }}>
+              {entry.name}
+              {isMe && (
+                <span
+                  style={{
+                    marginLeft: 8,
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    color: "var(--sc-bronze)",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  · you
+                </span>
+              )}
+            </span>
+            <span
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 9,
+                color: BUILD_COLOR[build],
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              {BUILD_LABEL[build]}
+            </span>
+          </div>
+        </div>
+      </td>
+      <td
+        style={{
+          padding: "10px 6px",
+          textAlign: "right",
+        }}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            fontFamily: "var(--font-mono)",
+            fontWeight: 700,
+            fontSize: 10,
+            padding: "3px 8px",
+            background: "var(--sc-page)",
+            color: "var(--sc-bronze)",
+            border: "1px solid var(--sc-bronze)",
+            borderRadius: "var(--r-pill)",
+          }}
+        >
+          Lv {entry.level}
+        </span>
+      </td>
+      <td
+        style={{
+          padding: "10px 6px",
+          textAlign: "right",
+          color: "var(--sc-bronze)",
+          fontFamily: "var(--font-mono)",
+          fontWeight: 800,
+          fontSize: 14,
+        }}
+      >
+        {entry.rating}
+      </td>
+      <td
+        style={{
+          padding: "10px 6px",
+          textAlign: "right",
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+        }}
+      >
+        <span style={{ color: "var(--rarity-uncommon)" }}>{entry.wins}</span>
+        <span style={{ color: "var(--sc-rim-2)", margin: "0 4px" }}>/</span>
+        <span style={{ color: "var(--sc-blood)" }}>{entry.losses}</span>
+      </td>
+      <td
+        style={{
+          padding: "10px 6px",
+          textAlign: "right",
+          color: "var(--sc-parchment)",
+          fontFamily: "var(--font-mono)",
+          fontWeight: 700,
+        }}
+      >
+        {winPct}%
+      </td>
+    </tr>
   );
 }
 
@@ -450,7 +609,7 @@ function SortHeader({
   return (
     <th
       style={{
-        padding: "8px 4px",
+        padding: "10px 6px",
         textAlign: align,
         width: width ? `${width}px` : undefined,
       }}
