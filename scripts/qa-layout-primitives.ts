@@ -170,16 +170,92 @@ function main(): void {
   contains(char, 'round(6)', 'GAP feeds through round(6)');
   // HP bar height — clamped above 22 so it stays readable when scaled down.
   contains(char, 'Math.max(22, round(40))', 'HP bar height = max(22, round(40))');
-  // Portrait sized at CENTER × CENTER (allow any whitespace between
-  // the width + height props — exact spacing depends on formatter).
-  const portraitFrameUsage = /<PortraitFrame[\s\S]*?width=\{CENTER\}[\s\S]*?height=\{CENTER\}/m;
+  // Phase 2-fix: NFT portrait is no longer a square — it's a 3:4
+  // vertical rectangle so vertically-oriented NFT art shows
+  // beautifully. Width stays at CENTER (=462 canonical); height
+  // grows to round(CENTER * 4 / 3) ≈ 616. PORTRAIT_W + PORTRAIT_H
+  // constants feed the PortraitFrame component.
+  contains(char, 'const PORTRAIT_W = CENTER', 'PORTRAIT_W = CENTER (width unchanged)');
+  contains(
+    char,
+    'const PORTRAIT_H = Math.round(CENTER * 4 / 3)',
+    'PORTRAIT_H = round(CENTER * 4 / 3) — 3:4 portrait ratio',
+  );
+  const portraitFrameUsage = /<PortraitFrame[\s\S]*?width=\{PORTRAIT_W\}[\s\S]*?height=\{PORTRAIT_H\}/m;
   if (portraitFrameUsage.test(char)) {
-    ok('portrait = CENTER × CENTER (462 square)');
+    ok('PortraitFrame wired to PORTRAIT_W × PORTRAIT_H (3:4 vertical)');
   } else {
-    fail('portrait dims', 'PortraitFrame width/height not both bound to CENTER');
+    fail(
+      'portrait dims',
+      'PortraitFrame width/height not bound to PORTRAIT_W/PORTRAIT_H constants',
+    );
   }
+  // CSS aspectRatio belt-and-suspenders inside PortraitFrame so the
+  // ratio holds even if dimensions get resized via flex/grid.
+  contains(char, 'aspectRatio: "3 / 4"', 'CSS aspectRatio "3 / 4" locked on PortraitFrame');
   // Ornament height — scaled, with min-clamp so it stays visible.
   contains(char, 'Math.max(60, round(120))', 'ornament height = max(60, round(120))');
+
+  // -------------------------------------------------------------------------
+  // [7b] Phase 2-fix: edge-to-edge slot fit
+  // -------------------------------------------------------------------------
+  // Equipped NFT img inside SlotTile fills the tile edge-to-edge:
+  // objectFit cover + padding 0 + absolute inset so the rarity
+  // border becomes the visual edge of the artwork.
+  console.log('\n[7b] Character — slot tiles render edge-to-edge');
+  contains(char, 'objectFit: "cover"', 'slot img objectFit = cover (edge-to-edge)');
+  contains(char, 'objectPosition: "center"', 'slot img centered when cropped');
+  contains(char, 'padding: 0,', 'slot img zero padding (touches rarity border)');
+  // The img must be positioned absolute so it fills the full slot
+  // even when the button is a flex parent centered on placeholders.
+  contains(char, 'position: "absolute"', 'slot img positioned absolute inside tile');
+  // Ensure the legacy contain+padding-6 combo is gone.
+  if (!/objectFit:\s*"contain"[\s\S]{0,80}padding:\s*6/.test(char)) {
+    ok('legacy objectFit:contain + padding:6 removed from slot img');
+  } else {
+    fail('legacy slot img style', 'still has contain+padding:6 — edge-to-edge not applied');
+  }
+
+  // -------------------------------------------------------------------------
+  // [7c] Phase 2-fix: row-aligned grid (left col = right col, row-by-row)
+  // -------------------------------------------------------------------------
+  console.log('\n[7c] Character — explicit grid rows align left + right columns');
+  // SIDE_ROWS template: 5 explicit BIG-tall row tracks shared by
+  // both side columns so every row's Y origin matches.
+  contains(
+    char,
+    'const SIDE_ROWS = `${BIG}px ${BIG}px ${BIG}px ${BIG}px ${BIG}px`',
+    'SIDE_ROWS template — 5× BIG-tall explicit row tracks',
+  );
+  // Both side columns reference the same SIDE_ROWS template — count
+  // exactly two occurrences (one for left, one for right).
+  const sideRowsUsages = (char.match(/gridTemplateRows: SIDE_ROWS/g) ?? []).length;
+  if (sideRowsUsages === 2) {
+    ok('SIDE_ROWS applied to BOTH side columns (left + right)');
+  } else {
+    fail(
+      'SIDE_ROWS usage count',
+      `expected 2 gridTemplateRows: SIDE_ROWS occurrences (left + right), got ${sideRowsUsages}`,
+    );
+  }
+  // Belt anchors top of its BIG-tall row so its top edge matches
+  // boots' top edge on the right column.
+  contains(char, 'alignSelf: "start"', 'belt alignSelf: start — top-anchored in row 5');
+  // Ring cluster centers vertically inside its BIG-tall row so its
+  // centerline matches bracers on the left column.
+  contains(char, 'alignSelf: "center"', 'ring cluster alignSelf: center — vertical-center in row 2');
+  // The flex-column legacy stack (gap: GAP with display: "flex") on
+  // the side columns should be gone — replaced by explicit grid.
+  if (!/gridColumn: 1,\s*gridRow: 2,\s*display: "flex"/.test(char)) {
+    ok('left column no longer uses flex-column (uses explicit grid)');
+  } else {
+    fail('left col layout', 'left column still uses flex-column instead of grid');
+  }
+  if (!/gridColumn: 3,\s*gridRow: 2,\s*display: "flex"/.test(char)) {
+    ok('right column no longer uses flex-column (uses explicit grid)');
+  } else {
+    fail('right col layout', 'right column still uses flex-column instead of grid');
+  }
 
   // ===========================================================================
   // [8] Character — slot mapping flip preserved

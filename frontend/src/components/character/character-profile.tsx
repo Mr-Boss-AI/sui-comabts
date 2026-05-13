@@ -162,10 +162,13 @@ function SlotTile({
             src={item.imageUrl}
             alt={item.name}
             style={{
+              position: "absolute",
+              inset: 0,
               width: "100%",
               height: "100%",
-              objectFit: "contain",
-              padding: 6,
+              objectFit: "cover",
+              objectPosition: "center",
+              padding: 0,
               filter: "drop-shadow(0 2px 3px rgba(0,0,0,.55))",
             }}
           />
@@ -337,6 +340,10 @@ function PortraitFrame({
       style={{
         width,
         height,
+        // 3:4 portrait ratio — explicit pixel height feeds this in,
+        // CSS aspectRatio belt-and-suspenders so the frame stays
+        // locked at vertical 3:4 if it ever resizes via flex/grid.
+        aspectRatio: "3 / 4",
         padding: 0,
         cursor: "pointer",
         overflow: "hidden",
@@ -822,6 +829,17 @@ function EquipmentFrame({
   const CENTER = round(462);
   const GAP = Math.max(4, round(6));
   const PAD = Math.max(8, round(14));
+  // Phase 2-fix: NFT portrait is a 3:4 vertical rectangle, not a
+  // square — width stays at CENTER, height grows by 4/3 so vertical
+  // NFT art shows beautifully and the empty-state plus stack stays
+  // visually centered. Belt/Boots row alignment is enforced by the
+  // SIDE_ROWS template below.
+  const PORTRAIT_W = CENTER;
+  const PORTRAIT_H = Math.round(CENTER * 4 / 3);
+  // Side columns share one explicit grid-template-rows track list so
+  // every row Y-origin is identical on both sides. Row 5 is BIG-tall
+  // to give boots its full square; belt anchors top-of-row inside it.
+  const SIDE_ROWS = `${BIG}px ${BIG}px ${BIG}px ${BIG}px ${BIG}px`;
 
   return (
     <div style={{ width: "fit-content", maxWidth: "100%" }}>
@@ -854,14 +872,17 @@ function EquipmentFrame({
           />
         </div>
 
-        {/* LEFT COLUMN */}
+        {/* LEFT COLUMN — explicit grid rows so each row's Y origin
+            matches the right column. Belt sits at the top of row 5
+            (BIG-tall track) leaving its shorter footprint anchored
+            level with the boots top edge on the right. */}
         <div
           style={{
             gridColumn: 1,
             gridRow: 2,
-            display: "flex",
-            flexDirection: "column",
-            gap: GAP,
+            display: "grid",
+            gridTemplateRows: SIDE_ROWS,
+            rowGap: GAP,
           }}
         >
           <SlotTile
@@ -895,14 +916,19 @@ function EquipmentFrame({
             onClick={() => onSlot("chest")}
             emptyLabel="Chest"
           />
-          <SlotTile
-            slot="belt"
-            item={eq.belt}
-            size={{ w: BIG, h: BELT_H }}
-            isDirty={dirtySlots.has("belt")}
-            onClick={() => onSlot("belt")}
-            emptyLabel="Belt"
-          />
+          {/* Belt is shorter than other tiles — anchor it to the top
+              of its BIG-tall row track so its top edge is level with
+              the boots top edge on the right column. */}
+          <div style={{ alignSelf: "start" }}>
+            <SlotTile
+              slot="belt"
+              item={eq.belt}
+              size={{ w: BIG, h: BELT_H }}
+              isDirty={dirtySlots.has("belt")}
+              onClick={() => onSlot("belt")}
+              emptyLabel="Belt"
+            />
+          </div>
         </div>
 
         {/* CENTER COLUMN — portrait stretches to fill remaining height */}
@@ -919,8 +945,8 @@ function EquipmentFrame({
           <PortraitFrame
             portrait={portrait}
             onClick={onPortrait}
-            width={CENTER}
-            height={CENTER}
+            width={PORTRAIT_W}
+            height={PORTRAIT_H}
           />
           <TribalOrnament width={CENTER} height={Math.max(60, round(120))} />
           {/* Spacer to push ornament down so the column heights match
@@ -932,14 +958,17 @@ function EquipmentFrame({
           <div style={{ flex: 1, minHeight: 4 }} />
         </div>
 
-        {/* RIGHT COLUMN */}
+        {/* RIGHT COLUMN — same explicit grid track as the left so
+            every row aligns. Row 2 contains the 3-ring cluster
+            (RING-tall) centered vertically inside its BIG-tall row
+            so it lines up with bracers (left col row 2). */}
         <div
           style={{
             gridColumn: 3,
             gridRow: 2,
-            display: "flex",
-            flexDirection: "column",
-            gap: GAP,
+            display: "grid",
+            gridTemplateRows: SIDE_ROWS,
+            rowGap: GAP,
           }}
         >
           <SlotTile
@@ -950,9 +979,13 @@ function EquipmentFrame({
             onClick={() => onSlot("necklace")}
             emptyLabel="Necklace"
           />
-          {/* Ring cluster — 3 square tiles in a row at width BIG. */}
+          {/* Ring cluster — 3 small tiles in a row, BIG wide, RING
+              tall. alignSelf: center vertically anchors the 64-tall
+              cluster in the middle of the BIG-tall row track so its
+              centerline matches bracers on the left. */}
           <div
             style={{
+              alignSelf: "center",
               width: BIG,
               height: RING,
               display: "grid",
