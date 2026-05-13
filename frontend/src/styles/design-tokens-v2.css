@@ -113,6 +113,14 @@
   --ls-button:         0.06em;
   --ls-stamp:          0.14em;
 
+  /* ---------- Wordmark (comic-outline "SUI COMBATS") ---------- */
+  /* The wordmark deliberately reaches outside the metal palette into
+   * brighter, more saturated reds and yellows — it's the loud meme-coin
+   * brand stamp, not chrome. Used by `components/v2/wordmark.tsx`. */
+  --wordmark-red:      #d63b2e;          /* hot blood-red */
+  --wordmark-yellow:   #e0b03a;          /* punchy bronze-yellow */
+  --wordmark-ink:      #08080a;          /* near-black outline */
+
   /* ---------- Backward-compat aliases (v1 Ponke tokens) ---------- */
   /* Existing JSX in the codebase predates the v2 rename. Keep these
    * alive so the migration can be incremental. New code should reach

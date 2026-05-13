@@ -14,6 +14,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useGame } from "@/hooks/useGameStore";
 import { useWalletBalance } from "@/hooks/useWalletBalance";
 import { Stamp } from "@/components/v2";
+import { Wordmark } from "@/components/v2/wordmark";
 import { isSoundEnabled, toggleSound } from "@/lib/sounds";
 import { useState } from "react";
 
@@ -55,17 +56,7 @@ export function Navbar() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 22,
-              lineHeight: 1,
-              color: "var(--sc-parchment)",
-              letterSpacing: "-0.01em",
-            }}
-          >
-            SUI<span style={{ color: "var(--sc-bronze)" }}>Combats</span>
-          </span>
+          <Wordmark size="navbar" />
           {character && (
             <div
               style={{
