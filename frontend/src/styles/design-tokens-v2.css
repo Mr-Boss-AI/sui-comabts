@@ -1,0 +1,198 @@
+/* ===================================================================
+ * SUI Combats — v2 Forged Metal design tokens
+ *
+ * Ported from design_v2/latest/ (the design-tool export). The original
+ * `colors_and_type.css` referenced by the design system wasn't included
+ * in any of the export zips; this file reconstructs it from:
+ *   - design_v2/latest/README.md (palette narrative + hex values)
+ *   - design_v2/latest/ui_kits/web_game/styles.css (every var consumed)
+ *   - design_v2/latest/preview/*.html (preview cards with literal hex)
+ *
+ * Source of truth from this point forward. Every component reads from
+ * these vars; never inline a hex literal in JSX.
+ *
+ * Aesthetic: gunmetal panels, burnished bronze accents, oxidized blood
+ * red for damage/wager, steel blue for defense/info, parchment text on
+ * dark. Hard corners (3px max), flat plate shadows, no gradients on
+ * chrome.
+ *
+ * Backward-compat: the v1 "Ponke" token names (--sc-yellow, --sc-red,
+ * --sc-paper, --sc-night) are kept as aliases pointing at the new metal
+ * tokens, so existing JSX keeps working through the redesign migration.
+ * Prefer the new names (--sc-bronze, --sc-blood, --sc-panel, --sc-page)
+ * for new code.
+ * =================================================================== */
+
+:root {
+  /* ---------- Backgrounds ---------- */
+  --bg-page:           #0a0d12;          /* gunmetal — page canvas */
+  --bg-surface:        #15191f;          /* panel default */
+  --bg-surface-2:      #1a1f28;          /* nested panel */
+  --bg-surface-3:      #222831;          /* focused panel */
+  --sc-page:           var(--bg-page);
+  --sc-panel:          var(--bg-surface);
+  --sc-panel-2:        var(--bg-surface-2);
+  --sc-panel-3:        var(--bg-surface-3);
+
+  /* ---------- Foreground / Parchment ---------- */
+  --sc-parchment:      #e8e2d4;          /* warm off-white — body text */
+  --fg-1:              #e8e2d4;          /* primary text */
+  --fg-2:              #b8b2a8;          /* secondary text */
+  --fg-3:              #8a8474;          /* tertiary / muted */
+
+  /* ---------- Bronze accent (primary) ---------- */
+  --sc-bronze:         #c89a3f;          /* canonical bronze */
+  --sc-bronze-deep:    #9c7530;          /* darker — shadows/borders */
+  --sc-bronze-hot:     #e0b258;          /* hover state, brighter */
+  --sc-bronze-glow:    #f0c878;          /* highlight */
+
+  /* ---------- Blood red accent (secondary) ---------- */
+  --sc-blood:          #b53d2c;          /* oxidized blood */
+  --sc-blood-deep:     #7d2618;          /* deeper red for shadows */
+
+  /* ---------- Steel blue accent (tertiary) ---------- */
+  --sc-steel:          #6d8fa3;          /* desaturated cool steel */
+  --sc-steel-deep:     #4a6577;          /* darker steel for borders */
+  --sc-steel-low:      #1f2a32;          /* background-tint steel */
+
+  /* ---------- Rims & ashes ---------- */
+  --sc-rim:            #2c333d;          /* default steel rim, 1-2px */
+  --sc-rim-2:          #3a414c;          /* slightly lighter rim */
+  --sc-ash:            #5a6068;          /* empty-slot icon stroke */
+  --sc-ash-2:          #3e434b;          /* dimmer ash for disabled */
+
+  /* ---------- Rarity ramp (locked) ---------- */
+  --rarity-common:     #8a8a8a;          /* iron-grey */
+  --rarity-uncommon:   #4a9c4a;          /* green */
+  --rarity-rare:       #3d6da3;          /* steel blue */
+  --rarity-epic:       #7d4ba5;          /* purple */
+  --rarity-legendary:  #c89a3f;          /* bronze */
+
+  /* ---------- Stat colors ---------- */
+  --stat-hp:           #b53d2c;          /* blood */
+  --stat-str:          #b53d2c;          /* blood */
+  --stat-dex:          #6d8fa3;          /* steel */
+  --stat-int:          #c89a3f;          /* bronze */
+  --stat-end:          #4a9c4a;          /* green */
+
+  /* ---------- Radii (sharp; combats.ru density) ---------- */
+  --r-sharp:           0px;              /* hype panels, frame */
+  --r-sm:              2px;              /* inputs, slot tiles */
+  --r-card:            3px;              /* default card/button */
+  --r-button:          3px;              /* alias */
+  --r-pill:            999px;            /* stamps only */
+
+  /* ---------- Shadows (flat plates, no blur) ---------- */
+  --sh-plate-sm:       2px 2px 0 0 #000;
+  --sh-plate:          3px 3px 0 0 #000;
+  --sh-plate-lg:       5px 5px 0 0 #000;
+  --sh-pop:            0 24px 64px -8px rgba(0, 0, 0, .9);
+  --rim-top:           inset 0 1px 0 rgba(255, 255, 255, .04);
+  --rim-bottom:        inset 0 -1px 0 rgba(0, 0, 0, .18);
+
+  /* ---------- Motion ---------- */
+  --d-fast:            120ms;
+  --d-base:            200ms;
+  --d-slow:            320ms;
+  --ease-out:          cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-pop:          cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ---------- Layout ---------- */
+  --container-max:     1280px;
+
+  /* ---------- Typography ---------- */
+  /* Font families come from next/font in app/layout.tsx via CSS vars:
+   * --font-display-src (Slackey)
+   * --font-ui-src      (Poppins)
+   * --font-mono-src    (JetBrains Mono)
+   * The aliases below stay stable so JSX reading var(--font-ui) works
+   * regardless of whether the loader changes. */
+  --font-display:      var(--font-display-src, 'Slackey', cursive);
+  --font-ui:           var(--font-ui-src, 'Poppins', system-ui, sans-serif);
+  --font-mono:         var(--font-mono-src, 'JetBrains Mono', ui-monospace, monospace);
+  --ls-button:         0.06em;
+  --ls-stamp:          0.14em;
+
+  /* ---------- Backward-compat aliases (v1 Ponke tokens) ---------- */
+  /* Existing JSX in the codebase predates the v2 rename. Keep these
+   * alive so the migration can be incremental. New code should reach
+   * for the metal tokens directly. */
+  --sc-yellow:         var(--sc-bronze);
+  --sc-yellow-hot:     var(--sc-bronze-hot);
+  --sc-yellow-deep:    var(--sc-bronze-deep);
+  --sc-red:            var(--sc-blood);
+  --sc-red-deep:       var(--sc-blood-deep);
+  --sc-paper:          var(--sc-panel);
+  --sc-night:          var(--sc-page);
+}
+
+/* ===================================================================
+ * Recipe classes — repeat-of-patterns built on the tokens above. Imported
+ * globally so JSX can reach for them via className without re-defining.
+ * =================================================================== */
+
+/* Forged plate (default surface) */
+.sk {
+  border: 1px solid var(--sc-rim);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-plate), var(--rim-top), var(--rim-bottom);
+  background: var(--bg-surface);
+}
+.sk-bronze {
+  border: 2px solid var(--sc-bronze);
+  border-radius: var(--r-sharp);
+  box-shadow: var(--sh-plate-lg);
+}
+.sk-lg {
+  box-shadow: var(--sh-plate-lg), var(--rim-top), var(--rim-bottom);
+}
+
+/* Press behavior — translate + shadow change on hover/active */
+.press {
+  transition:
+    transform var(--d-base) var(--ease-pop),
+    box-shadow var(--d-base) var(--ease-pop);
+  cursor: pointer;
+}
+.press:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--sh-plate-lg);
+}
+.press:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--sh-plate-sm);
+  transition-duration: var(--d-fast);
+}
+
+/* Stamp pill */
+.sc-stamp {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: var(--ls-stamp);
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  background: var(--sc-panel-2);
+  color: var(--fg-2);
+  border: 1px solid var(--sc-rim-2);
+  display: inline-block;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Divider */
+.sc-divider {
+  height: 1px;
+  background: var(--sc-rim);
+  width: 100%;
+  margin: 14px 0;
+}
+.sc-divider.soft   { opacity: .6; }
+.sc-divider.bronze { background: var(--sc-bronze); opacity: .35; }
+
+/* Forged-plate scrollbar (matches design system) */
+.scroll-plate::-webkit-scrollbar              { width: 6px; }
+.scroll-plate::-webkit-scrollbar-track        { background: transparent; }
+.scroll-plate::-webkit-scrollbar-thumb        { background: var(--sc-rim-2); border-radius: 3px; }
+.scroll-plate::-webkit-scrollbar-thumb:hover  { background: var(--sc-bronze-deep); }
