@@ -9,6 +9,17 @@
 > single artifact you can hand to a fresh session and know exactly
 > where everything stands.
 
+> **Addendum 2026-05-13 — Bucket 3 items #1 + #2 closed.**
+> Tavern verified live (2-online counter symmetric, profile modal
+> renders 10-slot doll + stats, DM plaintext delivery end-to-end).
+> Hall of Fame shipped: column sort toggles, level + build filter
+> chips, click-through to PlayerProfileModal, "Load more"
+> pagination, empty/loading states — backed by a fresh
+> `qa-hall-of-fame.ts` gauntlet (187 PASS). Commits since
+> `443e02d`: through `1fdbc03` (Hall of Fame ship). Remaining
+> Bucket 3 work: #3 multi-day stability, #4 fresh-user
+> onboarding, #5 admin endpoint audit — then v5.1 republish bundle.
+
 ---
 
 ## Quick links
@@ -89,15 +100,20 @@ already lands).
 | 7 | `97369ff` | Level-up modal (Fix 3) | unit only — XP grind too long for one session | qa-level-up-modal (44 PASS) |
 | 7p | `dc543c6` | Polish: hide busy cards | ✅ verified live | qa-busy-state-render (23 PASS) |
 
-### Bucket 3 — Pre-mainnet hardening (⏳ PENDING)
+### Bucket 3 — Pre-mainnet hardening (⏳ IN PROGRESS, 2/5 closed)
 
 | Item | State | Blocker |
 |---|---|---|
-| Tavern room (chat / presence / whispers / profile clicks) | not started | Currently a black box live-wise; no gauntlet covers chat |
-| Hall of Fame (sort / filter / profile click-throughs) | not started | Minimal prior verification |
+| Tavern room (chat / presence / whispers / profile clicks) | ✅ shipped + verified live 2026-05-13 (this session) — 2-online counter symmetric, profile modal renders 10-slot doll + stats, DM plaintext delivery works end-to-end, 7 gauntlets cover presence/handlers/sidebar/DM data + pipeline | closed; see CHANGELOG hotfixes #3-#7 + 2026-05-13 live verification |
+| Hall of Fame (sort / filter / profile click-throughs) | ✅ shipped 2026-05-13 — column sort toggles with arrow indicator + DEFAULT_DIR, level bucket chips reusing Tavern's SIDEBAR_BUCKETS, build classifier chips (Crit / Evasion / Tank / Hybrid based on stat dominance), name search, click-row → PlayerProfileModal, page-cumulative "Load more" (size 20), empty/loading/filtered-empty states. Backed by `qa-hall-of-fame.ts` (187 PASS) | closed; live UI verification next session (only 2 entries on the live board) |
 | Multi-day stability — overnight uptime | not started | Surfaces leaks / silent fails / orphan-wager idle conditions |
 | Fresh user onboarding (wipe localStorage / new wallet) | not started | Tests Block A duplicate-mint guard + auth_phase state machine end-to-end |
 | Admin endpoint pre-mainnet audit | not started | Every `/api/admin/*` endpoint should be testnet-network-gated; verify before flip |
+
+Net: items #1 (Tavern) and #2 (Hall of Fame) closed. Remaining
+Bucket 3 work is #3 multi-day stability, #4 fresh-user onboarding,
+and #5 admin endpoint audit — all three can run in parallel with
+the start of v5.1 republish work (which is what unblocks mainnet).
 
 ### Bucket 4 — v5.1 contract republish (⏳ QUEUED)
 
@@ -251,9 +267,11 @@ Tournaments, Pets, Clans, Herbs, Cross-game item interop — see [What's NOT in 
 
 ## Test Suite State
 
-> Last full run: 2026-05-04 evening. All static gauntlets PASS.
-> qa-chain-gauntlet runs against live testnet so its assertion count
-> varies by run — last successful run is reported here.
+> Last full run: 2026-05-13 (Hall of Fame ship). Bucket 3 added a
+> total of 8 new gauntlets since 2026-05-04 (Tavern × 5 + DM × 2 +
+> Hall of Fame × 1). All static gauntlets PASS. qa-chain-gauntlet
+> runs against live testnet so its assertion count varies by run —
+> last successful run is reported here.
 
 ### Static unit gauntlets (no chain)
 
@@ -279,7 +297,17 @@ Tournaments, Pets, Clans, Herbs, Cross-game item interop — see [What's NOT in 
 | `qa-wager-register.ts` | WS-ACK happy path + adopt-wager fallback | **25 / 25** |
 | `qa-ws-readystate.ts` | drainPendingMessages + capPendingQueue + reconnect / overflow integration | **37 / 37** |
 | `qa-xp.ts` | XP table parity + applyXp semantics + calculateXpReward | **143 / 143** |
-| **Static total** | | **1195 / 1195 PASS** |
+| `qa-tavern-presence.ts` (Bucket 3 #1) | derivePlayerStatus / groupPlayersByLevelBucket / upsertPresence priority chain / heartbeat / sweepStalePresence / multi-bucket scenario | **66 / 66** |
+| `qa-tavern-fight-requests.ts` (Bucket 3 #1) | evaluateCreate / evaluateTransition state machine / sweepExpired / per-sender limit / stake-bound | **58 / 58** |
+| `qa-tavern-dm-channels.ts` (Bucket 3 #1) | canonicalPair / registerChannel / bi-directional lookup / unread math + §7b recipient-notification preconditions | **51 / 51** |
+| `qa-tavern-handlers.ts` (Bucket 3 #1) | dispatchTavernMessage routing / announcePlayerOnline+Offline / enter_room / DM channel lifecycle / dm_send + dm_history WS layer | **72 / 72** |
+| `qa-tavern-sidebar.ts` (Bucket 3 #1) | groupPlayersForSidebar bucketing + search + status + exclude + sort | **42 / 42** |
+| `qa-dm-messages.ts` (Bucket 3 #1 hotfix #6) | syntheticChannelIdForPair determinism + insertMessage validation + getHistory ordering + getOrCreateSyntheticChannel idempotency | **53 / 53** |
+| `qa-dm-plaintext-pipeline.ts` (Bucket 3 #1 hotfix #6) | runPlaintextDmSend / runPlaintextDmHistory happy + timeout + cross-talk + cleanup | **36 / 36** |
+| `qa-dm-send-pipeline.ts` (Bucket 3 #1 hotfix #5) | runDmSend integration: happy / existing channel / ensureChannel hangs / unresolvable cap / sendMessage hangs / sendMessage rejects / step trace + resolveMemberCap retry | **65 / 65** |
+| `qa-messaging-client.ts` (Bucket 3 #1 hotfix) | Sui Stack Messaging SDK shape pins; MVR override on BOTH messaging SuiClient + dapp-kit signer; withTimeout regression guard | **65 / 65** |
+| `qa-hall-of-fame.ts` (Bucket 3 #2, NEW 2026-05-13) | Sort comparator × every column × asc/desc + tiebreakers + stability; nextSortState toggle machine; classifyBuild edge cases (INT-led → Hybrid, 45% threshold boundary, missing/null/zero stats); filterEntries composite (level + build + search); levelBucketCounts + buildCounts; paginateEntries math + clamp; formatWinRatePct rounding; rankColor gold/silver/bronze/dim; composite filter→sort→paginate roundtrip; screenshot scenario (Mr_Boss_v5.1 + Sx_v5.1); backward compat with no-stats wire; purity guards | **187 / 187** |
+| **Static total** | | **1890 / 1890 PASS** (Bucket 2 base 1195 + Bucket 3 #1 Tavern+DM 508 + Bucket 3 #2 Hall of Fame 187) |
 
 Plus **35/35** Move unit tests under `contracts/tests/` (`sui move test`).
 
@@ -395,6 +423,9 @@ biggest remaining task before mainnet.
 | TransferPolicy royalty withdraw UI | Bucket 2 closeout (carried) | Frontend feature |
 | Race-condition Test 12 (parallel buy script) | Bucket 2 closeout | Test infra |
 | Friendly abort-code → toast lookup | Bucket 2 closeout + this session abort-6 | Frontend polish |
+| DM modal closes / loses focus after Send (need to navigate back to see sent message) | 2026-05-13 live test | Frontend polish |
+| DM notification surfacing is weak when other modals are open (marketplace item-watch, etc.) — toast/pip gets buried | 2026-05-13 live test | Frontend polish |
+| PlayerProfileModal stats read pre-hydration (DOF race) — confirmed repro this session, same class as "equipped items invisible at fight start" | 2026-05-13 live test (already known) | Frontend polish |
 | Tournament feature (pot-funded, ticket NFT, fist-fight) | `project_tournament_seed.md` | Feature design |
 | Item slot_type primitive (subsumes 2H Path B + dagger-merge) | `project_slot_type_seed.md` | v5.1 contract bundle |
 | Mutual KO / Draw modal + chain settlement (3 SUI options open) | `project_mutual_ko_seed.md` | v5.1 contract bundle (counter table) + frontend modal |
@@ -415,6 +446,30 @@ biggest remaining task before mainnet.
 ## Files Modified This Session
 
 > Grouped by feature. Every change committed locally; nothing pushed.
+
+### Bucket 3 #2 — Hall of Fame ship (2026-05-13)
+
+```
+M  server/src/types.ts                                       (LeaderboardEntry adds optional stats)
+M  server/src/data/leaderboard.ts                            (pass stats through getLeaderboard)
+M  server/src/ws/handler.ts                                  (map stats in handleGetLeaderboard)
+M  frontend/src/types/game.ts                                (LeaderboardEntry mirrors optional stats)
+A  frontend/src/lib/hall-of-fame-sort.ts                     (NEW — pure sort comparator + toggle state machine)
+A  frontend/src/lib/hall-of-fame-filter.ts                   (NEW — level buckets reusing Tavern + build classifier + composite filter)
+A  frontend/src/lib/hall-of-fame-display.ts                  (NEW — paginate + winRate + rankColor)
+M  frontend/src/components/social/leaderboard.tsx            (rewrite — sort toggles, filter chips, click-through, pagination, empty/loading)
+A  scripts/qa-hall-of-fame.ts                                (NEW — 187-assertion static gauntlet)
+M  STATE_OF_PROJECT_2026-05-04.md                            (this doc — Bucket 3 row, parking lot, test totals)
+```
+
+Commits (chronological, on `feature/v5-redeploy`):
+
+```
+9ee469e feat(v5): leaderboard wire — propagate stats for build classifier
+c331676 feat(v5): Hall of Fame pure helpers — sort + filter + display
+5e2a146 feat(v5): Hall of Fame UI rebuild — sort toggles, filter chips, click-through, pagination
+1fdbc03 test(v5): qa-hall-of-fame gauntlet — 187 assertions over sort/filter/paginate/classifier
+```
 
 ### Bucket 2 Fix 1 — Multi-queue isolation (commit `6e2f2d3`)
 
