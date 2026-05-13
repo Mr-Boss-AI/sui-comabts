@@ -871,6 +871,113 @@ v5.1 republish + smoke test + audit pass land.
 
 ---
 
+## Phase 2 Progress Log (in-flight on `feature/phase-2-design`)
+
+> Phase 2 design rebuild is live on `feature/phase-2-design` —
+> branch is **not pushed** and **not merged to main** per standing
+> rules. Mainline stays at v4-era `08ff991`; the v5 functional
+> close-out branch `feature/v5-redeploy` is unchanged from the
+> 2026-05-13 push.
+
+### Phase 2-design (layout sweep — 2026-05-13)
+
+Ported the v2 "Forged Metal" design system and the Claude Design
+screen compositions across every screen. Every screen now mounts
+from canonical v2 primitives (Wordmark, Stamp, DangerButton,
+GhostButton, ListingCard, FrameTitle, PortraitFrame, TribalOrnament,
+HpBar) with the same gunmetal-panel / bronze-rim / parchment-text
+treatment.
+
+| Screen | Composition | Commit |
+|---|---|---|
+| Character | Loadout + pixel-spec equipment frame | `173ac14` |
+| Arena | 3-tile row + queue panel + wager form | `b326d70` |
+| Market | 3-column shell + dense ListingCard grid | `28938af` |
+| Tavern | 3-column (DMs · Chat · Online) | `490c85d` |
+| Hall of Fame | Podium + ladder | `3e14603` |
+
+### Phase 2-fix (this session — 2026-05-13)
+
+Three follow-up corrections applied in one pass:
+
+**1. Wordmark — chunky red+yellow comic outline** (`25e2096`)
+- New `frontend/src/components/v2/wordmark.tsx` primitive
+- Three size variants: `navbar` (inline ~22px), `footer` (~18px),
+  `hero` (stacked SUI 168px / COMBATS 132px)
+- "SUI" = red fill (`--wordmark-red #d63b2e`) + thick black stroke;
+  "COMBATS" = bronze/yellow fill (`--wordmark-yellow #e0b03a`) + black
+  stroke + dual stacked red drop-shadow
+- Technique: `-webkit-text-stroke` + `paintOrder: stroke fill` for
+  clean comic-outline rendering; hard edges only, no blur / boxShadow
+- Wired into `navbar.tsx` replacing the old `SUI<span>Combats</span>`
+- Gauntlet: `scripts/qa-wordmark.ts` — 30/30 PASS
+
+**2. Character page — 36/42/22 proportions** (`e96ac19`, `4531df5`)
+- Outer grid now **36% / 42% / 22%** at `xl` (Equipment / Center Info
+  / Inventory), `1fr 1fr` at `lg`, single column below
+- `EquipmentFrame` parameterized with a `scale` prop — every pixel
+  constant (`BIG=216`, `RING=64`, `BELT_H=102`, `CENTER=462`, `GAP=6`,
+  `PAD=14`) flows through `round(n * scale)`. Aspect ratios are
+  preserved end-to-end; HP bar height + ornament height carry a
+  min-clamp so they stay readable at small scales
+- `frameScale = 0.55 (xl) / 0.6 (lg) / 0.7 (md) / 0.8 (sm)`
+- New consolidated `CenterInfoCard` — archetype Stamp (tone-coded:
+  Crit→blood, Evasion→steel, Tank→bronze, Hybrid→default) + Slackey
+  44px name + Lv/ELO/W-L pills + Primary Attributes long bars + 2×4
+  Combat Stats grid (HP / ATK / CRIT / CRIT× / EVADE / ARMOR / DEF /
+  LV) + 5-segment XP bar
+- Recent Fights moved to a full-width row below the grid (no longer
+  wedged under Inventory)
+- Inventory header now uses Slackey 26px title + bronze pill count
+  badge
+- Gauntlets `qa-layout-primitives.ts` + `qa-v2-primitives.ts`
+  re-pinned to the scaled-constant form (`round(216)` etc.)
+
+**3. Landing page — full hero composition** (`395005e`)
+- New `frontend/src/components/landing/landing-page.tsx`
+- Hero left column: `Stamp tone="blood"` "Testnet · Live" pill +
+  `<Wordmark size="hero" />` + tagline + "95/5 split on every wager"
+  line + `DangerButton` "Connect Wallet" + `GhostButton` "Watch a
+  Fight ▾" + 3 outline Stamps (Walrus · MIT · Move v5)
+- Hero right column: 3 absolutely-positioned `FloatingNftCard`
+  instances rendering `ListingCard` with the real testnet catalog
+  Pinata folder `bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i`
+  (Pendant of Wrath / Dancer's Aegis / Whisperwind Amulet) — each
+  with distinct rotate / offset / zIndex; cards lift on hover
+- Three Steps tile row: 01 parchment (Mint your fighter) / 02 bronze
+  (Gear up) / 03 blood-red (Lock in, brawl) with Slackey 64px numbers
+- Footer: `<Wordmark size="footer" />` + "Built on Sui · 35/35 Move
+  tests · 2241/2241 QA · MIT licensed"
+- Connect-Wallet CTA wired via `document.querySelector` on the
+  `mysten-dapp-kit-connect-button` web component → click triggers the
+  dapp-kit modal
+- Wired into `game-screen.tsx` at the `!account` branch (old "A
+  blockchain PvP arena" stub removed)
+- Gauntlet: `scripts/qa-landing.ts` — 49/49 PASS
+
+### Regression sweep (this session)
+
+Ran all 36 `scripts/qa-*.ts` gauntlets after the three fixes landed.
+
+| Result | Count | Notes |
+|---|---|---|
+| ✅ PASS | 34 / 36 | All real assertions green |
+| ⚠ MOD | 2 / 36 | `qa-chain-gauntlet` + `qa-mint-catalog` — pre-existing `Cannot find module 'dotenv'` from script-root resolution path; not caused by this session's edits |
+
+Total static assertions across the green suites: **~2290 / 2290 PASS**
+(187 Hall of Fame + 49 Landing + 30 Wordmark + 125 layout + 128
+primitives + others).
+
+### Standing rules for Phase 2
+
+- **No git push** — branch stays local on `feature/phase-2-design`
+- **No merge to main** — main stays at v4-era `08ff991`
+- **No contract changes** — Phase 2 is frontend-only
+- **No breaking functionality** — every existing feature must keep
+  working under the new visuals
+
+---
+
 ## Reference Table
 
 > Canonical file list — the docs to read for current state vs
