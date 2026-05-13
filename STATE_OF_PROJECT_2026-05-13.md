@@ -356,7 +356,8 @@ v4 → v5; `MAINNET_PREP.md` documents the no-migration rule).
 | `qa-dm-send-pipeline.ts` (Bucket 3 #1 hotfix #5) | runDmSend integration: happy / existing channel / ensureChannel hangs / unresolvable cap / sendMessage hangs / sendMessage rejects / step trace + resolveMemberCap retry | **65 / 65** |
 | `qa-messaging-client.ts` (Bucket 3 #1 hotfix) | Sui Stack Messaging SDK shape pins; MVR override on BOTH messaging SuiClient + dapp-kit signer; withTimeout regression guard | **65 / 65** |
 | `qa-hall-of-fame.ts` (Bucket 3 #2, NEW 2026-05-13) | Sort comparator × every column × asc/desc + tiebreakers + stability; nextSortState toggle machine; classifyBuild edge cases (INT-led → Hybrid, 45% threshold boundary, missing/null/zero stats); filterEntries composite (level + build + search); levelBucketCounts + buildCounts; paginateEntries math + clamp; formatWinRatePct rounding; rankColor gold/silver/bronze/dim; composite filter→sort→paginate roundtrip; screenshot scenario (Mr_Boss_v5.1 + Sx_v5.1); backward compat with no-stats wire; purity guards | **187 / 187** |
-| **Static total** | | **1890 / 1890 PASS** (Bucket 2 base 1195 + Bucket 3 #1 Tavern+DM 508 + Bucket 3 #2 Hall of Fame 187) |
+| `qa-nft-portrait-picker.ts` (Phase 2 Step 2, NEW 2026-05-13) | Display-field extraction across both SDK shapes; ipfs/CID/http URL normalisation; isPortraitCandidate predicate; toNftCandidate conversion + fallback name; filterPortraitCandidates order + filters; pickerStateOf decision (loading/empty/error/ready); nextSelectionState (pick/clear/reset + canCommit); portraitKeyForWallet bucketing; readPortrait + writePortrait roundtrip + malformed JSON tolerance; wallet isolation (two wallets in same browser); storage failure tolerance (quota / disabled / SSR); end-to-end picker scenario; purity guards | **98 / 98** |
+| **Static total** | | **1988 / 1988 PASS** (Bucket 2 base 1195 + Bucket 3 #1 Tavern+DM 508 + Bucket 3 #2 Hall of Fame 187 + Phase 2 Step 2 NFT Portrait Picker 98) |
 
 Plus **35/35** Move unit tests under `contracts/tests/` (`sui move test`).
 
@@ -496,6 +497,46 @@ A  STATE_OF_PROJECT_2026-05-13.md                            (NEW — this doc; 
 M  STATUS.md                                                 (reduced to one-line pointer at STATE_OF_PROJECT_2026-05-13.md)
 M  CLAUDE.md / AGENTS.md                                     (gitnexus index counts synced after final wrap commit)
 ```
+
+### Phase 2 — UI redesign begins (2026-05-13, branch `feature/phase-2-design`)
+
+Started the same day the v5 wrap pushed. Branch is local-only (NOT
+pushed); waits on user QA + screenshot before broadening to other
+screens.
+
+```
+A  design_v2/latest/                                         (extracted from design-tool zips)
+A  design_v2/archive/                                        (zip backups, gitignored)
+A  design_v2/character_layout_reference.jpeg                 (user hand-mockup)
+A  design_v2/.gitignore                                      (excludes archive/)
+
+A  frontend/src/styles/design-tokens-v2.css                  (NEW — full token system: gunmetal/bronze/blood/steel)
+M  frontend/src/app/layout.tsx                               (replace Geist with Slackey+Poppins+JetBrains Mono via next/font)
+M  frontend/src/app/globals.css                              (bridge --background/--foreground/--font-* into v2 tokens)
+
+A  frontend/src/lib/nft-portrait.ts                          (NEW — pure picker helpers; storage DI for tests)
+A  frontend/src/components/character/nft-portrait-picker.tsx (NEW — modal: fetch wallet NFTs, 5-col grid, persist by wallet)
+M  frontend/src/components/character/character-profile.tsx   (rewrite — combats.ru border-frame layout w/ HP bar + 13-slot grid + tribal ornament)
+A  scripts/qa-nft-portrait-picker.ts                         (NEW — 98-assertion static gauntlet)
+```
+
+Commits (chronological, on `feature/phase-2-design`):
+
+```
+51f41e2 chore(phase-2): clean design_v2 folder — promote latest, archive iterations
+cc868ad feat(phase-2): foundation — v2 design tokens + fonts globally applied
+92f6f23 feat(phase-2): Character screen — combats.ru border-frame layout + NFT portrait picker
+```
+
+What's still open in Phase 2 (subsequent sessions):
+
+- Arena screen redesign (queue, matchmaking, wager lobby)
+- Marketplace redesign (browser, kiosk panel, item cards)
+- Tavern + Hall of Fame already match v2 aesthetically — light pass only
+- Fight Arena combat UI redesign
+- Navbar + town hub redesign
+- v5.1 contract republish bundle (separate branch, after UI lock-in)
+- Fresh wallets / characters / NFT catalog for v5.1 testnet
 
 ### Earlier sessions (referenced for completeness)
 
