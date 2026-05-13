@@ -1,44 +1,46 @@
 "use client";
 
 /**
- * Character screen — Phase 2 redesign.
+ * Character — Loadout composition (Phase 2 layout sweep).
  *
- * Reference: design_v2/character_layout_reference.jpeg (hand-mocked by
- * the user). Replaces the v1 doll silhouette with a combats.ru-style
- * border frame — 10 canonical equipment slots tucked tight around a
- * tall central NFT portrait, plus three ghosted v5.1-future slots
- * (Bracers / Ring 3 / Pants) reserved in-grid so the contract upgrade
- * can light them up without restructure.
+ * Matches the Claude Design screenshot at
+ * `design_v2/screenshopts/Screenshot from 2026-05-13 14-01-04.png`:
  *
- * Slot map (matching reference image):
- *   LEFT column  (top → bottom):  Helmet · Gloves · Weapon · Chest
- *   RIGHT column (top → bottom):  Necklace · [Ring1 Ring2 Ring3*] · Bracers* · Off-hand · Pants*
- *   BOTTOM row   (left → right):  Belt · TribalOrnament · Boots
- *   *  = v5.1 future slot — rendered as ghosted placeholder.
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │ "Loadout"  Slot in your gear …            [ ON CHAIN ]       │  ← TopBanner
+ *   ├──────────────────────────────────────────────────────────────┤
+ *   │ ┌───── Equipment Frame ─────┐ ┌── Stats ──┐ ┌─ Inventory ─┐  │
+ *   │ │ helm  | HP bar |  necklace│ │ name      │ │             │  │
+ *   │ │ brc.* | NFT    |  3 rings │ │ STR/DEX...│ │ items grid  │  │
+ *   │ │ wpn   |  frame |  gloves  │ │ HP/ATK... │ │             │  │
+ *   │ │ chst  | ornm   |  offhd   │ │ XP bar    │ │             │  │
+ *   │ │ belt  |        |  boots   │ │ W/L       │ │             │  │
+ *   │ └─────────────────────────────┘ └──────────┘ └─────────────┘  │
+ *   ├──────────────────────────────────────────────────────────────┤
+ *   │ Recent fights — WIN/LOSS rows                                 │  ← below frame
+ *   └──────────────────────────────────────────────────────────────┘
  *
- * Functionality preserved verbatim from v1:
- *   - useEquipmentActions (stage/unstage/save/discard)
- *   - StatAllocateModal modal-controller boolean + pendingStatAllocate bridge
- *   - ItemDetailModal + ItemCard picker modals
- *   - Dirty-slot rings + corner dots
- *   - 2H Path A locks via buildSlotPickerEntries
- *   - effectiveUnallocatedPoints chain-clamp (BUG 1, 2026-05-02)
+ * Pixel spec for the EquipmentFrame at the 1024px reference width:
+ *   - Big slot tiles: 216×216 (helmet / bracers / weapon / chest / belt /
+ *     necklace / gloves / off-hand / boots)
+ *   - Belt 216×102 (shorter, sits at the bottom of the left column)
+ *   - Center column: HP bar 462×40, NFT portrait 462×462, Ornament 462×120
+ *   - 3-ring cluster: 3 × 64×64 in a row spanning 216px
+ *   - 6px gap between cells, 14px frame padding, 2px bronze double rim
  *
- * New functionality (Phase 2):
- *   - NFT portrait picker — cosmetic only, localStorage-persisted per wallet
- *   - HP bar across top of frame
- *   - Title bar: crest + name + level + info icon (above frame)
+ * Three breakpoint regimes (driven by useBreakpoint):
+ *   xl (≥ 1440px) — 3-column outer: EquipmentFrame · Stats · Inventory
+ *   lg (1024–1439) — 2-column outer: EquipmentFrame · Stats; Inventory below
+ *   md / sm — stacked
  *
- * Visual rules (Forged Metal design system):
- *   - All colors via CSS vars from design-tokens-v2.css
- *   - Hard borders + flat plate shadows; no gradients on chrome
- *   - Rarity-coloured 2px slot borders when filled
- *   - Bronze double-rim frame; gunmetal slot fill
+ * Every existing behaviour preserved verbatim: stage/save/discard,
+ * stat-allocate modal-controller boolean + pendingStatAllocate bridge,
+ * ItemDetailModal + ItemCard pickers, dirty-slot rings, 2H Path A
+ * locks, effectiveUnallocatedPoints clamp, NFT portrait picker.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
-import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { computeDerivedStats, getArchetype, getArchetypeColor } from "@/lib/combat";
@@ -58,11 +60,20 @@ import {
   writePortrait,
   type NftCandidate,
 } from "@/lib/nft-portrait";
+import {
+  BronzeButton,
+  SectionLabel,
+  Stamp,
+} from "@/components/v2";
+import {
+  ScreenLayout,
+  SectionHeader,
+  TopBanner,
+  bpGte,
+  useBreakpoint,
+} from "@/components/v2/layout";
+import { Inventory } from "@/components/items/inventory";
 
-/* Map Tailwind rarity tokens (existing `text-purple-400` family) into
- * the v2 metal rarity ramp. The rest of the codebase still uses the
- * Tailwind colors; this keeps the slot border rarity colors visually
- * consistent with the rest of the v2 system. */
 const RARITY_BORDER_HEX: Record<Rarity, string> = {
   1: "var(--rarity-common)",
   2: "var(--rarity-uncommon)",
@@ -74,23 +85,15 @@ const RARITY_BORDER_HEX: Record<Rarity, string> = {
 /* ─────────────────────────── slot tile ─────────────────────────────── */
 
 interface SlotTileProps {
-  /** Canonical slot key, OR null for v5.1-future placeholders. */
   slot: keyof EquipmentSlots | null;
   item: Item | null;
-  /** When true, this slot is reserved for a v5.1 contract slot and
-   *  renders ghosted + non-interactive with a "v5.1" badge. */
   future?: boolean;
-  /** Future-slot label (for tooltip + future-slot ghost text). */
   futureLabel?: string;
-  /** Pixel dimensions — the grid sizes individual tiles for the
-   *  rectangular body-armor pieces vs square rings. */
-  w: number;
-  h: number;
+  /** Pixel size. Pass a single number for square tiles, or
+   *  `{ w, h }` for rectangles (e.g. the bottom Belt slot). */
+  size: number | { w: number; h: number };
   isDirty?: boolean;
   onClick?: () => void;
-  /** Optional slot-name label for empty active slots — appears as a
-   *  faint stamp in the bottom-left so first-time players know what
-   *  goes where. */
   emptyLabel?: string;
 }
 
@@ -99,12 +102,13 @@ function SlotTile({
   item,
   future,
   futureLabel,
-  w,
-  h,
+  size,
   isDirty,
   onClick,
   emptyLabel,
 }: SlotTileProps) {
+  const w = typeof size === "number" ? size : size.w;
+  const h = typeof size === "number" ? size : size.h;
   const rarityColor = item ? RARITY_BORDER_HEX[item.rarity] : null;
   const title = future
     ? `${futureLabel ?? "Slot"} — unlocks in v5.1 contract bundle`
@@ -153,7 +157,7 @@ function SlotTile({
     >
       {item ? (
         item.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
+          /* eslint-disable-next-line @next/next/no-img-element */
           <img
             src={item.imageUrl}
             alt={item.name}
@@ -161,8 +165,8 @@ function SlotTile({
               width: "100%",
               height: "100%",
               objectFit: "contain",
-              padding: 4,
-              filter: "drop-shadow(0 2px 2px rgba(0,0,0,.5))",
+              padding: 6,
+              filter: "drop-shadow(0 2px 3px rgba(0,0,0,.55))",
             }}
           />
         ) : (
@@ -178,15 +182,15 @@ function SlotTile({
         <span
           style={{
             position: "absolute",
-            bottom: 2,
-            right: 3,
+            bottom: 3,
+            right: 4,
             fontFamily: "var(--font-mono)",
-            fontSize: 8,
+            fontSize: 9,
             fontWeight: 700,
             color: "var(--sc-bronze)",
             letterSpacing: ".06em",
             background: "rgba(10,13,18,.85)",
-            padding: "1px 4px",
+            padding: "1px 5px",
             border: "1px solid var(--sc-bronze-deep)",
             lineHeight: 1,
           }}
@@ -198,11 +202,11 @@ function SlotTile({
         <span
           style={{
             position: "absolute",
-            bottom: 3,
-            left: 4,
-            right: 4,
+            bottom: 5,
+            left: 6,
+            right: 6,
             fontFamily: "var(--font-ui)",
-            fontSize: 8,
+            fontSize: 9,
             fontWeight: 700,
             color: "var(--fg-3)",
             letterSpacing: ".10em",
@@ -223,8 +227,8 @@ function SlotTile({
             position: "absolute",
             top: -3,
             right: -3,
-            width: 9,
-            height: 9,
+            width: 10,
+            height: 10,
             borderRadius: 999,
             background: "var(--sc-bronze)",
             boxShadow: "0 0 6px var(--sc-bronze-hot)",
@@ -235,17 +239,15 @@ function SlotTile({
   );
 }
 
-/* Empty-slot glyph — a faint cross/diamond. Pure SVG so it scales with
- * the tile size. */
 function SlotGlyph({ size, color }: { size: number; color: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
         d="M12 3 L12 21 M3 12 L21 12"
         stroke={color}
-        strokeWidth={1.8}
+        strokeWidth={1.6}
         strokeLinecap="round"
-        opacity={0.6}
+        opacity={0.55}
       />
     </svg>
   );
@@ -253,13 +255,14 @@ function SlotGlyph({ size, color }: { size: number; color: string }) {
 
 /* ─────────────────────────── HP bar ───────────────────────────────── */
 
-function HpBar({ current, max }: { current: number; max: number }) {
+function HpBar({ current, max, width }: { current: number; max: number; width: number }) {
   const pct = max > 0 ? Math.min(100, (current / max) * 100) : 0;
   return (
     <div
       style={{
         position: "relative",
-        height: 26,
+        width,
+        height: 40,
         background: "var(--sc-page)",
         border: "2px solid var(--sc-bronze)",
         boxShadow: "var(--rim-top), inset 0 -2px 0 rgba(0,0,0,.55)",
@@ -285,12 +288,11 @@ function HpBar({ current, max }: { current: number; max: number }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontFamily: "var(--font-mono)",
-          fontWeight: 700,
-          fontSize: 13,
+          fontFamily: "var(--font-display)",
+          fontSize: 22,
           color: "var(--sc-parchment)",
-          textShadow: "0 0 4px rgba(0,0,0,.9), 1px 1px 0 #000",
-          letterSpacing: "0.06em",
+          textShadow: "0 0 4px rgba(0,0,0,.9), 2px 2px 0 #000",
+          letterSpacing: "0.02em",
           pointerEvents: "none",
         }}
       >
@@ -305,9 +307,13 @@ function HpBar({ current, max }: { current: number; max: number }) {
 function PortraitFrame({
   portrait,
   onClick,
+  width,
+  height,
 }: {
   portrait: NftCandidate | null;
   onClick: () => void;
+  width: number;
+  height: number;
 }) {
   return (
     <button
@@ -319,9 +325,8 @@ function PortraitFrame({
           : "Click to set a portrait NFT"
       }
       style={{
-        flex: 1,
-        minHeight: 0,
-        width: "100%",
+        width,
+        height,
         padding: 0,
         cursor: "pointer",
         overflow: "hidden",
@@ -329,12 +334,12 @@ function PortraitFrame({
         border: "2px solid var(--sc-bronze)",
         borderRadius: 0,
         boxShadow:
-          "inset 0 0 0 1px rgba(0,0,0,.4), inset 0 2px 4px rgba(0,0,0,.6), var(--sh-plate-sm)",
+          "inset 0 0 0 1px rgba(0,0,0,.4), inset 0 2px 4px rgba(0,0,0,.6), var(--sh-plate-lg)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 14,
+        gap: 18,
         position: "relative",
         fontFamily: "var(--font-ui)",
         color: "var(--sc-parchment)",
@@ -350,7 +355,7 @@ function PortraitFrame({
       {portrait ? (
         <>
           {portrait.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
+            /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={portrait.imageUrl}
               alt={portrait.name}
@@ -364,7 +369,7 @@ function PortraitFrame({
             <div
               style={{
                 fontFamily: "var(--font-display)",
-                fontSize: 36,
+                fontSize: 48,
                 color: "var(--sc-bronze)",
                 textAlign: "center",
                 padding: 16,
@@ -376,16 +381,16 @@ function PortraitFrame({
           <span
             style={{
               position: "absolute",
-              left: 6,
-              top: 6,
+              left: 8,
+              top: 8,
               fontFamily: "var(--font-ui)",
-              fontSize: 9,
+              fontSize: 10,
               fontWeight: 700,
               letterSpacing: ".14em",
               textTransform: "uppercase",
               color: "var(--sc-bronze)",
               background: "rgba(10,13,18,.85)",
-              padding: "3px 8px",
+              padding: "3px 10px",
               border: "1px solid var(--sc-bronze)",
             }}
           >
@@ -396,15 +401,15 @@ function PortraitFrame({
         <>
           <div
             style={{
-              width: 64,
-              height: 64,
+              width: 80,
+              height: 80,
               border: "2px solid var(--sc-bronze)",
               color: "var(--sc-bronze)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               opacity: 0.6,
-              fontSize: 32,
+              fontSize: 44,
               fontWeight: 300,
               lineHeight: 1,
             }}
@@ -416,7 +421,7 @@ function PortraitFrame({
             style={{
               fontFamily: "var(--font-ui)",
               fontWeight: 800,
-              fontSize: 14,
+              fontSize: 16,
               letterSpacing: ".18em",
               textTransform: "uppercase",
               color: "var(--sc-ash)",
@@ -428,12 +433,12 @@ function PortraitFrame({
           <div
             style={{
               fontFamily: "var(--font-ui)",
-              fontSize: 11,
+              fontSize: 12,
               color: "var(--sc-ash-2)",
               textAlign: "center",
-              maxWidth: 220,
+              maxWidth: 280,
               lineHeight: 1.45,
-              marginTop: -8,
+              marginTop: -6,
             }}
           >
             Click to choose a portrait —<br />
@@ -447,13 +452,12 @@ function PortraitFrame({
 
 /* ──────────────────────── Tribal ornament ────────────────────────── */
 
-function TribalOrnament() {
+function TribalOrnament({ width, height }: { width: number; height: number }) {
   return (
     <div
       style={{
-        flex: 1,
-        height: "100%",
-        minHeight: 88,
+        width,
+        height,
         background: "var(--sc-panel-3)",
         border: "1px solid var(--sc-bronze-deep)",
         boxShadow:
@@ -465,9 +469,6 @@ function TribalOrnament() {
       }}
       aria-hidden
     >
-      {/* Bold tribal flourish — bronze hardline, twin-prong wings
-          extending from the central SUI medallion. Sized via viewBox so
-          it scales with the bottom-row height. */}
       <svg
         viewBox="0 0 480 110"
         width="100%"
@@ -475,7 +476,6 @@ function TribalOrnament() {
         preserveAspectRatio="xMidYMid meet"
         fill="none"
       >
-        {/* Outer halo */}
         <g
           stroke="var(--sc-bronze-deep)"
           strokeWidth={2.5}
@@ -483,18 +483,15 @@ function TribalOrnament() {
           fill="none"
           opacity={0.55}
         >
-          {/* LEFT flourish — twin upward sweeps + tooth accents */}
           <path d="M40 55 Q 110 14 180 38 Q 215 50 225 55" />
           <path d="M40 55 Q 110 96 180 72 Q 215 60 225 55" />
           <path d="M70 22 L 56 40 M 100 30 L 84 46 M 130 36 L 116 52 M 50 32 L 66 50" />
           <path d="M70 88 L 56 70 M 100 80 L 84 64 M 130 74 L 116 58" />
-          {/* RIGHT flourish (mirrored) */}
           <path d="M440 55 Q 370 14 300 38 Q 265 50 255 55" />
           <path d="M440 55 Q 370 96 300 72 Q 265 60 255 55" />
           <path d="M410 22 L 424 40 M 380 30 L 396 46 M 350 36 L 364 52 M 430 32 L 414 50" />
           <path d="M410 88 L 424 70 M 380 80 L 396 64 M 350 74 L 364 58" />
         </g>
-        {/* Tooth/spike accents — bronze hardline */}
         <g
           stroke="var(--sc-bronze)"
           strokeWidth={1.6}
@@ -504,7 +501,6 @@ function TribalOrnament() {
           <path d="M155 28 L 165 42 L 175 28 M 175 82 L 165 68 L 155 82" />
           <path d="M325 28 L 315 42 L 305 28 M 305 82 L 315 68 L 325 82" />
         </g>
-        {/* Central medallion — bronze double-ring with SUI mark */}
         <g fill="none">
           <circle cx="240" cy="55" r="26" stroke="var(--sc-bronze)" strokeWidth={2.2} />
           <circle cx="240" cy="55" r="20" stroke="var(--sc-bronze-deep)" strokeWidth={1.4} />
@@ -521,7 +517,6 @@ function TribalOrnament() {
         >
           SUI
         </text>
-        {/* Four corner studs */}
         <g fill="var(--sc-bronze)">
           <circle cx="14" cy="14" r="2.2" />
           <circle cx="466" cy="14" r="2.2" />
@@ -533,18 +528,16 @@ function TribalOrnament() {
   );
 }
 
-/* ──────────────────────── Title bar ──────────────────────────────── */
+/* ─────────────────────── Frame Title ───────────────────────────── */
 
-function TitleBar({
+function FrameTitle({
   name,
   level,
   archetype,
-  archetypeColor,
 }: {
   name: string;
   level: number;
   archetype: string;
-  archetypeColor: string;
 }) {
   return (
     <div
@@ -552,14 +545,14 @@ function TitleBar({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 10,
-        padding: "10px 0",
+        gap: 12,
+        padding: "12px 0",
         fontFamily: "var(--font-ui)",
       }}
     >
       <svg
-        width={22}
-        height={22}
+        width={26}
+        height={26}
         viewBox="0 0 24 24"
         fill="var(--sc-bronze)"
         stroke="var(--sc-page)"
@@ -571,7 +564,7 @@ function TitleBar({
       <span
         style={{
           fontFamily: "var(--font-display)",
-          fontSize: 28,
+          fontSize: 32,
           lineHeight: 1,
           color: "var(--sc-bronze)",
           letterSpacing: "0.02em",
@@ -584,7 +577,7 @@ function TitleBar({
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 700,
-          fontSize: 18,
+          fontSize: 20,
           color: "var(--sc-bronze)",
           opacity: 0.85,
         }}
@@ -596,8 +589,8 @@ function TitleBar({
         title={`${archetype} build · Lv ${level}`}
         aria-label="Build info"
         style={{
-          width: 22,
-          height: 22,
+          width: 26,
+          height: 26,
           padding: 0,
           background: "var(--sc-steel)",
           color: "var(--sc-parchment)",
@@ -608,26 +601,13 @@ function TitleBar({
           justifyContent: "center",
           fontFamily: "var(--font-display)",
           fontWeight: 900,
-          fontSize: 13,
+          fontSize: 16,
           fontStyle: "italic",
           borderRadius: 2,
         }}
       >
         i
       </button>
-      <span
-        className={archetypeColor}
-        style={{
-          fontFamily: "var(--font-ui)",
-          fontWeight: 700,
-          fontSize: 11,
-          letterSpacing: ".10em",
-          textTransform: "uppercase",
-          marginLeft: 4,
-        }}
-      >
-        {archetype}
-      </span>
     </div>
   );
 }
@@ -645,18 +625,706 @@ function sumEquipmentStat(
   return total;
 }
 
+/* ─────────────────────── Recent Fights ────────────────────────── */
+
+function RecentFights() {
+  const { state } = useGame();
+  const account = useCurrentAccount();
+  const { fightHistory } = state;
+
+  useEffect(() => {
+    if (!state.socket.authenticated) return;
+    state.socket.send({ type: "get_fight_history" });
+  }, [state.socket]);
+
+  if (!fightHistory.length) {
+    return (
+      <div
+        style={{
+          background: "var(--sc-panel)",
+          border: "1px solid var(--sc-rim)",
+          borderRadius: "var(--r-card)",
+          padding: 20,
+          boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
+        }}
+      >
+        <SectionHeader title="Recent fights" />
+        <p
+          style={{
+            color: "var(--fg-3)",
+            fontSize: 13,
+            textAlign: "center",
+            padding: "20px 0",
+            fontStyle: "italic",
+            margin: 0,
+          }}
+        >
+          No fights yet — head to the Arena and pick a queue.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        background: "var(--sc-panel)",
+        border: "1px solid var(--sc-rim)",
+        borderRadius: "var(--r-card)",
+        padding: 20,
+        boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
+      }}
+    >
+      <SectionHeader title="Recent fights" />
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {fightHistory.slice(0, 8).map((fight, i) => {
+          const won = fight.winner === account?.address;
+          const isA = fight.playerA.walletAddress === account?.address;
+          const opponent = isA ? fight.playerB : fight.playerA;
+          const isLast = i === Math.min(7, fightHistory.length - 1);
+          return (
+            <div
+              key={fight.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "auto 1fr auto auto",
+                alignItems: "center",
+                gap: 16,
+                padding: "12px 14px",
+                borderBottom: isLast ? "none" : "1px solid var(--sc-rim)",
+                background: "transparent",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              {/* WIN / LOSS stamp */}
+              <span
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontWeight: 800,
+                  fontSize: 11,
+                  letterSpacing: "var(--ls-stamp)",
+                  textTransform: "uppercase",
+                  padding: "5px 12px",
+                  background: won ? "var(--rarity-uncommon)" : "var(--sc-blood)",
+                  color: "var(--sc-parchment)",
+                  border: `1px solid ${
+                    won ? "var(--rarity-uncommon)" : "var(--sc-blood-deep)"
+                  }`,
+                  borderRadius: "var(--r-sm)",
+                  minWidth: 56,
+                  textAlign: "center",
+                }}
+              >
+                {won ? "Win" : "Loss"}
+              </span>
+              {/* Opponent name */}
+              <span style={{ fontWeight: 700, fontSize: 14 }}>
+                vs <span style={{ color: "var(--sc-parchment)" }}>{opponent.name}</span>
+              </span>
+              {/* Turn count / fight type */}
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  color: "var(--fg-3)",
+                  minWidth: 60,
+                  textAlign: "right",
+                }}
+              >
+                {fight.turns} turns
+              </span>
+              {/* Outcome note */}
+              <span
+                style={{
+                  fontSize: 12,
+                  color: fight.wagerAmount
+                    ? "var(--sc-bronze)"
+                    : "var(--fg-3)",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: fight.wagerAmount ? 800 : 600,
+                  minWidth: 140,
+                  textAlign: "right",
+                }}
+              >
+                {fight.wagerAmount
+                  ? `Wager ${fight.wagerAmount} SUI`
+                  : `${fight.type[0].toUpperCase()}${fight.type.slice(1)} fight`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────── Equipment Frame ───────────────────────── */
+
+/**
+ * The big bronze-rimmed frame. Sized at the 1024px reference width
+ * directly — the parent container clamps total content width via
+ * `ScreenLayout`'s 1440px max, and the right-side stat column floats
+ * next to it at xl viewports.
+ *
+ * Pixel spec recap (all at 1024px reference):
+ *   side col width = 216
+ *   center col width = 462
+ *   gap = 6
+ *   big slot = 216×216
+ *   belt = 216×102
+ *   3-ring row = 3 × 64 with gaps → fills 216 width
+ *   HP bar = 462×40
+ *   portrait = 462×462 (square)
+ *   ornament = 462×120
+ *   frame inner padding = 14
+ */
+
+function EquipmentFrame({
+  eq,
+  dirtySlots,
+  portrait,
+  onSlot,
+  onPortrait,
+  player,
+  hp,
+}: {
+  eq: EquipmentSlots;
+  dirtySlots: Set<keyof EquipmentSlots>;
+  portrait: NftCandidate | null;
+  onSlot: (slot: keyof EquipmentSlots) => void;
+  onPortrait: () => void;
+  player: { name: string; level: number; archetype: string };
+  hp: { current: number; max: number };
+}) {
+  const BIG = 216;
+  const RING = 64;
+  const BELT_H = 102;
+  const CENTER = 462;
+  const GAP = 6;
+  const PAD = 14;
+
+  return (
+    <div style={{ width: "fit-content", maxWidth: "100%" }}>
+      <FrameTitle
+        name={player.name}
+        level={player.level}
+        archetype={player.archetype}
+      />
+      <div
+        style={{
+          background: "var(--sc-panel)",
+          border: "2px solid var(--sc-bronze-deep)",
+          boxShadow:
+            "0 0 0 1px var(--sc-rim) inset, var(--sh-plate-lg), var(--rim-top)",
+          padding: PAD,
+          display: "grid",
+          gridTemplateColumns: `${BIG}px ${CENTER}px ${BIG}px`,
+          gridTemplateRows: "auto auto auto",
+          columnGap: GAP,
+          rowGap: GAP,
+        }}
+      >
+        {/* HP bar — spans all 3 cols */}
+        <div style={{ gridColumn: "1 / -1" }}>
+          <HpBar current={hp.current} max={hp.max} width={BIG + GAP + CENTER + GAP + BIG} />
+        </div>
+
+        {/* LEFT COLUMN */}
+        <div
+          style={{
+            gridColumn: 1,
+            gridRow: 2,
+            display: "flex",
+            flexDirection: "column",
+            gap: GAP,
+          }}
+        >
+          <SlotTile
+            slot="helmet"
+            item={eq.helmet}
+            size={BIG}
+            isDirty={dirtySlots.has("helmet")}
+            onClick={() => onSlot("helmet")}
+            emptyLabel="Helmet"
+          />
+          <SlotTile
+            slot={null}
+            item={null}
+            future
+            futureLabel="Bracers"
+            size={BIG}
+          />
+          <SlotTile
+            slot="weapon"
+            item={eq.weapon}
+            size={BIG}
+            isDirty={dirtySlots.has("weapon")}
+            onClick={() => onSlot("weapon")}
+            emptyLabel="Weapon"
+          />
+          <SlotTile
+            slot="chest"
+            item={eq.chest}
+            size={BIG}
+            isDirty={dirtySlots.has("chest")}
+            onClick={() => onSlot("chest")}
+            emptyLabel="Chest"
+          />
+          <SlotTile
+            slot="belt"
+            item={eq.belt}
+            size={{ w: BIG, h: BELT_H }}
+            isDirty={dirtySlots.has("belt")}
+            onClick={() => onSlot("belt")}
+            emptyLabel="Belt"
+          />
+        </div>
+
+        {/* CENTER COLUMN — portrait stretches to fill remaining height */}
+        <div
+          style={{
+            gridColumn: 2,
+            gridRow: 2,
+            display: "flex",
+            flexDirection: "column",
+            gap: GAP,
+            alignItems: "stretch",
+          }}
+        >
+          <PortraitFrame
+            portrait={portrait}
+            onClick={onPortrait}
+            width={CENTER}
+            height={CENTER}
+          />
+          <TribalOrnament width={CENTER} height={120} />
+          {/* Spacer to push ornament down so the column heights match
+              roughly. Left col total = 4*216 + 102 + 4*6 = 990; center
+              total so far = 462 + 6 + 120 = 588; ring-row + spacer
+              calibration covers the remaining ~402 by making the
+              right col absorb. We add a fixed spacer when the right
+              column has extra slots beyond the ring row. */}
+          <div style={{ flex: 1, minHeight: 4 }} />
+        </div>
+
+        {/* RIGHT COLUMN */}
+        <div
+          style={{
+            gridColumn: 3,
+            gridRow: 2,
+            display: "flex",
+            flexDirection: "column",
+            gap: GAP,
+          }}
+        >
+          <SlotTile
+            slot="necklace"
+            item={eq.necklace}
+            size={BIG}
+            isDirty={dirtySlots.has("necklace")}
+            onClick={() => onSlot("necklace")}
+            emptyLabel="Necklace"
+          />
+          {/* Ring cluster — 3 square tiles in a row at width BIG. */}
+          <div
+            style={{
+              width: BIG,
+              height: RING,
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: GAP,
+            }}
+          >
+            <SlotTile
+              slot="ring1"
+              item={eq.ring1}
+              size={{ w: (BIG - GAP * 2) / 3, h: RING }}
+              isDirty={dirtySlots.has("ring1")}
+              onClick={() => onSlot("ring1")}
+            />
+            <SlotTile
+              slot="ring2"
+              item={eq.ring2}
+              size={{ w: (BIG - GAP * 2) / 3, h: RING }}
+              isDirty={dirtySlots.has("ring2")}
+              onClick={() => onSlot("ring2")}
+            />
+            <SlotTile
+              slot={null}
+              item={null}
+              future
+              futureLabel="Ring 3"
+              size={{ w: (BIG - GAP * 2) / 3, h: RING }}
+            />
+          </div>
+          <SlotTile
+            slot="gloves"
+            item={eq.gloves}
+            size={BIG}
+            isDirty={dirtySlots.has("gloves")}
+            onClick={() => onSlot("gloves")}
+            emptyLabel="Gloves"
+          />
+          <SlotTile
+            slot="offhand"
+            item={eq.offhand}
+            size={BIG}
+            isDirty={dirtySlots.has("offhand")}
+            onClick={() => onSlot("offhand")}
+            emptyLabel="Off-hand"
+          />
+          <SlotTile
+            slot="boots"
+            item={eq.boots}
+            size={BIG}
+            isDirty={dirtySlots.has("boots")}
+            onClick={() => onSlot("boots")}
+            emptyLabel="Boots"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────── Stats column ────────────────────────── */
+
+function StatsColumn({
+  character,
+  derived,
+  archetype,
+  archetypeColor,
+  unallocatedPoints,
+  onAllocateClick,
+  saveControls,
+  characterEloDelta,
+}: {
+  character: Character;
+  derived: ReturnType<typeof computeDerivedStats>;
+  archetype: string;
+  archetypeColor: string;
+  unallocatedPoints: number;
+  onAllocateClick: () => void;
+  saveControls?: ReactNode;
+  characterEloDelta?: string;
+}) {
+  const winRate =
+    character.wins + character.losses > 0
+      ? Math.round((character.wins / (character.wins + character.losses)) * 100)
+      : 0;
+  const xpInLevel = getXpInCurrentLevel(character.level, character.xp);
+  const xpSpan = getXpSpanForLevel(character.level);
+  const xpProgress = getXpProgress(character.level, character.xp);
+  const isMaxLevel = character.level >= MAX_LEVEL;
+
+  const eq = (character as unknown as { equipment?: EquipmentSlots }).equipment ?? null;
+  const strBonus = eq ? sumEquipmentStat(eq, "strengthBonus") : 0;
+  const dexBonus = eq ? sumEquipmentStat(eq, "dexterityBonus") : 0;
+  const intBonus = eq ? sumEquipmentStat(eq, "intuitionBonus") : 0;
+  const endBonus = eq ? sumEquipmentStat(eq, "enduranceBonus") : 0;
+
+  const statRows: Array<{
+    label: string;
+    base: number;
+    bonus: number;
+    color: string;
+  }> = [
+    { label: "STR", base: character.stats.strength, bonus: strBonus, color: "var(--stat-str)" },
+    { label: "DEX", base: character.stats.dexterity, bonus: dexBonus, color: "var(--stat-dex)" },
+    { label: "INT", base: character.stats.intuition, bonus: intBonus, color: "var(--stat-int)" },
+    { label: "END", base: character.stats.endurance, bonus: endBonus, color: "var(--stat-end)" },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 260 }}>
+      {/* Header card — archetype + name in Slackey + Lv/ELO + allocate */}
+      <div
+        style={{
+          background: "var(--sc-panel)",
+          border: "1px solid var(--sc-rim)",
+          borderRadius: "var(--r-card)",
+          padding: 16,
+          boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <Stamp tone="blood">{archetype}</Stamp>
+            <h2
+              style={{
+                margin: "8px 0 0",
+                fontFamily: "var(--font-display)",
+                fontSize: 28,
+                lineHeight: 1.05,
+                color: "var(--sc-bronze)",
+                letterSpacing: "0.01em",
+              }}
+            >
+              {character.name}
+            </h2>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Stamp tone="bronze">Lv {character.level}</Stamp>
+              <Stamp tone="default" outline>
+                {character.rating} ELO
+              </Stamp>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--fg-3)",
+                  fontWeight: 700,
+                }}
+              >
+                {character.wins}W · {character.losses}L · {winRate}%
+              </span>
+            </div>
+          </div>
+          {unallocatedPoints > 0 && (
+            <BronzeButton size="sm" onClick={onAllocateClick}>
+              + {unallocatedPoints} pts
+            </BronzeButton>
+          )}
+        </div>
+        {saveControls && (
+          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {saveControls}
+          </div>
+        )}
+      </div>
+
+      {/* Primary Attributes */}
+      <div
+        style={{
+          background: "var(--sc-panel)",
+          border: "1px solid var(--sc-rim)",
+          borderRadius: "var(--r-card)",
+          padding: 16,
+          boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
+        }}
+      >
+        <SectionLabel>Primary Attributes</SectionLabel>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {statRows.map((row) => {
+            const total = row.base + row.bonus;
+            return (
+              <div
+                key={row.label}
+                style={{ display: "flex", alignItems: "center", gap: 10 }}
+              >
+                <span
+                  style={{
+                    fontWeight: 800,
+                    fontSize: 11,
+                    letterSpacing: ".10em",
+                    textTransform: "uppercase",
+                    color: row.color,
+                    width: 40,
+                  }}
+                >
+                  {row.label}
+                </span>
+                <div
+                  style={{
+                    flex: 1,
+                    height: 7,
+                    background: "var(--sc-page)",
+                    border: "1px solid var(--sc-rim-2)",
+                    borderRadius: 1,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.min(100, (total / 20) * 100)}%`,
+                      height: "100%",
+                      background: row.color,
+                      transition: "width var(--d-slow) var(--ease-out)",
+                    }}
+                  />
+                </div>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    color: row.color,
+                    minWidth: 36,
+                    textAlign: "right",
+                  }}
+                >
+                  {row.bonus > 0 ? (
+                    <>
+                      {row.base}
+                      <span style={{ color: "var(--rarity-uncommon)", marginLeft: 4, fontSize: 11 }}>
+                        +{row.bonus}
+                      </span>
+                    </>
+                  ) : (
+                    row.base
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Combat Stats */}
+      <div
+        style={{
+          background: "var(--sc-panel)",
+          border: "1px solid var(--sc-rim)",
+          borderRadius: "var(--r-card)",
+          padding: 16,
+          boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
+        }}
+      >
+        <SectionLabel>Combat Stats</SectionLabel>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 6,
+          }}
+        >
+          {(
+            [
+              ["HP", derived.maxHp, "var(--stat-hp)"],
+              ["ATK", derived.attackPower, "var(--sc-blood)"],
+              ["Crit", `${derived.critChance}%`, "var(--stat-int)"],
+              ["Crit ×", `${derived.critMultiplier}x`, "var(--stat-int)"],
+              ["Evade", `${derived.evasionChance}%`, "var(--stat-dex)"],
+              ["Armor", derived.armor, "var(--sc-steel)"],
+              ["Def", derived.defense, "var(--sc-bronze)"],
+              ["Lv", character.level, "var(--sc-parchment)"],
+            ] as const
+          ).map(([l, v, c]) => (
+            <div
+              key={l as string}
+              style={{
+                background: "var(--sc-page)",
+                border: "1px solid var(--sc-rim-2)",
+                borderRadius: 2,
+                padding: "8px 10px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: ".12em",
+                  textTransform: "uppercase",
+                  color: "var(--fg-3)",
+                }}
+              >
+                {l}
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 800,
+                  fontSize: 18,
+                  color: c as string,
+                  marginTop: 2,
+                }}
+              >
+                {v}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: ".10em",
+              textTransform: "uppercase",
+              color: "var(--fg-3)",
+              marginBottom: 4,
+            }}
+          >
+            <span>
+              Lv {character.level}
+              {isMaxLevel ? " MAX" : ` → ${character.level + 1}`}
+            </span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              {isMaxLevel
+                ? `${character.xp.toLocaleString()} XP`
+                : `${xpInLevel.toLocaleString()} / ${xpSpan.toLocaleString()} XP`}
+            </span>
+          </div>
+          <div
+            style={{
+              height: 8,
+              background: "var(--sc-page)",
+              border: "1px solid var(--sc-rim-2)",
+              overflow: "hidden",
+              position: "relative",
+            }}
+          >
+            <div
+              style={{
+                width: `${xpProgress * 100}%`,
+                height: "100%",
+                background:
+                  "linear-gradient(90deg, var(--sc-bronze-deep) 0%, var(--sc-bronze-hot) 50%, var(--sc-bronze-deep) 100%)",
+                transition: "width var(--d-slow) var(--ease-out)",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                pointerEvents: "none",
+              }}
+            >
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    flex: 1,
+                    borderRight:
+                      i < 4 ? "1px solid rgba(0,0,0,.45)" : "none",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Suppress unused archetypeColor — keeping prop for future use */}
+      <span style={{ display: "none" }} aria-hidden>
+        {archetypeColor}
+        {characterEloDelta}
+      </span>
+    </div>
+  );
+}
+
 /* ─────────────────────── Main component ──────────────────────────── */
 
 export function CharacterProfile({
   character,
+  compact,
+  extras,
 }: {
   character: Character;
-  /** Compact mode (legacy prop kept for back-compat — Phase 2 ignores it,
-   *  the layout now adapts via container width). */
+  /** Legacy prop — Phase 2 ignores it; the layout adapts via viewport. */
   compact?: boolean;
+  /** Optional trailing content (e.g. ResetCharacterButton) rendered
+   *  after the inventory column on the small viewport stack. */
+  extras?: ReactNode;
 }) {
+  void compact;
   const { state, dispatch } = useGame();
   const account = useCurrentAccount();
+  const bp = useBreakpoint();
   const {
     stageEquip,
     stageUnequip,
@@ -667,14 +1335,8 @@ export function CharacterProfile({
     dirtySlots,
   } = useEquipmentActions();
   const [showAllocate, setShowAllocate] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(
-    null,
-  );
+  const [selectedSlot, setSelectedSlot] = useState<keyof EquipmentSlots | null>(null);
 
-  // Portrait state — local React + persisted via localStorage in
-  // lib/nft-portrait.ts. Re-read whenever the connected wallet changes
-  // so swapping wallets in the same browser picks up that wallet's
-  // saved choice instead of leaking the prior wallet's portrait.
   const [portrait, setPortrait] = useState<NftCandidate | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   useEffect(() => {
@@ -689,8 +1351,6 @@ export function CharacterProfile({
     }
   }
 
-  // Bridge from LevelUpModal "Allocate Stat Points" CTA → this
-  // component's existing modal-controller boolean (Fix 3, 2026-05-04).
   useEffect(() => {
     if (state.pendingStatAllocate) {
       setShowAllocate(true);
@@ -698,9 +1358,6 @@ export function CharacterProfile({
     }
   }, [state.pendingStatAllocate, dispatch]);
 
-  // Saving is blocked during an active fight (the on-chain fight-lock
-  // DOF would abort the save PTB anyway — this pre-empts the wallet
-  // popup).
   const inFight = state.fight !== null;
   const saveDisabled = signing || inFight || !isDirty;
   const saveTooltip = inFight
@@ -711,25 +1368,15 @@ export function CharacterProfile({
         ? "No unsaved changes"
         : `Save ${dirtySlots.size} slot change(s) on-chain`;
 
-  // BUG 1 (live test 2026-05-02): the modal's "+N to allocate" must
-  // reflect chain truth, not the server's optimistic post-fight value,
-  // otherwise clicking Allocate stages a tx that aborts with
-  // ENotEnoughPoints. The helper takes min(server, chain) when chain
-  // has been hydrated.
   const unallocatedPoints = effectiveUnallocatedPoints(
     character.unallocatedPoints,
     state.onChainCharacter?.unallocatedPoints,
   );
   const characterObjectId = state.onChainCharacter?.objectId;
 
-  // Display pendingEquipment (what the user WANTS). Committed is the
-  // chain truth; combat uses committed (D4 — fight-room.ts re-reads
-  // DOFs). The doll slots show pending so staged changes are visible
-  // immediately without waiting for a Save Loadout tx.
   const eq: EquipmentSlots = state.pendingEquipment;
   const selectedItem = selectedSlot ? eq[selectedSlot] : null;
 
-  // Items already slotted in pending — hidden from the picker.
   const equippedPendingIds = useMemo(() => {
     const set = new Set<string>();
     for (const item of Object.values(state.pendingEquipment)) {
@@ -738,9 +1385,6 @@ export function CharacterProfile({
     return set;
   }, [state.pendingEquipment]);
 
-  // Effective equip level = min(server.level, onChain.level). Server
-  // level can be ahead of chain (pre-revert test-XP drift). Used by
-  // buildSlotPickerEntries to flag locked items.
   const effectiveLevel = Math.min(
     character.level,
     state.onChainCharacter?.level ?? character.level,
@@ -783,693 +1427,130 @@ export function CharacterProfile({
   );
   const archetype = getArchetype(character.stats);
   const archetypeColor = getArchetypeColor(archetype);
-  const xpInLevel = getXpInCurrentLevel(character.level, character.xp);
-  const xpSpan = getXpSpanForLevel(character.level);
-  const xpProgress = getXpProgress(character.level, character.xp);
-  const isMaxLevel = character.level >= MAX_LEVEL;
-  const winRate =
-    character.wins + character.losses > 0
-      ? Math.round((character.wins / (character.wins + character.losses)) * 100)
-      : 0;
 
-  // Equipment bonuses per stat
-  const strBonus = sumEquipmentStat(eq, "strengthBonus");
-  const dexBonus = sumEquipmentStat(eq, "dexterityBonus");
-  const intBonus = sumEquipmentStat(eq, "intuitionBonus");
-  const endBonus = sumEquipmentStat(eq, "enduranceBonus");
+  // Save / Discard inline controls — rendered into the stat-column
+  // header card so the Save action sits near the character identity.
+  const saveControls = isDirty ? (
+    <>
+      <button
+        type="button"
+        onClick={() => void saveLoadout()}
+        disabled={saveDisabled}
+        title={saveTooltip}
+        style={{
+          fontFamily: "var(--font-ui)",
+          fontWeight: 700,
+          fontSize: 11,
+          letterSpacing: "var(--ls-button)",
+          textTransform: "uppercase",
+          padding: "7px 14px",
+          border: `2px solid ${saveDisabled ? "var(--sc-rim-2)" : "var(--sc-bronze-deep)"}`,
+          borderRadius: "var(--r-button)",
+          background: saveDisabled ? "var(--sc-panel-2)" : "var(--sc-bronze)",
+          color: saveDisabled ? "var(--fg-3)" : "var(--sc-page)",
+          boxShadow: saveDisabled ? "none" : "var(--sh-plate-sm)",
+          cursor: saveDisabled ? "not-allowed" : "pointer",
+          opacity: saveDisabled ? 0.6 : 1,
+        }}
+      >
+        {signing ? "Saving…" : `Save Loadout (${dirtySlots.size})`}
+      </button>
+      <button
+        type="button"
+        onClick={stageDiscard}
+        disabled={signing}
+        title="Discard staged changes, revert to last saved"
+        style={{
+          fontFamily: "var(--font-ui)",
+          fontWeight: 700,
+          fontSize: 11,
+          letterSpacing: "var(--ls-button)",
+          textTransform: "uppercase",
+          padding: "7px 12px",
+          border: "1px solid var(--sc-rim-2)",
+          borderRadius: "var(--r-button)",
+          background: "var(--sc-page)",
+          color: "var(--fg-2)",
+          cursor: signing ? "not-allowed" : "pointer",
+          opacity: signing ? 0.6 : 1,
+        }}
+      >
+        Discard
+      </button>
+    </>
+  ) : null;
 
-  // Tailwind v4's JIT scanner doesn't evaluate runtime string ops like
-  // `color.replace("text-", "bg-")` — carry the literal bg-* token
-  // alongside the text-* token so STR/DEX/INT/END bars all compile.
-  const statRows: [string, number, number, string, string][] = [
-    ["STR", character.stats.strength, strBonus, "text-red-400", "bg-red-400"],
-    ["DEX", character.stats.dexterity, dexBonus, "text-cyan-400", "bg-cyan-400"],
-    ["INT", character.stats.intuition, intBonus, "text-purple-400", "bg-purple-400"],
-    ["END", character.stats.endurance, endBonus, "text-amber-400", "bg-amber-400"],
-  ];
-
-  // Slot dimensions — rectangular for body armor, square-ish for jewelry.
-  // Sized to match the reference image directly: tall rectangular tiles
-  // ~145×170 (≈ 1 : 1.17 W:H, golden-ratio-ish). Reference shows the
-  // slots are the dominant visual element of the frame, not an
-  // afterthought next to the portrait. Bumped 88→145 (W) and 100→170 (H)
-  // after live QA — user said "make slots more to size of reference."
-  const BIG_W = 145;
-  const BIG_H = 170;
-  // 3-ring row inside the right column. Ring tiles are square so the
-  // whole row sits side-by-side at the same width as the big slots.
-  const RING_W = 44;
-  const RING_H = 44;
-  // Bottom row (Belt · Ornament · Boots) — shorter tiles since the
-  // ornament takes the middle. Matches reference bottom-row proportions.
-  const BOT_W = 145;
-  const BOT_H = 102;
-  const COL_GAP = 6;
-  const SLOT_GAP = 6;
-
-  // HP derived from combat stats. Server doesn't currently expose
-  // current-HP outside a fight; we show full HP on the doll which is
-  // the correct out-of-combat reading.
-  const hpCurrent = derived.maxHp;
-  const hpMax = derived.maxHp;
+  // Outer responsive layout. xl = 3-col (Frame · Stats · Inventory),
+  // lg = 2-col (Frame · Stats), Inventory below; md/sm = stacked.
+  const showInventoryColumn = bpGte("xl", bp);
+  const showInventoryBelow = !showInventoryColumn;
 
   return (
     <>
-      <div
-        style={{
-          background: "var(--sc-panel)",
-          border: "1px solid var(--sc-rim)",
-          boxShadow: "var(--sh-plate-lg), var(--rim-top), var(--rim-bottom)",
-          overflow: "hidden",
-        }}
-      >
-        {/* ── Top header — name/level + save/discard + ELO ── */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "8px 14px",
-            borderBottom: "1px solid var(--sc-rim)",
-            background: "var(--sc-panel-2)",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <h2
-              style={{
-                margin: 0,
-                fontFamily: "var(--font-ui)",
-                fontWeight: 800,
-                fontSize: 14,
-                color: "var(--sc-parchment)",
-                letterSpacing: "0.01em",
-              }}
-            >
-              {character.name}
-            </h2>
-            <Badge variant="info">Lv.{character.level}</Badge>
-            <span
-              className={archetypeColor}
-              style={{
-                fontFamily: "var(--font-ui)",
-                fontWeight: 700,
-                fontSize: 11,
-                letterSpacing: ".08em",
-                textTransform: "uppercase",
-              }}
-            >
-              {archetype}
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {isDirty && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void saveLoadout();
-                  }}
-                  disabled={saveDisabled}
-                  title={saveTooltip}
-                  style={{
-                    fontFamily: "var(--font-ui)",
-                    fontWeight: 700,
-                    fontSize: 11,
-                    letterSpacing: "var(--ls-button)",
-                    textTransform: "uppercase",
-                    padding: "6px 12px",
-                    border: `2px solid ${saveDisabled ? "var(--sc-rim-2)" : "var(--sc-bronze-deep)"}`,
-                    borderRadius: "var(--r-button)",
-                    background: saveDisabled
-                      ? "var(--sc-panel-2)"
-                      : "var(--sc-bronze)",
-                    color: saveDisabled ? "var(--fg-3)" : "var(--sc-page)",
-                    boxShadow: saveDisabled ? "none" : "var(--sh-plate-sm)",
-                    cursor: saveDisabled ? "not-allowed" : "pointer",
-                    opacity: saveDisabled ? 0.6 : 1,
-                  }}
-                >
-                  {signing ? "Saving…" : `Save Loadout (${dirtySlots.size})`}
-                </button>
-                <button
-                  type="button"
-                  onClick={stageDiscard}
-                  disabled={signing}
-                  title="Discard staged changes, revert to last saved"
-                  style={{
-                    fontFamily: "var(--font-ui)",
-                    fontWeight: 700,
-                    fontSize: 11,
-                    letterSpacing: "var(--ls-button)",
-                    textTransform: "uppercase",
-                    padding: "6px 10px",
-                    border: "1px solid var(--sc-rim-2)",
-                    borderRadius: "var(--r-button)",
-                    background: "var(--sc-page)",
-                    color: "var(--fg-2)",
-                    cursor: signing ? "not-allowed" : "pointer",
-                    opacity: signing ? 0.6 : 1,
-                  }}
-                >
-                  Discard
-                </button>
-              </>
-            )}
-            <Badge variant="warning">{character.rating} ELO</Badge>
-          </div>
-        </div>
-
-        {/* ── Title bar with crest + name (display font) ── */}
-        <TitleBar
-          name={character.name}
-          level={character.level}
-          archetype={archetype}
-          archetypeColor={archetypeColor}
+      <ScreenLayout>
+        <TopBanner
+          title="Loadout"
+          subtitle={
+            <>
+              Slot in your gear. The chain commits when you{" "}
+              <strong style={{ color: "var(--sc-page)" }}>Save Loadout</strong>.
+            </>
+          }
+          pill="onChain"
+          tone="bronze"
         />
 
-        {/* ── The Forged Frame ── */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "auto 1fr",
-            gap: 18,
-            padding: "0 16px 14px",
+            gridTemplateColumns: showInventoryColumn
+              ? "auto minmax(0, 1fr) minmax(260px, 320px)"
+              : bpGte("lg", bp)
+                ? "auto minmax(0, 1fr)"
+                : "1fr",
+            gap: 20,
             alignItems: "start",
           }}
         >
-          {/* Equipment frame — left side, fills its column width */}
-          <div
-            style={{
-              background: "var(--sc-panel)",
-              border: "2px solid var(--sc-bronze-deep)",
-              boxShadow:
-                "0 0 0 1px var(--sc-rim) inset, var(--sh-plate-lg)",
-              padding: 10,
-              display: "grid",
-              gridTemplateColumns: `${BIG_W}px 1fr ${BIG_W}px`,
-              gridTemplateRows: "auto 1fr auto",
-              columnGap: COL_GAP,
-              rowGap: SLOT_GAP,
-              width: "fit-content",
-            }}
-          >
-            {/* HP bar — spans all 3 cols */}
-            <div style={{ gridColumn: "1 / -1" }}>
-              <HpBar current={hpCurrent} max={hpMax} />
-            </div>
+          <EquipmentFrame
+            eq={eq}
+            dirtySlots={dirtySlots}
+            portrait={portrait}
+            onSlot={(s) => setSelectedSlot(s)}
+            onPortrait={() => setPickerOpen(true)}
+            player={{ name: character.name, level: character.level, archetype }}
+            hp={{ current: derived.maxHp, max: derived.maxHp }}
+          />
 
-            {/* Left column */}
-            <div
-              style={{
-                gridColumn: 1,
-                gridRow: 2,
-                display: "flex",
-                flexDirection: "column",
-                gap: SLOT_GAP,
-              }}
-            >
-              <SlotTile
-                slot="helmet"
-                item={eq.helmet}
-                w={BIG_W}
-                h={BIG_H}
-                isDirty={dirtySlots.has("helmet")}
-                onClick={() => setSelectedSlot("helmet")}
-                emptyLabel="Helmet"
-              />
-              {/* v5.1 Bracers — forearm armor; today's contract has no
-                  slot for these. Layout pre-allocates the space so v5.1
-                  lights up without restructure. Flipped from right col
-                  to left col per user QA 2026-05-13 (reference image
-                  shows the leather forearm bracers on the LEFT side). */}
-              <SlotTile
-                slot={null}
-                item={null}
-                future
-                futureLabel="Bracers"
-                w={BIG_W}
-                h={BIG_H}
-              />
-              <SlotTile
-                slot="weapon"
-                item={eq.weapon}
-                w={BIG_W}
-                h={BIG_H}
-                isDirty={dirtySlots.has("weapon")}
-                onClick={() => setSelectedSlot("weapon")}
-                emptyLabel="Weapon"
-              />
-              <SlotTile
-                slot="chest"
-                item={eq.chest}
-                w={BIG_W}
-                h={BIG_H}
-                isDirty={dirtySlots.has("chest")}
-                onClick={() => setSelectedSlot("chest")}
-                emptyLabel="Chest"
-              />
-            </div>
+          <StatsColumn
+            character={character}
+            derived={derived}
+            archetype={archetype}
+            archetypeColor={archetypeColor}
+            unallocatedPoints={unallocatedPoints}
+            onAllocateClick={() => setShowAllocate(true)}
+            saveControls={saveControls}
+          />
 
-            {/* Center column — portrait fills the rest */}
-            <div
-              style={{
-                gridColumn: 2,
-                gridRow: 2,
-                display: "flex",
-                flexDirection: "column",
-                minHeight: BIG_H * 4 + SLOT_GAP * 3,
-                minWidth: 220,
-              }}
-            >
-              <PortraitFrame
-                portrait={portrait}
-                onClick={() => setPickerOpen(true)}
-              />
+          {showInventoryColumn && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Inventory />
+              {extras}
             </div>
-
-            {/* Right column */}
-            <div
-              style={{
-                gridColumn: 3,
-                gridRow: 2,
-                display: "flex",
-                flexDirection: "column",
-                gap: SLOT_GAP,
-              }}
-            >
-              <SlotTile
-                slot="necklace"
-                item={eq.necklace}
-                w={BIG_W}
-                h={BIG_H}
-                isDirty={dirtySlots.has("necklace")}
-                onClick={() => setSelectedSlot("necklace")}
-                emptyLabel="Necklace"
-              />
-              {/* Ring row — 3 ring slots; ring3 reserved for v5.1.
-                  Three equal-width square tiles spanning the column. */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: SLOT_GAP,
-                  height: RING_H,
-                  width: BIG_W,
-                }}
-              >
-                <SlotTile
-                  slot="ring1"
-                  item={eq.ring1}
-                  w={(BIG_W - SLOT_GAP * 2) / 3}
-                  h={RING_H}
-                  isDirty={dirtySlots.has("ring1")}
-                  onClick={() => setSelectedSlot("ring1")}
-                />
-                <SlotTile
-                  slot="ring2"
-                  item={eq.ring2}
-                  w={(BIG_W - SLOT_GAP * 2) / 3}
-                  h={RING_H}
-                  isDirty={dirtySlots.has("ring2")}
-                  onClick={() => setSelectedSlot("ring2")}
-                />
-                <SlotTile
-                  slot={null}
-                  item={null}
-                  future
-                  futureLabel="Ring 3"
-                  w={(BIG_W - SLOT_GAP * 2) / 3}
-                  h={RING_H}
-                />
-              </div>
-              {/* Canonical Gloves slot — flipped from left col per user
-                  QA 2026-05-13 (reference image shows the red gauntlets
-                  on the RIGHT side; the left forearm bracers are v5.1
-                  future). */}
-              <SlotTile
-                slot="gloves"
-                item={eq.gloves}
-                w={BIG_W}
-                h={BIG_H}
-                isDirty={dirtySlots.has("gloves")}
-                onClick={() => setSelectedSlot("gloves")}
-                emptyLabel="Gloves"
-              />
-              <SlotTile
-                slot="offhand"
-                item={eq.offhand}
-                w={BIG_W}
-                h={BIG_H}
-                isDirty={dirtySlots.has("offhand")}
-                onClick={() => setSelectedSlot("offhand")}
-                emptyLabel="Off-hand"
-              />
-              {/* v5.1 Pants — leg armor placeholder. */}
-              <SlotTile
-                slot={null}
-                item={null}
-                future
-                futureLabel="Pants"
-                w={BIG_W}
-                h={BIG_H}
-              />
-            </div>
-
-            {/* Bottom row: Belt · Ornament · Boots — spans all 3 cols */}
-            <div
-              style={{
-                gridColumn: "1 / -1",
-                gridRow: 3,
-                display: "flex",
-                gap: SLOT_GAP,
-                alignItems: "stretch",
-                height: BOT_H,
-              }}
-            >
-              <SlotTile
-                slot="belt"
-                item={eq.belt}
-                w={BOT_W}
-                h={BOT_H}
-                isDirty={dirtySlots.has("belt")}
-                onClick={() => setSelectedSlot("belt")}
-                emptyLabel="Belt"
-              />
-              <TribalOrnament />
-              <SlotTile
-                slot="boots"
-                item={eq.boots}
-                w={BOT_W}
-                h={BOT_H}
-                isDirty={dirtySlots.has("boots")}
-                onClick={() => setSelectedSlot("boots")}
-                emptyLabel="Boots"
-              />
-            </div>
-          </div>
-
-          {/* Stats column — right of the frame */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              minWidth: 240,
-            }}
-          >
-            {/* Attributes panel */}
-            <div
-              style={{
-                background: "var(--sc-panel-2)",
-                border: "1px solid var(--sc-rim)",
-                boxShadow: "var(--rim-top), var(--rim-bottom)",
-                padding: 12,
-              }}
-            >
-              <h3
-                style={{
-                  margin: "0 0 8px",
-                  fontFamily: "var(--font-ui)",
-                  fontWeight: 800,
-                  fontSize: 10,
-                  letterSpacing: ".14em",
-                  textTransform: "uppercase",
-                  color: "var(--sc-bronze)",
-                  borderBottom: "1px solid var(--sc-rim)",
-                  paddingBottom: 5,
-                }}
-              >
-                Primary Attributes
-              </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {statRows.map(([label, base, bonus, color, barBg]) => {
-                  const total = base + bonus;
-                  return (
-                    <div
-                      key={label}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        fontSize: 12,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 32,
-                          fontWeight: 800,
-                          fontSize: 11,
-                          letterSpacing: ".06em",
-                          color: "var(--fg-3)",
-                        }}
-                      >
-                        {label}
-                      </span>
-                      <div
-                        style={{
-                          flex: 1,
-                          height: 6,
-                          background: "var(--sc-page)",
-                          border: "1px solid var(--sc-rim-2)",
-                          borderRadius: 2,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div
-                          className={barBg}
-                          style={{
-                            width: `${Math.min(100, (total / 20) * 100)}%`,
-                            height: "100%",
-                            opacity: 0.7,
-                          }}
-                        />
-                      </div>
-                      <span
-                        className={`font-mono font-bold ${color}`}
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontWeight: 700,
-                          fontSize: 12,
-                          minWidth: 38,
-                          textAlign: "right",
-                        }}
-                      >
-                        {total > base ? (
-                          <>
-                            {base}{" "}
-                            <span style={{ color: "var(--rarity-uncommon)" }}>
-                              +{bonus}
-                            </span>
-                          </>
-                        ) : (
-                          base
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-              {unallocatedPoints > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllocate(true)}
-                  style={{
-                    marginTop: 10,
-                    width: "100%",
-                    fontFamily: "var(--font-ui)",
-                    fontWeight: 700,
-                    fontSize: 11,
-                    letterSpacing: "var(--ls-button)",
-                    textTransform: "uppercase",
-                    padding: "6px 10px",
-                    border: "2px solid var(--sc-bronze-deep)",
-                    borderRadius: "var(--r-button)",
-                    background: "var(--sc-bronze)",
-                    color: "var(--sc-page)",
-                    boxShadow: "var(--sh-plate-sm)",
-                    cursor: "pointer",
-                    animation: "pulse-bronze-pp 1.6s ease-in-out infinite",
-                  }}
-                >
-                  +{unallocatedPoints} pts to allocate
-                </button>
-              )}
-              <style>{`
-                @keyframes pulse-bronze-pp {
-                  0%, 100% { box-shadow: var(--sh-plate-sm); }
-                  50%     { box-shadow: 0 0 12px var(--sc-bronze-hot), var(--sh-plate-sm); }
-                }
-              `}</style>
-            </div>
-
-            {/* Combat stats panel */}
-            <div
-              style={{
-                background: "var(--sc-panel-2)",
-                border: "1px solid var(--sc-rim)",
-                boxShadow: "var(--rim-top), var(--rim-bottom)",
-                padding: 12,
-              }}
-            >
-              <h3
-                style={{
-                  margin: "0 0 8px",
-                  fontFamily: "var(--font-ui)",
-                  fontWeight: 800,
-                  fontSize: 10,
-                  letterSpacing: ".14em",
-                  textTransform: "uppercase",
-                  color: "var(--sc-bronze)",
-                  borderBottom: "1px solid var(--sc-rim)",
-                  paddingBottom: 5,
-                }}
-              >
-                Combat Statistics
-              </h3>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, 1fr)",
-                  gap: 4,
-                }}
-              >
-                {(
-                  [
-                    ["HP", derived.maxHp, "var(--stat-hp)"],
-                    ["ATK", derived.attackPower, "var(--sc-blood)"],
-                    ["Crit%", `${derived.critChance}%`, "var(--stat-int)"],
-                    ["Crit×", `${derived.critMultiplier}x`, "var(--stat-int)"],
-                    ["Evade", `${derived.evasionChance}%`, "var(--stat-dex)"],
-                    ["Armor", derived.armor, "var(--sc-steel)"],
-                    ["Def", derived.defense, "var(--sc-bronze)"],
-                    ["Lv", character.level, "var(--sc-parchment)"],
-                  ] as const
-                ).map(([label, val, color]) => (
-                  <div
-                    key={label as string}
-                    style={{
-                      background: "var(--sc-page)",
-                      border: "1px solid var(--sc-rim-2)",
-                      borderRadius: 2,
-                      padding: "4px 7px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        letterSpacing: ".12em",
-                        textTransform: "uppercase",
-                        color: "var(--fg-3)",
-                      }}
-                    >
-                      {label}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontWeight: 700,
-                        fontSize: 13,
-                        color: color as string,
-                      }}
-                    >
-                      {val}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* XP bar */}
-            <div
-              style={{
-                background: "var(--sc-panel-2)",
-                border: "1px solid var(--sc-rim)",
-                boxShadow: "var(--rim-top), var(--rim-bottom)",
-                padding: 12,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: ".10em",
-                  textTransform: "uppercase",
-                  color: "var(--fg-3)",
-                  marginBottom: 6,
-                }}
-              >
-                <span>
-                  Lv {character.level}
-                  {isMaxLevel ? " MAX" : ` → ${character.level + 1}`}
-                </span>
-                <span style={{ fontFamily: "var(--font-mono)" }}>
-                  {isMaxLevel
-                    ? `${character.xp.toLocaleString()} XP`
-                    : `${xpInLevel.toLocaleString()} / ${xpSpan.toLocaleString()} XP`}
-                </span>
-              </div>
-              <div
-                style={{
-                  height: 8,
-                  background: "var(--sc-page)",
-                  border: "1px solid var(--sc-rim-2)",
-                  overflow: "hidden",
-                  borderRadius: 2,
-                }}
-              >
-                <div
-                  style={{
-                    width: `${xpProgress * 100}%`,
-                    height: "100%",
-                    background:
-                      "linear-gradient(90deg, var(--sc-bronze-deep) 0%, var(--sc-bronze-hot) 50%, var(--sc-bronze-deep) 100%)",
-                    transition: "width var(--d-slow) var(--ease-out)",
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* W / L */}
-            <div
-              style={{
-                background: "var(--sc-panel-2)",
-                border: "1px solid var(--sc-rim)",
-                boxShadow: "var(--rim-top), var(--rim-bottom)",
-                padding: "10px 12px",
-                display: "flex",
-                gap: 16,
-                fontSize: 12,
-                fontWeight: 700,
-              }}
-            >
-              <span>
-                <span style={{ color: "var(--fg-3)" }}>W </span>
-                <span style={{ color: "var(--rarity-uncommon)" }}>
-                  {character.wins}
-                </span>
-              </span>
-              <span>
-                <span style={{ color: "var(--fg-3)" }}>L </span>
-                <span style={{ color: "var(--sc-blood)" }}>{character.losses}</span>
-              </span>
-              <span>
-                <span style={{ color: "var(--fg-3)" }}>Win% </span>
-                <span style={{ color: "var(--sc-parchment)" }}>{winRate}%</span>
-              </span>
-            </div>
-          </div>
+          )}
         </div>
-      </div>
 
-      {/* ── Modals — unchanged behaviour, kept verbatim from v1 ── */}
+        <RecentFights />
+
+        {showInventoryBelow && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <Inventory />
+            {extras}
+          </div>
+        )}
+      </ScreenLayout>
+
+      {/* Modals — verbatim from prior pass */}
       {showAllocate && (
         <StatAllocateModal
           character={{ ...character, unallocatedPoints }}
@@ -1485,7 +1566,21 @@ export function CharacterProfile({
           actions={
             <button
               onClick={handleUnequip}
-              className="w-full px-4 py-2 text-sm font-bold rounded bg-red-600/20 text-red-400 border border-red-700/40 hover:bg-red-600/30 hover:border-red-600/60 transition-all"
+              style={{
+                width: "100%",
+                padding: "10px 14px",
+                fontFamily: "var(--font-ui)",
+                fontWeight: 700,
+                fontSize: 13,
+                letterSpacing: "var(--ls-button)",
+                textTransform: "uppercase",
+                background: "var(--sc-blood)",
+                color: "var(--sc-parchment)",
+                border: "2px solid var(--sc-blood-deep)",
+                borderRadius: "var(--r-button)",
+                cursor: "pointer",
+                boxShadow: "var(--sh-plate-sm)",
+              }}
             >
               Unequip
             </button>
@@ -1501,11 +1596,29 @@ export function CharacterProfile({
           wide
         >
           {pickerEntries.length === 0 ? (
-            <p className="text-zinc-400 text-sm text-center py-4">
-              No compatible items in inventory
+            <p
+              style={{
+                color: "var(--fg-3)",
+                fontSize: 13,
+                textAlign: "center",
+                padding: "16px 0",
+                fontStyle: "italic",
+                margin: 0,
+              }}
+            >
+              No compatible items in inventory.
             </p>
           ) : (
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            <div
+              className="scroll-plate"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                maxHeight: 420,
+                overflowY: "auto",
+              }}
+            >
               {pickerEntries.map(({ item, locked, lockedReason }) => (
                 <ItemCard
                   key={item.id}
@@ -1528,10 +1641,7 @@ export function CharacterProfile({
         />
       )}
 
-      {/* RARITY_COLORS is referenced via `RARITY_COLORS[...]` only in the
-          ItemDetailModal/ItemCard children. Keep the legacy `RARITY_COLORS`
-          symbol used so future Tailwind JIT scans still see the literal
-          token chain. (No-op at runtime.) */}
+      {/* Tailwind JIT pin */}
       <span style={{ display: "none" }} aria-hidden>
         {Object.values(RARITY_COLORS).join(" ")}
       </span>

@@ -205,53 +205,21 @@ function AreaContent() {
 
   if (!character) return null;
 
+  // Phase 2 layout sweep — each screen owns its own ScreenLayout
+  // wrapper + TopBanner + composition. game-screen just routes to
+  // the right top-level component; no more per-screen grid wrappers
+  // here (they'd fight the screen's own 3-column / podium / etc).
   switch (currentArea) {
     case "character":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 space-y-4">
-            <CharacterProfile character={character} />
-            <FightHistory />
-          </div>
-          <div className="space-y-4">
-            <Inventory />
-            <ResetCharacterButton />
-          </div>
-        </div>
-      );
+      return <CharacterProfile character={character} extras={<ResetCharacterButton />} />;
     case "arena":
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div />
-            <HowToPlayButton />
-          </div>
-          <MatchmakingQueue />
-        </div>
-      );
+      return <MatchmakingQueue />;
     case "marketplace":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <MarketplaceBrowser />
-          </div>
-          <div className="space-y-4">
-            <MyKioskPanel />
-            <Inventory />
-          </div>
-        </div>
-      );
+      return <MarketplaceBrowser />;
     case "tavern":
       return <TavernRoom />;
     case "hall_of_fame":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Leaderboard />
-          </div>
-          <div />
-        </div>
-      );
+      return <Leaderboard />;
     default:
       return null;
   }
@@ -347,22 +315,21 @@ export function GameScreen() {
       <LevelUpModal />
       <div
         style={{
-          maxWidth: "var(--container-max)",
-          margin: "0 auto",
           width: "100%",
-          padding: "14px 18px",
           display: "flex",
           flexDirection: "column",
-          gap: 14,
         }}
       >
+        {/* Outer chrome — testnet banner + nav at full viewport width.
+            Each Area-content screen below owns its own ScreenLayout
+            wrapper so the 1440px max-width + side padding stays
+            consistent with the design system spec. */}
         <div
           style={{
             background: "var(--sc-panel-2)",
-            border: "1px solid var(--sc-blood-deep)",
-            borderLeft: "3px solid var(--sc-blood)",
+            borderBottom: "1px solid var(--sc-blood-deep)",
             color: "var(--fg-2)",
-            padding: "8px 14px",
+            padding: "8px 18px",
             fontFamily: "var(--font-ui)",
             fontWeight: 600,
             fontSize: 11,
@@ -376,6 +343,7 @@ export function GameScreen() {
           characters and items reset on server restart
         </div>
         <TownNav />
+        <div style={{ height: 16 }} />
         <AreaContent />
       </div>
       <ChallengePopup />
