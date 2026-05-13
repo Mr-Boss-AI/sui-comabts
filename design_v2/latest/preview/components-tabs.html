@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Tabs / Town Nav</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#15191f;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:20px;display:flex;flex-direction:column;gap:14px;}
+  .tabs{display:flex;gap:0;border-bottom:2px solid #e8e2d4;}
+  .t{position:relative;padding:14px 22px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#8a8474;cursor:pointer;border:none;background:transparent;border-bottom:4px solid transparent;margin-bottom:-2px;}
+  .t.active{color:#e8e2d4;border-bottom-color:#b53d2c;}
+  .t .meta{display:block;font-weight:500;font-size:10px;text-transform:none;letter-spacing:0;color:#9a958a;margin-top:2px;}
+  .t.active .meta{color:#8a8474;}
+  .seg{display:inline-flex;border:2px solid #e8e2d4;border-radius:999px;overflow:hidden;background:#15191f;box-shadow:3px 3px 0 0 #000;align-self:flex-start;}
+  .seg button{font-family:"Poppins";font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.08em;border:none;background:transparent;padding:8px 16px;color:#8a8474;cursor:pointer;}
+  .seg button.on{background:#0a0d12;color:#c89a3f;}
+</style></head><body>
+<div class="wrap">
+  <div class="tabs">
+    <button class="t">Character<span class="meta">Stats &amp; gear</span></button>
+    <button class="t active">Arena<span class="meta">Fight players</span></button>
+    <button class="t">Market<span class="meta">Buy &amp; sell</span></button>
+    <button class="t">Tavern<span class="meta">Chat &amp; social</span></button>
+    <button class="t">Hall of Fame<span class="meta">Rankings</span></button>
+  </div>
+  <div class="seg">
+    <button class="on">Friendly</button>
+    <button>Ranked</button>
+    <button>Wager</button>
+  </div>
+</div>
+</body></html>

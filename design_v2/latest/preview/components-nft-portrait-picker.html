@@ -1,0 +1,68 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>NFT Portrait Picker</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#0a0d12;font-family:"Poppins",sans-serif;color:#e8e2d4;height:100%;}
+  .scene{position:relative;width:100%;min-height:560px;}
+  .scrim{position:absolute;inset:0;background:rgba(0,0,0,.65);}
+  .modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(660px,92%);max-height:520px;background:#15191f;
+    border:2px solid #c89a3f;box-shadow:0 24px 64px -8px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.05);
+    display:flex;flex-direction:column;}
+  .hd{padding:14px 18px;border-bottom:1px solid #2c333d;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;}
+  .stamp{font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    padding:3px 9px;background:transparent;color:#c89a3f;border:1px solid #c89a3f;border-radius:999px;}
+  h2{margin:6px 0 2px;font-size:20px;font-weight:800;color:#c89a3f;letter-spacing:-0.01em;}
+  .sub{margin:0;font-size:12px;color:#c8c1b0;line-height:1.4;}
+  .x{border:1px solid #3a4250;background:#0a0d12;color:#c8c1b0;padding:5px;cursor:pointer;width:26px;height:26px;display:flex;align-items:center;justify-content:center;}
+  .body{padding:14px;flex:1;overflow:auto;}
+  .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;}
+  .thumb{background:#0a0d12;border:2px solid #2c333d;padding:6px;display:flex;flex-direction:column;gap:4px;cursor:pointer;position:relative;}
+  .thumb.sel{border-color:#c89a3f;box-shadow:0 0 0 1px #c89a3f,inset 0 0 0 1px rgba(200,154,63,.4);}
+  .thumb.epic{border-color:#7a3a8a;}
+  .thumb.leg{border-color:#c89a3f;}
+  .thumb.rare{border-color:#3a6a9a;}
+  .art{aspect-ratio:1/1;background:#1a1f28;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
+  .art img{width:100%;height:100%;object-fit:contain;padding:4px;}
+  .name{font-size:10px;font-weight:700;text-align:center;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .rar{font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-align:center;}
+  .rar.epic{color:#7a3a8a;} .rar.leg{color:#c89a3f;} .rar.rare{color:#3a6a9a;}
+  .check{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:999px;background:#c89a3f;color:#0a0d12;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;box-shadow:0 0 0 2px #0a0d12;}
+  .fr{padding:12px 18px;border-top:1px solid #2c333d;background:#1a1f28;display:flex;justify-content:space-between;align-items:center;}
+  .link{background:transparent;border:0;color:#8a8474;font-weight:700;font-size:11px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;}
+  .btn{font-family:"Poppins";font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:12px;padding:9px 18px;border:2px solid;cursor:pointer;}
+  .btn.alt{background:#1a1f28;color:#e8e2d4;border-color:#3a4250;}
+  .btn.go{background:#c89a3f;color:#0a0d12;border-color:#a87e29;box-shadow:3px 3px 0 0 #000;}
+</style></head><body>
+<div class="scene">
+  <div class="scrim"></div>
+  <div class="modal">
+    <div class="hd">
+      <div>
+        <span class="stamp">Cosmetic · No stat impact</span>
+        <h2>Choose Portrait</h2>
+        <p class="sub">Display any NFT from your wallet — pure cosmetic, no stat impact.</p>
+      </div>
+      <button class="x">✕</button>
+    </div>
+    <div class="body">
+      <div class="grid">
+        <div class="thumb leg sel"><div class="art"><img src="../assets/items/Skullcrusher_Maul.png"><div class="check">✓</div></div><div class="name">Skullcrusher Maul</div><div class="rar leg">Legendary</div></div>
+        <div class="thumb epic"><div class="art"><img src="../assets/items/Bloodletter_Gauntlets.png"></div><div class="name">Bloodletter Gauntlets</div><div class="rar epic">Epic</div></div>
+        <div class="thumb rare"><div class="art"><img src="../assets/items/Phantom_Loop.png"></div><div class="name">Phantom Loop</div><div class="rar rare">Rare</div></div>
+        <div class="thumb epic"><div class="art"><img src="../assets/items/Whisperwind_Amulet.png"></div><div class="name">Whisperwind Amulet</div><div class="rar epic">Epic</div></div>
+        <div class="thumb epic"><div class="art"><img src="../assets/items/Shadowstep_Wraps.png"></div><div class="name">Shadowstep Wraps</div><div class="rar epic">Epic</div></div>
+        <div class="thumb rare"><div class="art"><img src="../assets/items/Hunters_Hood.png"></div><div class="name">Hunter's Hood</div><div class="rar rare">Rare</div></div>
+        <div class="thumb epic"><div class="art"><img src="../assets/items/Dancers_Aegis.png"></div><div class="name">Dancer's Aegis</div><div class="rar epic">Epic</div></div>
+        <div class="thumb leg"><div class="art"><img src="../assets/items/Pendant_of_Wrath.png"></div><div class="name">Pendant of Wrath</div><div class="rar leg">Legendary</div></div>
+        <div class="thumb epic"><div class="art"><img src="../assets/items/Skullsplitter_Helm.png"></div><div class="name">Skullsplitter Helm</div><div class="rar epic">Epic</div></div>
+        <div class="thumb rare"><div class="art"><img src="../assets/items/Twin_Stilettos.png"></div><div class="name">Twin Stilettos</div><div class="rar rare">Rare</div></div>
+      </div>
+    </div>
+    <div class="fr">
+      <button class="link">Clear portrait</button>
+      <div style="display:flex;gap:8px;"><button class="btn alt">Cancel</button><button class="btn go">Set as Portrait</button></div>
+    </div>
+  </div>
+</div>
+</body></html>

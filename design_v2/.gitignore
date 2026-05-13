@@ -1,0 +1,5 @@
+# archive/ holds the original design-tool exports (zips + extracted
+# iteration folders, ~37 MB of NFT-art duplicates). Everything
+# functional is in design_v2/latest/. Keep archive/ local-only as a
+# recovery snapshot; it doesn't need to ship with the repo.
+archive/

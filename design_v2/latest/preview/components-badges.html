@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Badges & Pills</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#15191f;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:20px;display:flex;flex-direction:column;gap:14px;}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#8a8474;min-width:120px;}
+  .b{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:5px 11px;border-radius:999px;border:1.5px solid #8a8474;background:#15191f;color:#e8e2d4;}
+  .b.fill-black{background:#0a0d12;color:#e8e2d4;}
+  .b.fill-red{background:#b53d2c;color:#e8e2d4;border-color:#b53d2c;}
+  .b.fill-yellow{background:#c89a3f;color:#0a0d12;border-color:#c89a3f;}
+  .b.green{background:#5a8a3a;color:#e8e2d4;border-color:#5a8a3a;}
+  .b.purple{background:#7a3a8a;color:#e8e2d4;border-color:#7a3a8a;}
+  .lv{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:6px;background:#0a0d12;color:#c89a3f;font-family:"JetBrains Mono";font-weight:700;font-size:11px;border:1.5px solid #8a8474;}
+  .elo{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:6px;background:#15191f;color:#e8e2d4;font-family:"JetBrains Mono";font-weight:700;font-size:11px;border:1.5px solid #8a8474;}
+</style></head><body>
+<div class="wrap">
+  <div class="row"><span class="label">Category pill</span>
+    <span class="b">Infrastructure</span><span class="b">Apparel</span><span class="b">Community</span>
+  </div>
+  <div class="row"><span class="label">Status pill</span>
+    <span class="b fill-black">Live</span><span class="b fill-red">Wager</span><span class="b fill-yellow">Ranked</span><span class="b green">Online</span><span class="b purple">Legendary</span>
+  </div>
+  <div class="row"><span class="label">Stats / level</span>
+    <span class="lv">Lv 14</span><span class="elo">2,134 ELO</span><span class="elo" style="color:#5a8a3a">+18</span><span class="elo" style="color:#b53d2c">−12</span>
+  </div>
+</div>
+</body></html>

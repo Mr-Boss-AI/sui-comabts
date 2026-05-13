@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Body & Stamps</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#15191f;font-family:"Poppins",sans-serif;color:#e8e2d4;padding:0;}
+  .wrap{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:24px;}
+  .col{display:flex;flex-direction:column;gap:8px;}
+  .meta{font-family:"JetBrains Mono",monospace;font-size:10px;color:#8a8474;}
+  .body-lg{font-size:18px;line-height:1.45;}
+  .body{font-size:16px;line-height:1.45;}
+  .body-sm{font-size:14px;line-height:1.45;}
+  .stamps{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .stamp{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:4px 10px;border-radius:999px;background:#0a0d12;color:#e8e2d4;}
+  .stamp.red{background:#b53d2c;}
+  .stamp.yellow{background:#c89a3f;color:#0a0d12;}
+  .stamp.outline{background:#15191f;color:#e8e2d4;border:1.5px solid #8a8474;}
+</style></head><body>
+<div class="wrap">
+  <div class="col">
+    <span class="meta">Body LG · 18 / 400</span>
+    <p class="body-lg" style="margin:0">Mint your fighter, gear up, and lock in real SUI on a wager fight.</p>
+    <span class="meta" style="margin-top:8px">Body · 16 / 400</span>
+    <p class="body" style="margin:0">Server-authoritative resolution. 20s turn timer. 95/5 split to the winner. Reconnect grace pauses the fight if your wifi blips.</p>
+    <span class="meta" style="margin-top:8px">Body SM · 14 / 400</span>
+    <p class="body-sm" style="margin:0;color:#8a8474">Testnet demo — characters and items reset on server restart.</p>
+  </div>
+  <div class="col">
+    <span class="meta">Stamps · 11 / 700 / +12% tracking</span>
+    <div class="stamps">
+      <span class="stamp">Infrastructure</span>
+      <span class="stamp red">Wager</span>
+      <span class="stamp yellow">Ranked</span>
+      <span class="stamp outline">Community</span>
+      <span class="stamp">Apparel</span>
+    </div>
+    <span class="meta" style="margin-top:8px">Used for category badges + rarity pills + nav meta.</span>
+  </div>
+</div>
+</body></html>

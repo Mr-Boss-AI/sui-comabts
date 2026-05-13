@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Stat Colors</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#15191f;font-family:"Poppins",sans-serif;}
+  .wrap{padding:20px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .stat{border:2px solid #e8e2d4;border-radius:12px;overflow:hidden;box-shadow:4px 4px 0 0 #000;background:#15191f;}
+  .top{height:60px;display:flex;align-items:center;justify-content:center;font-family:"Slackey";font-size:32px;color:#e8e2d4;}
+  .body{padding:10px 14px;border-top:2px solid #e8e2d4;display:flex;flex-direction:column;gap:2px;}
+  .label{font-weight:800;font-size:14px;letter-spacing:-0.01em;}
+  .hex{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:10px;color:#8a8474;}
+  .stamp{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#e8e2d4;background:#0a0d12;padding:3px 6px;border-radius:4px;align-self:flex-start;margin-top:4px;}
+</style></head><body>
+<div class="wrap">
+  <div class="stat"><div class="top" style="background:#b53d2c;color:#e8e2d4;">STR</div><div class="body"><span class="label">Strength</span><span class="hex">#b53d2c</span><span class="stamp">Damage</span></div></div>
+  <div class="stat"><div class="top" style="background:#3a6a9a;color:#e8e2d4;">DEX</div><div class="body"><span class="label">Dexterity</span><span class="hex">#3a6a9a</span><span class="stamp">Evasion</span></div></div>
+  <div class="stat"><div class="top" style="background:#7a3a8a;color:#e8e2d4;">INT</div><div class="body"><span class="label">Intuition</span><span class="hex">#7a3a8a</span><span class="stamp">Crit</span></div></div>
+  <div class="stat"><div class="top" style="background:#c89a3f;">END</div><div class="body"><span class="label">Endurance</span><span class="hex">#c89a3f</span><span class="stamp">Tank</span></div></div>
+</div>
+</body></html>

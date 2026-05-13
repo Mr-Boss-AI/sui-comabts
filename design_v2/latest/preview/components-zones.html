@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Zone Selector</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#c89a3f;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:24px;display:flex;gap:24px;align-items:center;justify-content:center;}
+  .panel{background:#15191f;border:3px solid #e8e2d4;border-radius:14px;box-shadow:6px 6px 0 0 #000;padding:16px 18px;}
+  .ttl{font-family:"Slackey";font-size:22px;text-align:center;margin-bottom:10px;}
+  .stack{display:flex;flex-direction:column;gap:6px;width:160px;}
+  .z{display:flex;align-items:center;justify-content:space-between;border:2px solid #e8e2d4;border-radius:8px;padding:8px 12px;background:#15191f;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;}
+  .z .k{font-family:"JetBrains Mono";font-size:11px;color:#9a958a;}
+  .z.attack{background:#b53d2c;color:#e8e2d4;box-shadow:3px 3px 0 0 #000;}
+  .z.block{background:#0a0d12;color:#c89a3f;}
+  .z.both{background:#c89a3f;color:#0a0d12;box-shadow:3px 3px 0 0 #b53d2c;}
+  .legend{display:flex;gap:8px;margin-top:10px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#e8e2d4;}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block;border:1.5px solid #8a8474;vertical-align:middle;margin-right:4px;}
+</style></head><body>
+<div class="wrap">
+  <div class="panel">
+    <div class="ttl">Attack</div>
+    <div class="stack">
+      <div class="z attack">Head<span class="k">1</span></div>
+      <div class="z">Chest<span class="k">2</span></div>
+      <div class="z attack">Stomach<span class="k">3</span></div>
+      <div class="z">Belt<span class="k">4</span></div>
+      <div class="z">Legs<span class="k">5</span></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="ttl">Block</div>
+    <div class="stack">
+      <div class="z">Head<span class="k">Q</span></div>
+      <div class="z block">Chest<span class="k">W</span></div>
+      <div class="z block">Stomach<span class="k">E</span></div>
+      <div class="z block">Belt<span class="k">R</span></div>
+      <div class="z">Legs<span class="k">T</span></div>
+    </div>
+    <div class="legend">
+      <span><i class="dot" style="background:#b53d2c"></i>Attack</span>
+      <span><i class="dot" style="background:#0a0d12"></i>Block</span>
+    </div>
+  </div>
+</div>
+</body></html>
