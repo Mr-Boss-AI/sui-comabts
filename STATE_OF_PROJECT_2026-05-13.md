@@ -530,13 +530,110 @@ cc868ad feat(phase-2): foundation — v2 design tokens + fonts globally applied
 
 What's still open in Phase 2 (subsequent sessions):
 
-- Arena screen redesign (queue, matchmaking, wager lobby)
-- Marketplace redesign (browser, kiosk panel, item cards)
-- Tavern + Hall of Fame already match v2 aesthetically — light pass only
-- Fight Arena combat UI redesign
-- Navbar + town hub redesign
+- Per-screen polish via Claude Design (now that the global system is
+  applied uniformly, individual screens can be iterated at low credit
+  cost — feed the deployed code as context for each pass)
+- Real NFT art commissioning for character portraits + new item
+  catalog assets
 - v5.1 contract republish bundle (separate branch, after UI lock-in)
 - Fresh wallets / characters / NFT catalog for v5.1 testnet
+- Mobile-responsive audit (Phase 2 is desktop-first; mobile follows)
+
+### Phase 2 — App-wide v2 sweep (2026-05-13, later)
+
+After the first Character-screen ship, user feedback was visual:
+"structural layout is right but slots too small, ornament too faint,
+bronze accents missing across the rest of the app". This sweep
+applies the v2 system to every screen + component in one comprehensive
+pass.
+
+#### Commits (chronological, on `feature/phase-2-design` after the
+initial Character ship at `92f6f23` / docs at `321be9a`):
+
+```
+075606a feat(phase-2): Character — bigger slots, flipped gloves/bracers, ornate tribal panel
+e59a9b7 feat(phase-2): shared v2 primitives + global chrome (Navbar, tabs, testnet banner)
+e738c33 feat(phase-2): PlayerProfileModal — shared v2 surface (Tavern + HoF)
+69b2b43 feat(phase-2): Tavern — chat + sidebar + DM panel in v2
+5c66660 feat(phase-2): Hall of Fame — v2 leaderboard with bronze-rim table + chip filters
+d00a8af feat(phase-2): Arena — chunky fight-type tiles + bronze wager form
+9a7358c feat(phase-2): Marketplace + ItemCard — rarity-rim listings, bronze kiosk
+8086b69 feat(phase-2): Fight room — HP bars, zones, damage log, timer, reconnect banner
+8bfe284 feat(phase-2): modals — LevelUp, StatAllocate, ItemDetail in v2
+7e7f5cb feat(phase-2): toasts + fight history — v2 forged-plate treatment
+dca9a76 feat(phase-2): inventory + remaining toasts + fight result + reset action
+87dc505 test(phase-2): qa-v2-primitives — 127-assertion structural gauntlet
+```
+
+#### What landed
+
+**Character screen v2 ship (after live QA feedback)**:
+- Slot dimensions bumped 88×100 → 145×170 (golden-ratio'ish, matches
+  the user's hand-mocked reference image)
+- Slot mapping flipped per user QA — left col[2] is now v5.1 future
+  Bracers (ghosted), right col canonical Gloves moved BELOW the
+  3-ring row
+- Tribal ornament panel rebuilt with bold bronze flourishes, triple-
+  ring SUI medallion, four corner studs (was three thin grey lines)
+
+**Shared primitives** (`frontend/src/components/v2/index.tsx`):
+- `RimFrame` (bronze/steel/blood tones, padless option)
+- `DisplayTitle` (Slackey sizes sm/md/lg/xl)
+- `Stamp` (9 tones: default, bronze, blood, steel, common→legendary)
+- `BronzeButton` / `DangerButton` / `SteelButton` / `SecondaryButton`
+  / `GhostButton`
+- `V2Input` (bronze focus rim)
+- `V2Chip` (filter pill with active state + count + tone-coding)
+- `V2Tab` (combats.ru tab with bronze underline)
+- `ToneDivider`, `SectionLabel`
+
+**Cascade primitives** (`components/ui/{button,card,badge,modal}.tsx`):
+Rewritten to read from design-tokens-v2.css. Drop-in compatible —
+the ~20 consumer files inherit the v2 visuals without any further
+edits.
+
+**Screens retrofitted** (every one of them):
+- Navbar — Slackey wordmark, bronze SUI balance pill, parchment text
+- TownNav — bronze-underlined V2Tab row
+- Testnet banner — 3px blood-red left edge stamp, no orange tint
+- Character screen (already done)
+- PlayerProfileModal (shared by Tavern + HoF) — bronze rim, 10-slot
+  doll with v2 ProfileSlot, three tone-coded action buttons
+- TavernRoom + ChatPanel + PlayerSidebar — bronze rims, V2Chip
+  filters, parchment messages, mono timestamps, cyan-steel unread pip
+- DmPanel — bronze outer rim, bronze outgoing bubbles vs panel-2
+  incoming, 3px blood/bronze edges on error/SDK banners
+- Hall of Fame leaderboard — Slackey title, V2Chip level + build
+  filters with live counts, sort-arrow column headers, rank-coloured
+  ranks, bronze "Load more" pagination
+- Arena (MatchmakingQueue) — 3-up chunky fight-type tiles tone-coded
+  (steel/bronze/blood), bronze wager-create panel with 3px blood
+  left edge, V2-style stake input, mono balance display
+- Marketplace browser + MyKioskPanel — bronze rims, ItemCard
+  rewritten with 4px rarity left accent, mono SUI prices, bronze
+  Withdraw + List buttons, blood-red Delist
+- Inventory (right sidebar) — bronze rim, v2 chip category tabs,
+  action-panel rewires for Retrieve/Equip/List flows
+- Fight room — HpBar with threshold colours + critical pulse,
+  ZoneSelector tone-coded (Attack blood, Block steel), DamageLog
+  with tone-coded hit lines, TurnTimer Slackey digits with pulse,
+  OpponentDisconnectedBanner with bronze left edge
+- All modals — Item Detail (3px rarity NFT frame), Stat Allocate
+  (bronze +/− buttons per archetype row), Level Up (Slackey 44px
+  headline with bronze pulse-glow), Fight Result (Slackey 56px
+  YOU WIN / YOU LOSE)
+- ChallengePopup — bronze rim, Slackey "Challenge!" headline
+- All toasts — ErrorToast (sticky + auto-fade), FightRequestToasts
+  (tone-coded), DmToasts (steel-blue), all with hard plate shadows
+  and zero rounded-xl
+
+**Test gauntlet**: `qa-v2-primitives.ts` — **127 / 127 PASS** across
+9 sections. Pins token declarations, hex values, alias resolution,
+primitive exports, ui/* cascade absence of v1 debt, slot-flip
+preservation, font wiring.
+
+**Total static gauntlet**: All 32 suites pass. Project total:
+2377 / 2377 (was 2250 pre-phase-2-sweep + 127 new primitives gauntlet).
 
 ### Earlier sessions (referenced for completeness)
 
