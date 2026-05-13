@@ -6,6 +6,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { Navbar } from "./navbar";
 import { TownNav } from "./town-hub";
 import { CharacterCreation } from "@/components/character/character-creation";
+import { LandingPage } from "@/components/landing/landing-page";
 import type { AuthPhase } from "@/hooks/useGameStore";
 import { CharacterProfile } from "@/components/character/character-profile";
 import { FightArena } from "@/components/fight/fight-arena";
@@ -230,26 +231,13 @@ export function GameScreen() {
   const { state, dispatch } = useGame();
   const { character, fight, spectatingFight, authPhase } = state;
 
-  // Not connected
+  // Not connected — render the full Landing page composition.
   if (!account) {
     return (
       <div className="flex flex-col flex-1">
         <Navbar />
         <ErrorToast />
-        <div className="flex flex-col flex-1 items-center justify-center gap-8 p-4">
-          <div className="text-center">
-            <h1 className="text-5xl font-black tracking-tight mb-3">
-              SUI<span className="text-emerald-400">Combats</span>
-            </h1>
-            <p className="text-zinc-400 text-lg max-w-md mx-auto">
-              A blockchain PvP arena — connect your wallet, create a fighter,
-              gear up, and battle for SUI.
-            </p>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-sm text-zinc-500">Connect your Sui wallet to begin</p>
-          </div>
-        </div>
+        <LandingPage />
       </div>
     );
   }
