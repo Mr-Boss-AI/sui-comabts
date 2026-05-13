@@ -228,21 +228,29 @@ function main(): void {
   // Bracers must be a future placeholder, NOT canonical Gloves
   contains(charProfile, 'futureLabel="Bracers"', 'left col[2] is future Bracers');
   // Canonical gloves must live in the right column area (after the
-  // 3-ring row, before off-hand)
-  const ringRowIdx = charProfile.indexOf('Ring row — 3 ring slots');
+  // ring cluster, before off-hand). The Phase 2 layout sweep renamed
+  // the comment from "Ring row — 3 ring slots" to "Ring cluster" —
+  // accept either spelling.
+  const ringRowIdx = Math.max(
+    charProfile.indexOf('Ring row — 3 ring slots'),
+    charProfile.indexOf('Ring cluster'),
+  );
   const glovesIdx = charProfile.indexOf('slot="gloves"');
   const offhandIdx = charProfile.indexOf('slot="offhand"');
   if (ringRowIdx > 0 && glovesIdx > ringRowIdx && offhandIdx > glovesIdx) {
-    ok('right col: Ring row → Gloves (canonical) → Off-hand');
+    ok('right col: Ring cluster → Gloves (canonical) → Off-hand');
   } else {
     fail(
       'right col gloves ordering',
       `ringRow=${ringRowIdx}, gloves=${glovesIdx}, offhand=${offhandIdx}`,
     );
   }
-  // Slot sizes are bumped (BIG_W ≥ 140, BIG_H ≥ 165)
-  contains(charProfile, 'const BIG_W = 145', 'BIG_W = 145 (post-QA bump)');
-  contains(charProfile, 'const BIG_H = 170', 'BIG_H = 170 (post-QA bump)');
+  // Phase 2 layout sweep bumped the spec to the exact Claude Design
+  // pixel values: BIG = 216, CENTER (portrait + HP + ornament) = 462.
+  // The constants are inside `EquipmentFrame`; assert their presence.
+  contains(charProfile, 'const BIG = 216', 'BIG = 216 (layout sweep pixel spec)');
+  contains(charProfile, 'const CENTER = 462', 'CENTER = 462 (portrait square + HP bar width)');
+  contains(charProfile, 'const BELT_H = 102', 'BELT_H = 102 (bottom-left tile)');
 
   // ===========================================================================
   // [8] Hot-paths: every screen imports v2 primitives
