@@ -1,10 +1,19 @@
 "use client";
 
+/**
+ * Phase 2 v2 — Top navigation bar.
+ *
+ * Slackey wordmark with the COMBATS half in blood-red outlined in
+ * parchment (matching the design tool's hero treatment). Bronze rim
+ * separators between sections. Balance pill in bronze fill with the
+ * Sui mark.
+ */
+
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useGame } from "@/hooks/useGameStore";
 import { useWalletBalance } from "@/hooks/useWalletBalance";
-import { Badge } from "@/components/ui/badge";
+import { Stamp } from "@/components/v2";
 import { isSoundEnabled, toggleSound } from "@/lib/sounds";
 import { useState } from "react";
 
@@ -23,48 +32,123 @@ export function Navbar() {
   const [sound, setSound] = useState(isSoundEnabled());
 
   return (
-    <nav className="border-b border-amber-900/20 bg-[#08080a] sticky top-0 z-40 shadow-lg shadow-black/50">
-      <div className="max-w-7xl mx-auto px-4 h-12 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <span className="text-lg font-black tracking-tight">
-            SUI<span className="text-emerald-400">Combats</span>
+    <nav
+      style={{
+        background: "var(--sc-panel)",
+        borderBottom: "2px solid var(--sc-bronze-deep)",
+        position: "sticky",
+        top: 0,
+        zIndex: 40,
+        boxShadow: "0 2px 0 0 rgba(0,0,0,0.4)",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: "var(--container-max)",
+          margin: "0 auto",
+          padding: "0 18px",
+          height: 56,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <span
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 22,
+              lineHeight: 1,
+              color: "var(--sc-parchment)",
+              letterSpacing: "-0.01em",
+            }}
+          >
+            SUI<span style={{ color: "var(--sc-bronze)" }}>Combats</span>
           </span>
           {character && (
-            <div className="hidden sm:flex items-center gap-2 text-sm">
-              <span className="text-zinc-400">{character.name}</span>
-              <Badge variant="info">Lv.{character.level}</Badge>
-              <Badge variant="warning">{character.rating}</Badge>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                paddingLeft: 14,
+                borderLeft: "1px solid var(--sc-rim-2)",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--sc-parchment)",
+                }}
+              >
+                {character.name}
+              </span>
+              <Stamp tone="bronze">Lv {character.level}</Stamp>
+              <Stamp tone="default" outline>
+                {character.rating}
+              </Stamp>
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {account && (
             <span
-              className="hidden sm:inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-zinc-900 border border-zinc-700 text-amber-300"
               title={
                 balance.error
                   ? `Balance fetch failed: ${balance.error}`
                   : `${balance.mist.toString()} MIST`
               }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+                fontSize: 12,
+                padding: "5px 10px",
+                background: "var(--sc-bronze)",
+                color: "var(--sc-page)",
+                border: "1px solid var(--sc-bronze-deep)",
+                boxShadow: "var(--sh-plate-sm)",
+                letterSpacing: "0.02em",
+              }}
             >
-              <span className="text-zinc-500">SUI</span>
-              <span className="font-mono">
-                {balance.error ? "—" : formatSui(balance.sui)}
-              </span>
+              <span style={{ opacity: 0.7, fontWeight: 800 }}>SUI</span>
+              <span>{balance.error ? "—" : formatSui(balance.sui)}</span>
             </span>
           )}
           <button
             onClick={() => setSound(toggleSound())}
-            className="text-zinc-500 hover:text-zinc-300 text-sm"
             title={sound ? "Mute sounds" : "Enable sounds"}
+            style={{
+              background: "transparent",
+              border: 0,
+              color: "var(--fg-3)",
+              fontSize: 14,
+              cursor: "pointer",
+              padding: "4px 6px",
+              fontFamily: "var(--font-ui)",
+            }}
           >
             {sound ? "♪" : "♪̸"}
           </button>
-          {state.socket.connected ? (
-            <div className="w-2 h-2 rounded-full bg-emerald-500" title="Connected" />
-          ) : (
-            <div className="w-2 h-2 rounded-full bg-red-500" title="Disconnected" />
-          )}
+          <span
+            title={state.socket.connected ? "Connected" : "Disconnected"}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: state.socket.connected
+                ? "var(--rarity-uncommon)"
+                : "var(--sc-blood)",
+              boxShadow: state.socket.connected
+                ? "0 0 6px var(--rarity-uncommon)"
+                : "0 0 6px var(--sc-blood)",
+            }}
+          />
           <ConnectButton />
         </div>
       </div>

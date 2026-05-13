@@ -13,10 +13,14 @@ import { MatchmakingQueue } from "@/components/fight/matchmaking-queue";
 import { SpectateView } from "@/components/fight/spectate-view";
 import { Inventory } from "@/components/items/inventory";
 import { ChatPanel } from "@/components/social/chat-panel";
-import { PlayerList } from "@/components/social/player-list";
 import { ChallengePopup } from "@/components/social/challenge-popup";
 import { Leaderboard } from "@/components/social/leaderboard";
 import { FightHistory } from "@/components/social/fight-history";
+import { TavernRoom } from "@/components/social/tavern-room";
+import { PlayerProfileModal } from "@/components/social/player-profile-modal";
+import { FightRequestToasts } from "@/components/social/fight-request-toasts";
+import { DmToasts } from "@/components/social/dm-toasts";
+import { DmPanel } from "@/components/social/dm-panel";
 import { MarketplaceBrowser } from "@/components/marketplace/marketplace-browser";
 import { MyKioskPanel } from "@/components/marketplace/my-kiosk-panel";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -209,30 +213,7 @@ function AreaContent() {
         </div>
       );
     case "tavern":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Card className="h-[500px] flex flex-col">
-              <CardHeader>
-                <span className="font-semibold">Tavern Chat</span>
-              </CardHeader>
-              <CardBody className="flex-1 p-0 min-h-0">
-                <ChatPanel />
-              </CardBody>
-            </Card>
-          </div>
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <span className="font-semibold">Players</span>
-              </CardHeader>
-              <CardBody>
-                <PlayerList />
-              </CardBody>
-            </Card>
-          </div>
-        </div>
-      );
+      return <TavernRoom />;
     case "hall_of_fame":
       return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -335,14 +316,45 @@ export function GameScreen() {
       <Navbar />
       <ErrorToast />
       <LevelUpModal />
-      <div className="max-w-7xl mx-auto w-full px-4 py-4 space-y-3">
-        <div className="bg-amber-900/30 border border-amber-700/40 rounded-lg px-4 py-2 text-xs text-amber-300/80 text-center">
-          Testnet demo — characters and items reset on server restart
+      <div
+        style={{
+          maxWidth: "var(--container-max)",
+          margin: "0 auto",
+          width: "100%",
+          padding: "14px 18px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div
+          style={{
+            background: "var(--sc-panel-2)",
+            border: "1px solid var(--sc-blood-deep)",
+            borderLeft: "3px solid var(--sc-blood)",
+            color: "var(--fg-2)",
+            padding: "8px 14px",
+            fontFamily: "var(--font-ui)",
+            fontWeight: 600,
+            fontSize: 11,
+            letterSpacing: "0.04em",
+            textAlign: "center",
+            boxShadow: "var(--sh-plate-sm)",
+          }}
+        >
+          <span style={{ color: "var(--sc-blood)", fontWeight: 800 }}>TESTNET DEMO</span>
+          <span style={{ color: "var(--fg-3)", margin: "0 8px" }}>—</span>
+          characters and items reset on server restart
         </div>
         <TownNav />
         <AreaContent />
       </div>
       <ChallengePopup />
+      {/* Bucket 3 Tavern global mounts — surface above every area. */}
+      <FightRequestToasts />
+      <DmToasts />
+      <PlayerProfileModal />
+      <DmPanel />
     </div>
   );
 }
