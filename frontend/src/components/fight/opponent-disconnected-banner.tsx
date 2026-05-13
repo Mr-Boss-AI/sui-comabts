@@ -57,32 +57,81 @@ export function OpponentDisconnectedBanner() {
     <div
       role="status"
       aria-live="polite"
-      className="rounded-xl border border-amber-700/50 bg-amber-950/40 px-4 py-3 flex flex-col gap-2"
+      style={{
+        background: "var(--sc-panel-2)",
+        border: "1px solid var(--sc-bronze-deep)",
+        borderLeft: "3px solid var(--sc-bronze)",
+        borderRadius: "var(--r-card)",
+        padding: "10px 14px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        boxShadow: "var(--sh-plate-sm)",
+        fontFamily: "var(--font-ui)",
+      }}
     >
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-amber-100 font-semibold">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          fontSize: 13,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: "var(--sc-bronze)",
+              animation: "pulse 1.4s ease-in-out infinite",
+              boxShadow: "0 0 6px var(--sc-bronze-hot)",
+            }}
+          />
+          <span style={{ color: "var(--sc-bronze)", fontWeight: 800 }}>
             {subjectLabel} disconnected
           </span>
-          <span className="text-amber-300/80">
+          <span style={{ color: "var(--fg-2)" }}>
             — {verb} reconnecting. Turn timer paused.
           </span>
         </div>
-        <div className="text-amber-200 font-mono tabular-nums text-sm">
+        <div
+          style={{
+            color: "var(--sc-bronze)",
+            fontFamily: "var(--font-mono)",
+            fontVariantNumeric: "tabular-nums",
+            fontWeight: 700,
+            fontSize: 14,
+          }}
+        >
           {remainingSec}s
         </div>
       </div>
-      <div className="w-full bg-amber-900/40 h-1 rounded-full overflow-hidden">
+      <div
+        style={{
+          width: "100%",
+          height: 3,
+          background: "var(--sc-page)",
+          overflow: "hidden",
+          borderRadius: 1,
+        }}
+      >
         <div
-          className="bg-amber-400 h-1 rounded-full transition-all duration-200"
-          style={{ width: `${pct}%` }}
+          style={{
+            height: 3,
+            background: "var(--sc-bronze)",
+            width: `${pct}%`,
+            transition: "width 200ms linear",
+          }}
         />
       </div>
-      <div className="text-xs text-amber-300/70">
+      <div style={{ fontSize: 11, color: "var(--fg-3)" }}>
         If no reconnect within {totalSec}s the fight forfeits to the connected
         player.
       </div>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
     </div>
   );
 }

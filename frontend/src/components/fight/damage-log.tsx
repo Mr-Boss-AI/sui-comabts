@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * Phase 2 v2 — Damage Log.
+ *
+ * Gunmetal background, parchment damage numbers, bronze for crits,
+ * blood-red for HP loss, steel-blue for blocks, weathered grey for
+ * misses. Matches design_v2/latest/preview/components-damagelog.html.
+ */
+
 import { useRef, useEffect } from "react";
 import type { TurnResult, HitResult, FightState } from "@/types/game";
 import { ZONE_LABELS } from "@/types/game";
@@ -21,8 +29,17 @@ export function DamageLog({ log, fight, myAddress }: DamageLogProps) {
 
   if (log.length === 0) {
     return (
-      <div className="text-zinc-600 text-sm text-center py-4">
-        Waiting for combat...
+      <div
+        style={{
+          fontSize: 12,
+          color: "var(--fg-3)",
+          textAlign: "center",
+          padding: "16px 0",
+          fontFamily: "var(--font-ui)",
+          fontStyle: "italic",
+        }}
+      >
+        Waiting for combat…
       </div>
     );
   }
@@ -32,41 +49,82 @@ export function DamageLog({ log, fight, myAddress }: DamageLogProps) {
   return (
     <div
       ref={scrollRef}
-      className="space-y-3 overflow-y-auto max-h-[400px] pr-2 scrollbar-thin"
+      className="scroll-plate"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        overflowY: "auto",
+        maxHeight: 420,
+        paddingRight: 8,
+        fontFamily: "var(--font-ui)",
+      }}
     >
       {log.map((turn) => {
-        // My attacks hit the opponent (playerB.hits if I'm A, playerA.hits if I'm B)
         const myHits = isPlayerA ? turn.playerB.hits : turn.playerA.hits;
         const oppHits = isPlayerA ? turn.playerA.hits : turn.playerB.hits;
-        const myActions = isPlayerA ? turn.playerA.actions : turn.playerB.actions;
-        const oppActions = isPlayerA ? turn.playerB.actions : turn.playerA.actions;
-
         return (
           <div
             key={turn.turn}
-            className="border-l-2 border-zinc-700 pl-3 py-1"
+            style={{
+              borderLeft: "2px solid var(--sc-bronze-deep)",
+              paddingLeft: 12,
+              paddingTop: 4,
+              paddingBottom: 4,
+            }}
           >
-            <div className="text-xs text-zinc-500 font-bold mb-1">
-              ── Turn {turn.turn} ──
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 12,
+                color: "var(--sc-bronze)",
+                marginBottom: 4,
+                letterSpacing: "0.04em",
+              }}
+            >
+              Turn {turn.turn}
             </div>
-
-            {/* My attacks */}
             {myHits.map((hit, i) => (
-              <div key={`my-${i}`} className={`text-sm ${getHitStyle(hit, true)}`}>
+              <div
+                key={`my-${i}`}
+                style={{
+                  fontSize: 12,
+                  marginBottom: 2,
+                  ...hitStyleOf(hit, true),
+                }}
+              >
                 {formatMyAttack(hit)}
               </div>
             ))}
-
-            {/* Opponent attacks */}
             {oppHits.map((hit, i) => (
-              <div key={`opp-${i}`} className={`text-sm ${getHitStyle(hit, false)}`}>
+              <div
+                key={`opp-${i}`}
+                style={{
+                  fontSize: 12,
+                  marginBottom: 2,
+                  ...hitStyleOf(hit, false),
+                }}
+              >
                 {formatOppAttack(hit)}
               </div>
             ))}
-
-            {/* HP summary after turn */}
-            <div className="text-xs text-zinc-500 mt-1 font-mono">
-              Your HP: {getHpAfterTurn(turn, isPlayerA)} | Opponent HP: {getHpAfterTurn(turn, !isPlayerA)}
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--fg-3)",
+                marginTop: 4,
+              }}
+            >
+              Your HP{" "}
+              <span style={{ color: "var(--sc-parchment)", fontWeight: 700 }}>
+                {getHpAfterTurn(turn, isPlayerA)}
+              </span>
+              {"  ·  "}
+              Foe HP{" "}
+              <span style={{ color: "var(--sc-parchment)", fontWeight: 700 }}>
+                {getHpAfterTurn(turn, !isPlayerA)}
+              </span>
             </div>
           </div>
         );
@@ -77,25 +135,27 @@ export function DamageLog({ log, fight, myAddress }: DamageLogProps) {
 
 function formatMyAttack(hit: HitResult): string {
   const zone = ZONE_LABELS[hit.zone];
-  if (hit.blocked) return `You attacked ${zone} → BLOCKED`;
-  if (hit.dodged) return `You attacked ${zone} → DODGED`;
-  if (hit.crit) return `You attacked ${zone} → CRIT! ${hit.damage.toFixed(1)} damage`;
-  return `You attacked ${zone} → HIT for ${hit.damage.toFixed(1)} damage`;
+  if (hit.blocked) return `You → ${zone} · BLOCKED`;
+  if (hit.dodged) return `You → ${zone} · DODGED`;
+  if (hit.crit) return `You → ${zone} · CRIT ${hit.damage.toFixed(1)}`;
+  return `You → ${zone} · ${hit.damage.toFixed(1)}`;
 }
 
 function formatOppAttack(hit: HitResult): string {
   const zone = ZONE_LABELS[hit.zone];
-  if (hit.blocked) return `Opponent attacked ${zone} → YOU BLOCKED`;
-  if (hit.dodged) return `Opponent attacked ${zone} → YOU DODGED`;
-  if (hit.crit) return `Opponent attacked ${zone} → CRIT! ${hit.damage.toFixed(1)} damage`;
-  return `Opponent attacked ${zone} → HIT for ${hit.damage.toFixed(1)} damage`;
+  if (hit.blocked) return `Foe → ${zone} · YOU BLOCKED`;
+  if (hit.dodged) return `Foe → ${zone} · YOU DODGED`;
+  if (hit.crit) return `Foe → ${zone} · CRIT ${hit.damage.toFixed(1)}`;
+  return `Foe → ${zone} · ${hit.damage.toFixed(1)}`;
 }
 
-function getHitStyle(hit: HitResult, isMyAttack: boolean): string {
-  if (hit.blocked) return isMyAttack ? "text-zinc-500" : "text-blue-400";
-  if (hit.dodged) return isMyAttack ? "text-zinc-500" : "text-cyan-400";
-  if (hit.crit) return isMyAttack ? "text-red-400 font-bold" : "text-red-500 font-bold";
-  return isMyAttack ? "text-emerald-400" : "text-orange-400";
+function hitStyleOf(hit: HitResult, isMine: boolean): { color: string; fontWeight: number } {
+  if (hit.blocked) return { color: "var(--sc-steel)", fontWeight: 600 };
+  if (hit.dodged) return { color: "var(--fg-3)", fontWeight: 500 };
+  if (hit.crit) return { color: "var(--sc-bronze)", fontWeight: 800 };
+  return isMine
+    ? { color: "var(--rarity-uncommon)", fontWeight: 700 }
+    : { color: "var(--sc-blood)", fontWeight: 700 };
 }
 
 function getHpAfterTurn(turn: TurnResult, isA: boolean): string {

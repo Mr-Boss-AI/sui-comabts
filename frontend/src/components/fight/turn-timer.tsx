@@ -49,33 +49,63 @@ export function TurnTimer({ deadline, onExpired, frozen, paused, pausedRemaining
   }, [paused, pausedRemainingMs]);
 
   const pct = Math.max(0, (remaining / TURN_SECONDS) * 100);
-  const color =
-    remaining > 15 ? "bg-emerald-500" : remaining > 5 ? "bg-amber-500" : "bg-red-500";
-  const textColor =
+  // Tone-color the timer per design system threshold (matches HpBar).
+  const fill =
     remaining > 15
-      ? "text-emerald-400"
+      ? "var(--rarity-uncommon)"
       : remaining > 5
-        ? "text-amber-400"
-        : "text-red-400 animate-pulse";
+        ? "var(--sc-bronze)"
+        : "var(--sc-blood)";
+  const textColor = paused ? "var(--sc-bronze)" : fill;
 
   return (
-    <div className="text-center">
+    <div style={{ textAlign: "center", fontFamily: "var(--font-ui)" }}>
       <div
-        className={`text-3xl font-bold font-mono ${
-          paused ? "text-amber-300" : textColor
-        }`}
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 38,
+          fontWeight: 400,
+          color: textColor,
+          lineHeight: 1,
+          letterSpacing: "0.02em",
+          animation: !paused && remaining <= 5 ? "pulse-timer 0.6s ease-in-out infinite" : undefined,
+        }}
       >
         {remaining}
       </div>
-      <div className="w-32 mx-auto bg-zinc-800 h-1.5 rounded-full overflow-hidden mt-1">
+      <div
+        style={{
+          width: 128,
+          margin: "6px auto 0",
+          background: "var(--sc-page)",
+          height: 4,
+          overflow: "hidden",
+          border: "1px solid var(--sc-rim-2)",
+          borderRadius: 1,
+        }}
+      >
         <div
-          className={`${paused ? "bg-amber-500/60" : color} h-1.5 rounded-full transition-all duration-200`}
-          style={{ width: `${pct}%` }}
+          style={{
+            background: paused ? "rgba(200,154,63,.55)" : fill,
+            height: "100%",
+            width: `${pct}%`,
+            transition: "width 200ms linear",
+          }}
         />
       </div>
-      <div className="text-xs text-zinc-500 mt-1">
+      <div
+        style={{
+          fontSize: 9,
+          fontWeight: 800,
+          letterSpacing: "var(--ls-stamp)",
+          textTransform: "uppercase",
+          color: "var(--fg-3)",
+          marginTop: 4,
+        }}
+      >
         {paused ? "paused" : "seconds"}
       </div>
+      <style>{`@keyframes pulse-timer{0%,100%{opacity:1}50%{opacity:.55}}`}</style>
     </div>
   );
 }

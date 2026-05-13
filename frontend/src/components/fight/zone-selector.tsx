@@ -70,11 +70,21 @@ export function ZoneSelector({
   }
 
   return (
-    <div className="flex gap-6 items-start">
-      {/* Attack body */}
-      <div className="text-center">
-        <div className="text-xs text-red-400 font-bold mb-2 uppercase tracking-wider">Attack</div>
-        <svg viewBox="0 0 100 200" className="w-28 h-56">
+    <div style={{ display: "flex", gap: 24, alignItems: "flex-start", fontFamily: "var(--font-ui)" }}>
+      {/* Attack body — blood-red selected */}
+      <div style={{ textAlign: "center" }}>
+        <div
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 18,
+            color: "var(--sc-blood)",
+            marginBottom: 8,
+            letterSpacing: "0.01em",
+          }}
+        >
+          Attack
+        </div>
+        <svg viewBox="0 0 100 200" style={{ width: 112, height: 224 }}>
           {ZONES.map((zone) => {
             const isSelected = selectedAttack.includes(zone);
             const path = ZONE_PATHS[zone];
@@ -82,19 +92,38 @@ export function ZoneSelector({
               <g key={zone}>
                 <path
                   d={path.d}
-                  fill={isSelected ? "rgba(220, 38, 38, 0.5)" : "rgba(63, 63, 70, 0.3)"}
-                  stroke={isSelected ? "#ef4444" : "#52525b"}
-                  strokeWidth={isSelected ? "2" : "1"}
-                  className={`${disabled ? "pointer-events-none opacity-40" : "cursor-pointer hover:fill-red-900/40 hover:stroke-red-500"} transition-all`}
+                  fill={isSelected ? "rgba(181, 61, 44, 0.55)" : "rgba(26, 31, 40, 0.85)"}
+                  stroke={isSelected ? "var(--sc-blood)" : "var(--sc-rim-2)"}
+                  strokeWidth={isSelected ? 2 : 1}
+                  style={{
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    opacity: disabled ? 0.4 : 1,
+                    pointerEvents: disabled ? "none" : "auto",
+                    transition: "all var(--d-fast)",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!disabled && !isSelected) {
+                      e.currentTarget.setAttribute("fill", "rgba(181, 61, 44, 0.25)");
+                      e.currentTarget.setAttribute("stroke", "var(--sc-blood)");
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!disabled && !isSelected) {
+                      e.currentTarget.setAttribute("fill", "rgba(26, 31, 40, 0.85)");
+                      e.currentTarget.setAttribute("stroke", "var(--sc-rim-2)");
+                    }
+                  }}
                   onClick={() => !disabled && onAttackToggle(zone)}
                 />
                 <text
-                  x="50" y={path.labelY}
+                  x="50"
+                  y={path.labelY}
                   textAnchor="middle"
-                  className="pointer-events-none select-none"
-                  fill={isSelected ? "#fca5a5" : "#71717a"}
+                  fill={isSelected ? "var(--sc-parchment)" : "var(--fg-3)"}
                   fontSize="9"
-                  fontWeight="bold"
+                  fontWeight="800"
+                  fontFamily="var(--font-ui)"
+                  style={{ pointerEvents: "none", userSelect: "none", letterSpacing: ".06em", textTransform: "uppercase" }}
                 >
                   {ZONE_LABELS[zone]}
                 </text>
@@ -102,13 +131,33 @@ export function ZoneSelector({
             );
           })}
         </svg>
-        <div className="text-xs text-zinc-500 mt-1">{selectedAttack.length}/{maxAttacks}</div>
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--sc-blood)",
+            marginTop: 4,
+            fontWeight: 700,
+          }}
+        >
+          {selectedAttack.length}/{maxAttacks}
+        </div>
       </div>
 
-      {/* Block body */}
-      <div className="text-center">
-        <div className="text-xs text-blue-400 font-bold mb-2 uppercase tracking-wider">Block</div>
-        <svg viewBox="0 0 100 200" className="w-28 h-56">
+      {/* Block body — steel-blue selected */}
+      <div style={{ textAlign: "center" }}>
+        <div
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 18,
+            color: "var(--sc-steel)",
+            marginBottom: 8,
+            letterSpacing: "0.01em",
+          }}
+        >
+          Block
+        </div>
+        <svg viewBox="0 0 100 200" style={{ width: 112, height: 224 }}>
           {ZONES.map((zone) => {
             const isSelected = selectedBlock.includes(zone);
             const path = ZONE_PATHS[zone];
@@ -116,19 +165,38 @@ export function ZoneSelector({
               <g key={zone}>
                 <path
                   d={path.d}
-                  fill={isSelected ? "rgba(37, 99, 235, 0.5)" : "rgba(63, 63, 70, 0.3)"}
-                  stroke={isSelected ? "#3b82f6" : "#52525b"}
-                  strokeWidth={isSelected ? "2" : "1"}
-                  className={`${disabled ? "pointer-events-none opacity-40" : "cursor-pointer hover:fill-blue-900/40 hover:stroke-blue-500"} transition-all`}
+                  fill={isSelected ? "rgba(109, 143, 163, 0.55)" : "rgba(26, 31, 40, 0.85)"}
+                  stroke={isSelected ? "var(--sc-steel)" : "var(--sc-rim-2)"}
+                  strokeWidth={isSelected ? 2 : 1}
+                  style={{
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    opacity: disabled ? 0.4 : 1,
+                    pointerEvents: disabled ? "none" : "auto",
+                    transition: "all var(--d-fast)",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!disabled && !isSelected) {
+                      e.currentTarget.setAttribute("fill", "rgba(109, 143, 163, 0.22)");
+                      e.currentTarget.setAttribute("stroke", "var(--sc-steel)");
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!disabled && !isSelected) {
+                      e.currentTarget.setAttribute("fill", "rgba(26, 31, 40, 0.85)");
+                      e.currentTarget.setAttribute("stroke", "var(--sc-rim-2)");
+                    }
+                  }}
                   onClick={() => !disabled && handleBlockClick(zone)}
                 />
                 <text
-                  x="50" y={path.labelY}
+                  x="50"
+                  y={path.labelY}
                   textAnchor="middle"
-                  className="pointer-events-none select-none"
-                  fill={isSelected ? "#93c5fd" : "#71717a"}
+                  fill={isSelected ? "var(--sc-parchment)" : "var(--fg-3)"}
                   fontSize="9"
-                  fontWeight="bold"
+                  fontWeight="800"
+                  fontFamily="var(--font-ui)"
+                  style={{ pointerEvents: "none", userSelect: "none", letterSpacing: ".06em", textTransform: "uppercase" }}
                 >
                   {ZONE_LABELS[zone]}
                 </text>
@@ -136,7 +204,15 @@ export function ZoneSelector({
             );
           })}
         </svg>
-        <div className="text-xs text-zinc-500 mt-1">
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--sc-steel)",
+            marginTop: 4,
+            fontWeight: 700,
+          }}
+        >
           {selectedBlock.length}/{maxBlocks}
           {shieldMode && " line"}
         </div>
