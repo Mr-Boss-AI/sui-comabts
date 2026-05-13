@@ -1063,6 +1063,7 @@ function handleGetLeaderboard(client: ConnectedClient): void {
     rating: e.rating,
     wins: e.wins,
     losses: e.losses,
+    stats: e.stats,
   }));
   send(client, {
     type: 'leaderboard',

@@ -259,6 +259,11 @@ export interface LeaderboardEntry {
   wins: number;
   losses: number;
   level: number;
+  /** Bucket 3 Hall of Fame — used by the frontend's build classifier
+   *  (Crit / Evasion / Tank / Hybrid). Optional so the wire stays
+   *  backward-compat with any older client; the classifier returns
+   *  'hybrid' when stats are missing. */
+  stats?: CharacterStats;
 }
 
 // === Fight History ===

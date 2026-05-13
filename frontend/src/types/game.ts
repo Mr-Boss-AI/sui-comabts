@@ -266,6 +266,14 @@ export interface ChatMessage {
 // ===== PRESENCE =====
 export type PlayerStatus = "online" | "in_fight" | "in_marketplace" | "idle";
 
+export type TavernRoom =
+  | "tavern"
+  | "character"
+  | "arena"
+  | "marketplace"
+  | "hall_of_fame"
+  | "fight";
+
 export interface OnlinePlayer {
   walletAddress: string;
   name: string;
@@ -273,6 +281,11 @@ export interface OnlinePlayer {
   rating: number;
   status: PlayerStatus;
   fightId?: string;
+  /** Bucket 3 — which surface the player is currently in. Driven by
+   *  the server's presence service; updated via `enter_room` WS
+   *  messages. Used by the player sidebar to render a small badge
+   *  ("⚒ Crafting" / "🛒 Shopping" / etc.). */
+  currentRoom?: TavernRoom;
 }
 
 // ===== LEADERBOARD =====
@@ -284,6 +297,10 @@ export interface LeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
+  /** Bucket 3 Hall of Fame — optional stat block used by the build
+   *  classifier (Crit / Evasion / Tank / Hybrid). Returns 'hybrid'
+   *  when missing so older server builds stay compatible. */
+  stats?: CharacterStats;
 }
 
 // ===== MARKETPLACE =====

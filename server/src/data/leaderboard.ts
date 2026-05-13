@@ -28,6 +28,7 @@ export function getLeaderboard(limit: number = 100): LeaderboardEntry[] {
     wins: char.wins,
     losses: char.losses,
     level: char.level,
+    stats: { ...char.stats },
   }));
 }
 
