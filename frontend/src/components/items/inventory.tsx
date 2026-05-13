@@ -173,18 +173,38 @@ export function Inventory() {
         <CardHeader>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <span
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 18,
-                  color: "var(--sc-bronze)",
-                }}
-              >
-                Inventory
-                <span style={{ marginLeft: 8, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--fg-3)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    fontSize: 26,
+                    lineHeight: 1.0,
+                    color: "var(--sc-parchment)",
+                    letterSpacing: "0.01em",
+                  }}
+                >
+                  Inventory
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: 26,
+                    height: 22,
+                    padding: "0 8px",
+                    background: "var(--sc-page)",
+                    color: "var(--sc-bronze)",
+                    border: "1.5px solid var(--sc-bronze)",
+                    borderRadius: "var(--r-pill)",
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 800,
+                    fontSize: 12,
+                  }}
+                >
                   {allItems.length}
                 </span>
-              </span>
+              </div>
               <select
                 value={filterRarity}
                 onChange={(e) =>

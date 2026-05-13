@@ -255,14 +255,24 @@ function SlotGlyph({ size, color }: { size: number; color: string }) {
 
 /* ─────────────────────────── HP bar ───────────────────────────────── */
 
-function HpBar({ current, max, width }: { current: number; max: number; width: number }) {
+function HpBar({
+  current,
+  max,
+  width,
+  height = 40,
+}: {
+  current: number;
+  max: number;
+  width: number;
+  height?: number;
+}) {
   const pct = max > 0 ? Math.min(100, (current / max) * 100) : 0;
   return (
     <div
       style={{
         position: "relative",
         width,
-        height: 40,
+        height,
         background: "var(--sc-page)",
         border: "2px solid var(--sc-bronze)",
         boxShadow: "var(--rim-top), inset 0 -2px 0 rgba(0,0,0,.55)",
@@ -788,6 +798,7 @@ function EquipmentFrame({
   onPortrait,
   player,
   hp,
+  scale = 1,
 }: {
   eq: EquipmentSlots;
   dirtySlots: Set<keyof EquipmentSlots>;
@@ -796,13 +807,21 @@ function EquipmentFrame({
   onPortrait: () => void;
   player: { name: string; level: number; archetype: string };
   hp: { current: number; max: number };
+  /** Multiplier applied to every tile + portrait + gap dimension.
+   *  1.0 = the canonical 1024px reference (BIG=216, CENTER=462).
+   *  0.55 ≈ 498px total frame width — fits the 36% column at
+   *  1440px viewport (~520px column inner). Aspect ratios stay
+   *  locked because every pixel constant flows through `scale`. */
+  scale?: number;
 }) {
-  const BIG = 216;
-  const RING = 64;
-  const BELT_H = 102;
-  const CENTER = 462;
-  const GAP = 6;
-  const PAD = 14;
+  // Canonical pixel spec — see file-header doc comment.
+  const round = (n: number) => Math.round(n * scale);
+  const BIG = round(216);
+  const RING = round(64);
+  const BELT_H = round(102);
+  const CENTER = round(462);
+  const GAP = Math.max(4, round(6));
+  const PAD = Math.max(8, round(14));
 
   return (
     <div style={{ width: "fit-content", maxWidth: "100%" }}>
@@ -827,7 +846,12 @@ function EquipmentFrame({
       >
         {/* HP bar — spans all 3 cols */}
         <div style={{ gridColumn: "1 / -1" }}>
-          <HpBar current={hp.current} max={hp.max} width={BIG + GAP + CENTER + GAP + BIG} />
+          <HpBar
+            current={hp.current}
+            max={hp.max}
+            width={BIG + GAP + CENTER + GAP + BIG}
+            height={Math.max(22, round(40))}
+          />
         </div>
 
         {/* LEFT COLUMN */}
@@ -898,7 +922,7 @@ function EquipmentFrame({
             width={CENTER}
             height={CENTER}
           />
-          <TribalOrnament width={CENTER} height={120} />
+          <TribalOrnament width={CENTER} height={Math.max(60, round(120))} />
           {/* Spacer to push ornament down so the column heights match
               roughly. Left col total = 4*216 + 102 + 4*6 = 990; center
               total so far = 462 + 6 + 120 = 588; ring-row + spacer
@@ -988,7 +1012,379 @@ function EquipmentFrame({
   );
 }
 
-/* ─────────────────────── Stats column ────────────────────────── */
+/* ─────────────────────── Center Info card ───────────────────────
+ *
+ * Single tall card sitting between the EquipmentFrame and the
+ * Inventory, matching the Claude Design target screenshot:
+ *
+ *   ┌──────────────────────────────────────────────┐
+ *   │ [ARCHETYPE]                       [ + N PTS ]│
+ *   │ Ponke_the_Brawler                            │  ← Slackey 52px name
+ *   │ [Lv 14] [2134 ELO] 47w · 21l · 69%           │
+ *   │ ────────────────────────────────────────────  │
+ *   │ PRIMARY ATTRIBUTES                            │
+ *   │   STR ▇▇▇▇▇▇▇▇▇▇▇▇▇▇                    14   │
+ *   │   DEX ▇▇▇                                 8   │
+ *   │   INT ▇▇▇▇▇▇▇▇▇▇                         10   │
+ *   │   END ▇▇▇▇▇▇▇▇▇▇▇▇                       12   │
+ *   │ COMBAT STATS                                  │
+ *   │ ┌─ HP ─┐ ┌─ ATK ─┐ ┌─ CRIT ─┐ ┌─ CRIT × ─┐    │
+ *   │ │ 240  │ │  38   │ │  18%   │ │  1.75x   │    │
+ *   │ ├─EVADE┤ ├─ARMOR─┤ ├──DEF───┤ ├──LV──────┤    │
+ *   │ │  9%  │ │  22   │ │  31    │ │  14      │    │
+ *   │ └──────┘ └───────┘ └────────┘ └──────────┘    │
+ *   │ LV 14 → 15                  4,820 / 7,200 XP  │
+ *   │ ████████████████░░░░░░░░░░░░                  │
+ *   └──────────────────────────────────────────────┘
+ */
+
+interface CenterInfoCardProps {
+  character: Character;
+  derived: ReturnType<typeof computeDerivedStats>;
+  archetype: string;
+  unallocatedPoints: number;
+  onAllocateClick: () => void;
+  saveControls?: ReactNode;
+}
+
+const ARCHETYPE_TONE: Record<string, "blood" | "steel" | "bronze" | "default"> = {
+  Crit: "blood",
+  Evasion: "steel",
+  Tank: "bronze",
+  Hybrid: "default",
+};
+
+function CenterInfoCard({
+  character,
+  derived,
+  archetype,
+  unallocatedPoints,
+  onAllocateClick,
+  saveControls,
+}: CenterInfoCardProps) {
+  const xpInLevel = getXpInCurrentLevel(character.level, character.xp);
+  const xpSpan = getXpSpanForLevel(character.level);
+  const xpProgress = getXpProgress(character.level, character.xp);
+  const isMaxLevel = character.level >= MAX_LEVEL;
+  const winRate =
+    character.wins + character.losses > 0
+      ? Math.round((character.wins / (character.wins + character.losses)) * 100)
+      : 0;
+
+  const eq = (character as unknown as { equipment?: EquipmentSlots }).equipment ?? null;
+  const strBonus = eq ? sumEquipmentStat(eq, "strengthBonus") : 0;
+  const dexBonus = eq ? sumEquipmentStat(eq, "dexterityBonus") : 0;
+  const intBonus = eq ? sumEquipmentStat(eq, "intuitionBonus") : 0;
+  const endBonus = eq ? sumEquipmentStat(eq, "enduranceBonus") : 0;
+
+  const statRows: Array<{
+    label: string;
+    base: number;
+    bonus: number;
+    color: string;
+    icon: string;
+  }> = [
+    { label: "STR", base: character.stats.strength, bonus: strBonus, color: "var(--stat-str)", icon: "⚔" },
+    { label: "DEX", base: character.stats.dexterity, bonus: dexBonus, color: "var(--stat-dex)", icon: "⚡" },
+    { label: "INT", base: character.stats.intuition, bonus: intBonus, color: "var(--stat-int)", icon: "✦" },
+    { label: "END", base: character.stats.endurance, bonus: endBonus, color: "var(--stat-end)", icon: "❖" },
+  ];
+
+  const combatGrid: Array<[string, string | number, string]> = [
+    ["HP", derived.maxHp, "var(--stat-hp)"],
+    ["ATK", derived.attackPower, "var(--sc-blood)"],
+    ["CRIT", `${derived.critChance}%`, "var(--stat-int)"],
+    ["CRIT ×", `${derived.critMultiplier}x`, "var(--stat-int)"],
+    ["EVADE", `${derived.evasionChance}%`, "var(--stat-dex)"],
+    ["ARMOR", derived.armor, "var(--sc-steel)"],
+    ["DEF", derived.defense, "var(--sc-bronze)"],
+    ["LV", character.level, "var(--sc-parchment)"],
+  ];
+
+  const archetypeTone = ARCHETYPE_TONE[archetype] ?? "default";
+
+  return (
+    <div
+      style={{
+        background: "var(--sc-panel)",
+        border: "1px solid var(--sc-rim)",
+        borderRadius: "var(--r-card)",
+        boxShadow: "var(--sh-plate-lg), var(--rim-top), var(--rim-bottom)",
+        padding: "18px 20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        fontFamily: "var(--font-ui)",
+        color: "var(--sc-parchment)",
+        minWidth: 0,
+      }}
+    >
+      {/* Header row — archetype + "+N pts" / save controls */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <Stamp tone={archetypeTone}>{archetype}</Stamp>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {unallocatedPoints > 0 && (
+            <BronzeButton size="sm" onClick={onAllocateClick}>
+              + {unallocatedPoints} pts
+            </BronzeButton>
+          )}
+          {saveControls}
+        </div>
+      </div>
+
+      {/* Slackey character name */}
+      <h2
+        style={{
+          margin: 0,
+          fontFamily: "var(--font-display)",
+          fontSize: 44,
+          lineHeight: 1.0,
+          color: "var(--sc-bronze)",
+          letterSpacing: "0.01em",
+          wordBreak: "break-word",
+        }}
+      >
+        {character.name}
+      </h2>
+
+      {/* Lv + ELO + W/L summary */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <Stamp tone="bronze">Lv {character.level}</Stamp>
+        <Stamp tone="default" outline>
+          {character.rating} ELO
+        </Stamp>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            color: "var(--fg-3)",
+            fontWeight: 700,
+            letterSpacing: ".02em",
+          }}
+        >
+          {character.wins}w · {character.losses}l · {winRate}%
+        </span>
+      </div>
+
+      {/* Primary Attributes */}
+      <div>
+        <SectionLabel>Primary Attributes</SectionLabel>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {statRows.map((row) => {
+            const total = row.base + row.bonus;
+            return (
+              <div
+                key={row.label}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    width: 72,
+                    color: row.color,
+                    fontWeight: 800,
+                    fontSize: 11,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>{row.icon}</span>
+                  {row.label}
+                </span>
+                <div
+                  style={{
+                    flex: 1,
+                    height: 8,
+                    background: "var(--sc-page)",
+                    border: "1px solid var(--sc-rim-2)",
+                    borderRadius: 1,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.min(100, (total / 20) * 100)}%`,
+                      height: "100%",
+                      background: row.color,
+                      transition: "width var(--d-slow) var(--ease-out)",
+                    }}
+                  />
+                </div>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    color: row.color,
+                    minWidth: 56,
+                    textAlign: "right",
+                  }}
+                >
+                  {row.bonus > 0 ? (
+                    <>
+                      {row.base}
+                      <span
+                        style={{
+                          color: "var(--rarity-uncommon)",
+                          marginLeft: 4,
+                          fontSize: 11,
+                        }}
+                      >
+                        +{row.bonus}
+                      </span>
+                    </>
+                  ) : (
+                    row.base
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Combat Stats — 4-col grid, 2 rows */}
+      <div>
+        <SectionLabel>Combat Stats</SectionLabel>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 6,
+          }}
+        >
+          {combatGrid.map(([label, value, color]) => (
+            <div
+              key={label}
+              style={{
+                background: "var(--sc-page)",
+                border: "1px solid var(--sc-rim-2)",
+                borderRadius: 2,
+                padding: "8px 10px",
+                minWidth: 0,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: ".12em",
+                  textTransform: "uppercase",
+                  color: "var(--fg-3)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {label}
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 800,
+                  fontSize: 18,
+                  color,
+                  marginTop: 2,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* XP bar */}
+      <div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: ".10em",
+            textTransform: "uppercase",
+            color: "var(--fg-3)",
+            marginBottom: 4,
+          }}
+        >
+          <span>
+            Lv {character.level}
+            {isMaxLevel ? " MAX" : ` → ${character.level + 1}`}
+          </span>
+          <span style={{ fontFamily: "var(--font-mono)" }}>
+            {isMaxLevel
+              ? `${character.xp.toLocaleString()} XP`
+              : `${xpInLevel.toLocaleString()} / ${xpSpan.toLocaleString()} XP`}
+          </span>
+        </div>
+        <div
+          style={{
+            position: "relative",
+            height: 8,
+            background: "var(--sc-page)",
+            border: "1px solid var(--sc-rim-2)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${xpProgress * 100}%`,
+              height: "100%",
+              background:
+                "linear-gradient(90deg, var(--sc-bronze-deep) 0%, var(--sc-bronze-hot) 50%, var(--sc-bronze-deep) 100%)",
+              transition: "width var(--d-slow) var(--ease-out)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              pointerEvents: "none",
+            }}
+          >
+            {Array.from({ length: 5 }).map((_, i) => (
+              <span
+                key={i}
+                style={{
+                  flex: 1,
+                  borderRight: i < 4 ? "1px solid rgba(0,0,0,.45)" : "none",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────── Stats column (legacy, kept for back-compat) ── */
 
 function StatsColumn({
   character,
@@ -1480,10 +1876,24 @@ export function CharacterProfile({
     </>
   ) : null;
 
-  // Outer responsive layout. xl = 3-col (Frame · Stats · Inventory),
-  // lg = 2-col (Frame · Stats), Inventory below; md/sm = stacked.
-  const showInventoryColumn = bpGte("xl", bp);
-  const showInventoryBelow = !showInventoryColumn;
+  // Responsive layout regimes — drive both column ratios and the
+  // EquipmentFrame scale factor from a single decision so the doll
+  // never overflows its column.
+  //
+  //   xl (≥ 1440) — 3-col 36/42/22, frame scaled 0.55 (498px wide,
+  //                 fits the ~520px column inner)
+  //   lg (≥ 1024) — 2-col Equipment+Stats; Inventory + Recent Fights
+  //                 stack below. Frame scale 0.6.
+  //   md / sm     — single column stack; frame scales down further.
+  const isXl = bpGte("xl", bp);
+  const isLg = bpGte("lg", bp);
+  const frameScale = isXl ? 0.55 : isLg ? 0.6 : bpGte("md", bp) ? 0.7 : 0.8;
+
+  const outerCols = isXl
+    ? "36% 42% 22%"
+    : isLg
+      ? "minmax(0, 1fr) minmax(0, 1fr)"
+      : "1fr";
 
   return (
     <>
@@ -1503,36 +1913,42 @@ export function CharacterProfile({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: showInventoryColumn
-              ? "auto minmax(0, 1fr) minmax(260px, 320px)"
-              : bpGte("lg", bp)
-                ? "auto minmax(0, 1fr)"
-                : "1fr",
-            gap: 20,
+            gridTemplateColumns: outerCols,
+            gap: 24,
             alignItems: "start",
           }}
         >
-          <EquipmentFrame
-            eq={eq}
-            dirtySlots={dirtySlots}
-            portrait={portrait}
-            onSlot={(s) => setSelectedSlot(s)}
-            onPortrait={() => setPickerOpen(true)}
-            player={{ name: character.name, level: character.level, archetype }}
-            hp={{ current: derived.maxHp, max: derived.maxHp }}
-          />
+          {/* LEFT — Equipment Frame (36% at xl). Scale factor keeps
+              the canonical pixel spec proportional while fitting the
+              narrower column.  */}
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <EquipmentFrame
+              eq={eq}
+              dirtySlots={dirtySlots}
+              portrait={portrait}
+              onSlot={(s) => setSelectedSlot(s)}
+              onPortrait={() => setPickerOpen(true)}
+              player={{ name: character.name, level: character.level, archetype }}
+              hp={{ current: derived.maxHp, max: derived.maxHp }}
+              scale={frameScale}
+            />
+          </div>
 
-          <StatsColumn
+          {/* CENTER — Consolidated Center Info card (42% at xl).
+              Combines header + Primary Attributes + Combat Stats +
+              XP into one tall panel per the Claude Design target. */}
+          <CenterInfoCard
             character={character}
             derived={derived}
             archetype={archetype}
-            archetypeColor={archetypeColor}
             unallocatedPoints={unallocatedPoints}
             onAllocateClick={() => setShowAllocate(true)}
             saveControls={saveControls}
           />
 
-          {showInventoryColumn && (
+          {/* RIGHT — Inventory (22% at xl, hides at lg/md/sm and
+              re-renders below). */}
+          {isXl && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <Inventory />
               {extras}
@@ -1540,9 +1956,11 @@ export function CharacterProfile({
           )}
         </div>
 
+        {/* Recent Fights — full-width row below the 3-col grid. */}
         <RecentFights />
 
-        {showInventoryBelow && (
+        {/* Below-fold inventory at lg/md/sm. */}
+        {!isXl && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <Inventory />
             {extras}
