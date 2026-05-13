@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,19 @@ import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager } from "@/lib/wager-accept-gate";
 import { computeBusyState, decideMatchmakingRender } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
+
+function suiFromMist(stakeMist: string): string {
+  try {
+    const mist = BigInt(stakeMist);
+    const whole = mist / 1_000_000_000n;
+    const frac = mist % 1_000_000_000n;
+    if (frac === 0n) return whole.toString();
+    const fracStr = frac.toString().padStart(9, "0").replace(/0+$/, "");
+    return `${whole.toString()}.${fracStr}`;
+  } catch {
+    return "0.1";
+  }
+}
 
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
   { type: "friendly", label: "Friendly", desc: "No stakes, just practice", minLevel: 1 },
@@ -71,11 +84,19 @@ function WagerLobbyCard({
   const acceptBlocked = disableAccept || signing;
 
   return (
-    <div className={`rounded-lg border p-3 transition-all ${
-      isOwn
-        ? "border-amber-700/40 bg-amber-900/10"
-        : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700"
-    }`}>
+    <div
+      className="p-3 transition-all"
+      style={{
+        border: isOwn
+          ? "2px solid var(--sc-bronze)"
+          : "1px solid var(--sc-rim-2)",
+        borderLeft: isOwn ? "3px solid var(--sc-bronze)" : "1px solid var(--sc-rim-2)",
+        background: isOwn ? "rgba(200,154,63,0.08)" : "var(--sc-panel-2)",
+        borderRadius: "var(--r-card)",
+        boxShadow: isOwn ? "var(--sh-plate-sm)" : "var(--rim-top), var(--rim-bottom)",
+        fontFamily: "var(--font-ui)",
+      }}
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -122,6 +143,19 @@ export function MatchmakingQueue() {
   const [wagerInput, setWagerInput] = useState(String(MIN_STAKE_SUI));
   const [selectedType, setSelectedType] = useState<FightType>("friendly");
   const [signing, setSigning] = useState(false);
+
+  // Bucket 3 — when a wager challenge lands, the game-provider sets
+  // `prefilledWagerTarget` and switches to the Arena. Pre-fill the
+  // stake input + lock selectedType to wager so the user can sign
+  // create_wager immediately.
+  useEffect(() => {
+    const prefill = state.prefilledWagerTarget;
+    if (!prefill) return;
+    setSelectedType("wager");
+    if (prefill.stakeMist) {
+      setWagerInput(suiFromMist(prefill.stakeMist));
+    }
+  }, [state.prefilledWagerTarget]);
   const dAppKit = useDAppKit();
   const balance = useWalletBalance();
   // Reserve a buffer for gas. 0.05 SUI is more than enough headroom for the
@@ -267,8 +301,16 @@ export function MatchmakingQueue() {
 
         if (regResult.kind === "ack") {
           console.log("[Wager] Server ACKed lobby entry for", wagerMatchId);
+          // Bucket 3 — clear the prefilled-target banner once we've
+          // committed the wager. The challenge handshake is done.
+          if (state.prefilledWagerTarget) {
+            dispatch({ type: "SET_PREFILLED_WAGER_TARGET", target: null });
+          }
         } else if (regResult.kind === "recovered") {
           console.warn("[Wager] WS ACK timed out — recovered via adopt-wager:", wagerMatchId);
+          if (state.prefilledWagerTarget) {
+            dispatch({ type: "SET_PREFILLED_WAGER_TARGET", target: null });
+          }
         } else {
           // Both paths failed. The wager IS on chain; the server has no
           // record. Sticky error tells the user EXACTLY what to do (don't
@@ -424,29 +466,89 @@ export function MatchmakingQueue() {
             (open wager, queue panel, fight) is self-explanatory and
             cluttering the UI with greyed-out cards adds noise without
             information. */}
-        {slots.showFightTypes && FIGHT_TYPES.map(({ type, label, desc, minLevel }) => {
-          const locked = level < minLevel;
-          return (
-            <button
-              key={type}
-              disabled={locked || signing}
-              onClick={() => setSelectedType(type)}
-              className={`w-full text-left rounded-lg border p-3 transition-all ${
-                selectedType === type
-                  ? "border-emerald-600 bg-emerald-900/20"
-                  : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
-              } ${locked ? "opacity-40 cursor-not-allowed" : ""}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{label}</span>
-                {locked && (
-                  <span className="text-xs text-zinc-500">Lv.{minLevel}+</span>
-                )}
-              </div>
-              <p className="text-xs text-zinc-400 mt-0.5">{desc}</p>
-            </button>
-          );
-        })}
+        {slots.showFightTypes && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 8,
+            }}
+          >
+            {FIGHT_TYPES.map(({ type, label, desc, minLevel }) => {
+              const locked = level < minLevel;
+              const active = selectedType === type;
+              // Tone-coded per fight type: friendly = steel-blue,
+              // ranked = bronze, wager = blood-red. Matches the
+              // design-tool ArenaScreen reference.
+              const tone =
+                type === "friendly"
+                  ? { active: "var(--sc-steel)", bg: "rgba(109,143,163,0.18)" }
+                  : type === "wager"
+                    ? { active: "var(--sc-blood)", bg: "rgba(181,61,44,0.16)" }
+                    : { active: "var(--sc-bronze)", bg: "rgba(200,154,63,0.18)" };
+              return (
+                <button
+                  key={type}
+                  disabled={locked || signing}
+                  onClick={() => setSelectedType(type)}
+                  style={{
+                    textAlign: "left",
+                    padding: 14,
+                    border: `2px solid ${active ? tone.active : "var(--sc-rim-2)"}`,
+                    background: active ? tone.bg : "var(--sc-panel-2)",
+                    color: "var(--sc-parchment)",
+                    borderRadius: "var(--r-card)",
+                    boxShadow: active ? "var(--sh-plate-sm)" : "var(--rim-top), var(--rim-bottom)",
+                    cursor: locked ? "not-allowed" : "pointer",
+                    opacity: locked ? 0.4 : 1,
+                    fontFamily: "var(--font-ui)",
+                    transition: "all var(--d-fast)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--font-display)",
+                        fontSize: 18,
+                        color: active ? tone.active : "var(--sc-parchment)",
+                      }}
+                    >
+                      {label}
+                    </span>
+                    {locked && (
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 10,
+                          color: "var(--fg-3)",
+                        }}
+                      >
+                        Lv.{minLevel}+
+                      </span>
+                    )}
+                  </div>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 11,
+                      color: "var(--fg-3)",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {desc}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Wager UI — driven by `slots.showWagerCreate` /
             `slots.showWagerLobby` (Bucket 2 polish, 2026-05-04). When
@@ -459,36 +561,112 @@ export function MatchmakingQueue() {
                 wager open (their own wager renders in the lobby below
                 with a Cancel button). */}
             {slots.showWagerCreate && !ownLobbyEntry && (
-              <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-zinc-400">Stake (SUI):</label>
+              <div
+                className="p-3"
+                style={{
+                  background: "var(--sc-panel-2)",
+                  border: "1px solid var(--sc-rim)",
+                  borderLeft: "3px solid var(--sc-blood)",
+                  borderRadius: "var(--r-card)",
+                  boxShadow: "var(--rim-top), var(--rim-bottom)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                {state.prefilledWagerTarget && (
+                  <div
+                    className="px-3 py-2"
+                    style={{
+                      background: "rgba(200,154,63,0.12)",
+                      borderLeft: "3px solid var(--sc-bronze)",
+                      borderRadius: "var(--r-sm)",
+                      fontSize: 11,
+                      color: "var(--sc-parchment)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, marginBottom: 2 }}>
+                      Challenge ready —{" "}
+                      <span style={{ color: "var(--sc-bronze)" }}>
+                        {state.prefilledWagerTarget.name}
+                      </span>{" "}
+                      accepted your wager challenge.
+                    </div>
+                    <div style={{ color: "var(--fg-2)" }}>
+                      Sign the create_wager transaction below to lock the SUI
+                      escrow. They'll see your wager appear in their lobby and
+                      can sign accept_wager to start the fight.
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <label
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: ".10em",
+                      textTransform: "uppercase",
+                      color: "var(--sc-bronze)",
+                    }}
+                  >
+                    Stake
+                  </label>
                   <input
                     type="text"
                     inputMode="decimal"
                     autoComplete="off"
                     value={wagerInput}
-                    placeholder={`${MIN_STAKE_SUI} minimum`}
+                    placeholder={`${MIN_STAKE_SUI} min`}
                     onChange={(e) => setWagerInput(e.target.value)}
                     aria-invalid={!parsedWager.ok}
-                    className={`w-24 bg-zinc-800 border rounded px-2 py-1 text-sm text-zinc-100 ${
-                      parsedWager.ok ? "border-zinc-700" : "border-red-700/60"
-                    }`}
+                    style={{
+                      width: 96,
+                      padding: "7px 10px",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      background: "var(--sc-page)",
+                      border: `1px solid ${parsedWager.ok ? "var(--sc-rim-2)" : "var(--sc-blood)"}`,
+                      borderRadius: "var(--r-sm)",
+                      color: "var(--sc-parchment)",
+                      outline: "none",
+                      boxShadow: "var(--rim-top), var(--rim-bottom)",
+                    }}
                   />
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontWeight: 800,
+                      fontSize: 13,
+                      color: "var(--sc-bronze)",
+                    }}
+                  >
+                    SUI
+                  </span>
                 </div>
-                <p className="text-xs text-zinc-500">
-                  Wallet balance: <span className="text-amber-300 font-mono">{balance.sui.toFixed(3)} SUI</span>
-                  {balance.error ? <span className="text-red-400 ml-2">({balance.error})</span> : null}
+                <p style={{ margin: 0, fontSize: 11, color: "var(--fg-3)" }}>
+                  Wallet balance:{" "}
+                  <span style={{ color: "var(--sc-bronze)", fontFamily: "var(--font-mono)", fontWeight: 700 }}>
+                    {balance.sui.toFixed(3)} SUI
+                  </span>
+                  {balance.error ? (
+                    <span style={{ color: "var(--sc-blood)", marginLeft: 8 }}>
+                      ({balance.error})
+                    </span>
+                  ) : null}
                 </p>
                 {parsedWager.ok ? (
-                  <p className="text-xs text-zinc-500">
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--fg-3)", lineHeight: 1.5 }}>
                     Your wallet will lock {parsedWager.amount} SUI in on-chain escrow.
                     Winner gets 95%. 5% platform fee.
                   </p>
                 ) : (
-                  <p className="text-xs text-red-400">{parsedWager.reason}</p>
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--sc-blood)", fontWeight: 600 }}>
+                    {parsedWager.reason}
+                  </p>
                 )}
                 {parsedWager.ok && insufficientFunds && (
-                  <p className="text-xs text-red-400">
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--sc-blood)", fontWeight: 600 }}>
                     Insufficient SUI. Need at least {(wagerAmount + GAS_BUFFER_SUI).toFixed(3)} (stake + ~{GAS_BUFFER_SUI} gas).
                   </p>
                 )}
@@ -513,12 +691,48 @@ export function MatchmakingQueue() {
                 browseable other-player wagers (in idle state). */}
             {slots.showWagerLobby && (
               <div>
-                <div className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-2">
-                  Open Wagers ({wagerLobby.length})
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: "var(--ls-stamp)",
+                      textTransform: "uppercase",
+                      color: "var(--sc-bronze)",
+                    }}
+                  >
+                    Open Wagers
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontWeight: 700,
+                      fontSize: 11,
+                      color: "var(--fg-3)",
+                    }}
+                  >
+                    {wagerLobby.length}
+                  </span>
                 </div>
                 {wagerLobby.length === 0 ? (
-                  <p className="text-sm text-zinc-600 text-center py-4">
-                    No open wagers. Create one to challenge others!
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "var(--fg-3)",
+                      textAlign: "center",
+                      padding: "20px 0",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    No open wagers. Create one to challenge others.
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-[400px] overflow-y-auto">
