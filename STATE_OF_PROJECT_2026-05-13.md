@@ -635,6 +635,113 @@ preservation, font wiring.
 **Total static gauntlet**: All 32 suites pass. Project total:
 2377 / 2377 (was 2250 pre-phase-2-sweep + 127 new primitives gauntlet).
 
+### Phase 2 — App-wide composition rebuild (2026-05-13, later × 2)
+
+The v2-sweep applied palette + typography correctly but kept each
+screen's v1 internal layout. This sweep rebuilds the composition of
+every screen end-to-end to match the Claude Design screenshots in
+`design_v2/screenshopts/`.
+
+#### Commits (chronological)
+
+```
+8570a53 feat(phase-2-layout): shared layout primitives
+173ac14 feat(phase-2-layout): Character — Loadout composition + exact pixel-spec equipment frame
+b326d70 feat(phase-2-layout): Arena — 3-tile row + queue panel + wager form
+28938af feat(phase-2-layout): Market — 3-column composition + dense ListingCard grid
+490c85d feat(phase-2-layout): Tavern — 3-column composition (DMs · Chat · Online)
+3e14603 feat(phase-2-layout): Hall of Fame — podium + ladder composition
+e1dc291 test(phase-2-layout): qa-layout-primitives gauntlet + v2-primitives spec sync
+```
+
+#### New shared primitives — `frontend/src/components/v2/layout.tsx`
+
+- **`useBreakpoint()` / `bpGte()`** — viewport-driven responsive
+  helpers. `xl` ≥ 1440, `lg` ≥ 1024, `md` ≥ 768, else `sm`. SSR-safe
+  (defaults to `xl` so desktop layout paints first; reflows
+  client-side on mount).
+- **`ScreenLayout`** — 1440px max-width centering wrapper. Replaces
+  the prior 896px center column.
+- **`TopBanner`** — Slackey title + subtitle + right pill. Tones:
+  bronze (Character / Market / Tavern), blood (Arena / Hall of Fame).
+  Pills: `onChain` (bronze fill) / `testnet` (blood-deep fill).
+- **`ThreeColumn`** — left / center / right grid. Stacks vertically
+  below `lg`.
+- **`PodiumBlock`** — Hall of Fame rank tile. 1=bronze 240px tall +
+  crown SVG, 2=parchment 180px, 3=blood-red 140px. Each with avatar,
+  Slackey name, level pill, ELO mono pill.
+- **`ListingCard`** — Market full-NFT-art tile. Rarity tint
+  background + badge, 2H stamp when applicable, Slackey item name,
+  mono slot+stat line, bronze SUI price + blood-red Buy CTA.
+- **`DMRow`** / **`OnlineRow`** — Tavern sidebar primitives.
+- **`SectionHeader`** — Slackey sub-section header with optional
+  right-side stamp.
+
+#### Per-screen compositions
+
+**Character** — TopBanner "Loadout" with ON CHAIN pill above the
+existing equipment frame, which is now sized at the exact 1024px
+pixel spec (BIG=216 / CENTER=462 / BELT_H=102 / RING=64 / GAP=6).
+Stats column right of the frame (Header card with archetype stamp +
+Slackey name + Lv/ELO/W-L stamps + Save controls + +N pts button;
+Primary Attributes panel; Combat Stats grid + XP bar with tick
+segments). Recent fights card below the frame. Inventory at 1440px+
+becomes a third column on the right; below 1440px it stacks below
+the frame.
+
+**Arena** — TopBanner "Arena" with V5·TESTNET red pill above a 3-up
+chunky tile row (Friendly parchment / Ranked bronze / Wager
+blood-red, 260px min height, Slackey 52px labels, tone-coded CTAs).
+Queue panel (when in matchmaking) with bobbing 🐸 mascot, Slackey
+"Looking for fighter…" headline, ETA mono line, Cancel + Widen ELO
+Range action pair.
+
+**Market** — TopBanner "Market" + ON CHAIN pill. 3-column
+(240/1fr/300): left filter sidebar (search input + rarity chip
+column + slot chip wrap), center "N listings" Slackey + sort chips
+(Low to High / Recent / Rarity) + auto-fill ListingCard grid,
+right My Kiosk panel embedded directly into the screen layout.
+
+**Tavern** — TopBanner "Tavern" + ON CHAIN pill. 3-column
+(260/1fr/240): left Direct Messages sidebar (DMRow list built from
+state.dmChannels + onlinePlayers lookup), center The Tavern global
+chat (Slackey title + ChatPanel below), right Online · N sidebar
+(OnlineRow list). Click DM row → OPEN_DM. Click online row →
+OPEN_PROFILE.
+
+**Hall of Fame** — TopBanner "Hall of Fame" + V5·TESTNET red pill.
+Podium row top: 2/1/3 grid using PodiumBlock primitive (top-3 from
+raw ELO, filter-independent). Ladder card below: Slackey header +
+"By ELO · 7-Day" outline stamp + search input + V2Chip filter rows
+(level + build with live counts) + sort-arrow column headers +
+LadderRow component (rank in tier colour, avatar tile + Slackey
+name + archetype label, Lv pill, ELO mono bronze, W/L tone-coded,
+Win% mono). Current user's row highlighted bronze with "· you"
+suffix. "Load more" pagination footer.
+
+#### game-screen restructure
+
+`AreaContent` switch flattened — each case now returns the screen's
+top-level component directly. No more per-area `lg:grid-cols-3`
+wrappers fighting the screen's own grid. Outer chrome (testnet
+banner + TownNav) stays full-viewport width; each screen owns its
+own ScreenLayout wrapper for the 1440px max-width + 20px side
+padding.
+
+#### Tests
+
+- **`qa-layout-primitives.ts` (NEW)** — 125 / 125 PASS across 14
+  sections covering bpGte, PodiumBlock tier config, ListingCard
+  rarity map, primitive exports, TopBanner tones+pills, hot-path
+  screen imports, Character pixel-spec, slot-mapping flip
+  preservation, Arena 3-up palette, Market ListingCard+ThreeColumn
+  usage, Tavern 3-column composition, HoF podium order + ladder,
+  game-screen flattening, every backward-compat handler wired.
+- **`qa-v2-primitives.ts` spec-synced** — accepts both "Ring row" /
+  "Ring cluster" comment forms, asserts new pixel constants
+  (BIG=216, CENTER=462, BELT_H=102). 128 / 128 PASS.
+- All 30 prior gauntlets still pass. **Project total: 2241 / 2241.**
+
 ### Earlier sessions (referenced for completeness)
 
 See [STATE_OF_PROJECT_2026-05-04.md § Files Modified This Session](./STATE_OF_PROJECT_2026-05-04.md#files-modified-this-session)
