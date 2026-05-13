@@ -170,39 +170,71 @@ export function Inventory() {
   return (
     <>
       <Card>
-        <CardHeader className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-zinc-200">
-              Inventory ({allItems.length})
-            </span>
-            <select
-              value={filterRarity}
-              onChange={(e) =>
-                setFilterRarity(e.target.value === "all" ? "all" : (Number(e.target.value) as Rarity))
-              }
-              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300"
-            >
-              <option value="all">All Rarities</option>
-              {Object.entries(RARITY_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
-          </div>
-          {/* Category tabs */}
-          <div className="flex gap-1">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setCategory(tab.id)}
-                className={`px-3 py-1.5 text-xs font-bold rounded transition-all ${
-                  category === tab.id
-                    ? "bg-zinc-700 text-zinc-100 border border-zinc-600"
-                    : "bg-zinc-900/60 text-zinc-500 hover:text-zinc-300 border border-zinc-800"
-                }`}
+        <CardHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: 18,
+                  color: "var(--sc-bronze)",
+                }}
               >
-                {tab.label}
-              </button>
-            ))}
+                Inventory
+                <span style={{ marginLeft: 8, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--fg-3)" }}>
+                  {allItems.length}
+                </span>
+              </span>
+              <select
+                value={filterRarity}
+                onChange={(e) =>
+                  setFilterRarity(e.target.value === "all" ? "all" : (Number(e.target.value) as Rarity))
+                }
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 11,
+                  padding: "4px 8px",
+                  background: "var(--sc-panel-2)",
+                  color: "var(--sc-parchment)",
+                  border: "1px solid var(--sc-rim-2)",
+                  borderRadius: "var(--r-sm)",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="all">All Rarities</option>
+                {Object.entries(RARITY_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {TABS.map((tab) => {
+                const active = category === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setCategory(tab.id)}
+                    style={{
+                      padding: "4px 10px",
+                      fontFamily: "var(--font-ui)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: ".04em",
+                      border: `1px solid ${active ? "var(--sc-bronze)" : "var(--sc-rim-2)"}`,
+                      background: active ? "rgba(200,154,63,0.20)" : "var(--sc-panel-2)",
+                      color: active ? "var(--sc-bronze)" : "var(--fg-2)",
+                      borderRadius: "var(--r-card)",
+                      cursor: "pointer",
+                      transition: "all var(--d-fast)",
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </CardHeader>
         <CardBody>
@@ -233,13 +265,20 @@ export function Inventory() {
           onClose={() => setSelectedItem(null)}
           actions={
             <div className="space-y-3">
-              {/* Stuck-in-kiosk migration: the item is a DOF of a Kiosk but
-                  not listed for sale (probably a leftover from a vanilla
-                  delist that didn't take). Surface a single Retrieve button
-                  — equip / list both require ownership in the wallet. */}
               {selectedItem.inKiosk && !selectedItem.kioskListed && kiosk.kioskId && kiosk.capId && (
-                <div className="rounded-lg border border-zinc-700/40 bg-zinc-900/40 p-3 space-y-2">
-                  <p className="text-xs text-zinc-400">
+                <div
+                  style={{
+                    padding: 12,
+                    background: "var(--sc-panel-2)",
+                    border: "1px solid var(--sc-rim)",
+                    borderLeft: "3px solid var(--sc-steel)",
+                    borderRadius: "var(--r-card)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--fg-2)", lineHeight: 1.45 }}>
                     This item is sitting unlisted inside your Kiosk. Pull it
                     back to your wallet to equip or relist.
                   </p>
@@ -265,39 +304,91 @@ export function Inventory() {
                       }
                     }}
                     disabled={marketSigning}
-                    className="w-full px-4 py-2.5 text-sm font-bold rounded bg-zinc-700/50 text-zinc-100 border border-zinc-600/60 hover:bg-zinc-700/70 hover:border-zinc-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      width: "100%",
+                      padding: "8px 14px",
+                      fontFamily: "var(--font-ui)",
+                      fontWeight: 700,
+                      fontSize: 12,
+                      letterSpacing: "var(--ls-button)",
+                      textTransform: "uppercase",
+                      background: "var(--sc-steel-low)",
+                      color: "var(--sc-steel)",
+                      border: "2px solid var(--sc-steel-deep)",
+                      borderRadius: "var(--r-button)",
+                      cursor: marketSigning ? "not-allowed" : "pointer",
+                      boxShadow: marketSigning ? "none" : "var(--sh-plate-sm)",
+                      opacity: marketSigning ? 0.6 : 1,
+                    }}
                   >
                     {marketSigning ? "Signing…" : "Retrieve to Wallet"}
                   </button>
                 </div>
               )}
 
-              {/* Listed-for-sale items can't be equipped or relisted. Direct
-                  the user to the Kiosk panel to delist (which now atomically
-                  takes back). */}
               {selectedItem.inKiosk && selectedItem.kioskListed && (
-                <p className="text-xs text-amber-300/80 text-center">
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 11,
+                    color: "var(--sc-bronze)",
+                    textAlign: "center",
+                    fontStyle: "italic",
+                  }}
+                >
                   Currently listed for sale. Use Delist in My Kiosk to take it back.
                 </p>
               )}
 
-              {/* Equip slot choices — only when the item is not in a kiosk. */}
               {!selectedItem.inKiosk && (selectedSlots.length > 0 ? (
-                <div className="space-y-2">
-                  <span className="text-xs text-zinc-500">Equip to:</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 800,
+                      letterSpacing: "var(--ls-stamp)",
+                      textTransform: "uppercase",
+                      color: "var(--sc-bronze)",
+                    }}
+                  >
+                    Equip to
+                  </span>
                   {selectedSlots.map((slot) => {
                     const current = eq[slot];
                     return (
                       <button
                         key={slot}
                         onClick={() => handleEquip(selectedItem, slot)}
-                        className="w-full text-left rounded-lg border border-emerald-700/40 bg-emerald-600/10 p-3 hover:bg-emerald-600/20 hover:border-emerald-600/60 transition-all"
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: 12,
+                          background: "var(--sc-panel-2)",
+                          border: "1px solid var(--sc-rim)",
+                          borderLeft: "3px solid var(--rarity-uncommon)",
+                          borderRadius: "var(--r-card)",
+                          cursor: "pointer",
+                          transition: "all var(--d-fast)",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "var(--sc-panel-3)";
+                          e.currentTarget.style.borderLeftColor = "var(--rarity-uncommon)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "var(--sc-panel-2)";
+                        }}
                       >
-                        <div className="font-semibold text-sm text-emerald-400">
+                        <div
+                          style={{
+                            fontWeight: 800,
+                            fontSize: 13,
+                            color: "var(--rarity-uncommon)",
+                          }}
+                        >
                           {EQUIPMENT_SLOT_LABELS[slot]}
                         </div>
                         {current && (
-                          <div className="text-xs text-zinc-500 mt-0.5">
+                          <div style={{ fontSize: 11, color: "var(--fg-3)", marginTop: 2 }}>
                             Replaces: {current.name}
                           </div>
                         )}
@@ -306,30 +397,41 @@ export function Inventory() {
                   })}
                 </div>
               ) : (
-                <p className="text-xs text-zinc-600 text-center">
+                <p style={{ fontSize: 11, color: "var(--fg-3)", textAlign: "center", margin: 0 }}>
                   Requires Level {selectedItem.levelReq}
                 </p>
               ))}
 
-              {/* List-on-marketplace affordance — only for on-chain NFTs the
-                  user actually owns (0x... id) and that aren't already inside
-                  a Kiosk. NPC items have no chain rep and can't be listed. */}
               {selectedItem.id.startsWith("0x") &&
                 selectedItem.id.length >= 42 &&
                 !selectedItem.inKiosk && (
-                  <div className="border-t border-zinc-800 pt-3">
+                  <div style={{ borderTop: "1px solid var(--sc-rim)", paddingTop: 12 }}>
                     {kiosk.kioskId && kiosk.capId ? (
                       <button
                         onClick={() => {
                           setListingItem(selectedItem);
                           setSelectedItem(null);
                         }}
-                        className="w-full px-4 py-2.5 text-sm font-bold rounded bg-amber-600/20 text-amber-300 border border-amber-700/40 hover:bg-amber-600/30 hover:border-amber-600/60 transition-all"
+                        style={{
+                          width: "100%",
+                          padding: "10px 14px",
+                          fontFamily: "var(--font-ui)",
+                          fontWeight: 700,
+                          fontSize: 12,
+                          letterSpacing: "var(--ls-button)",
+                          textTransform: "uppercase",
+                          background: "var(--sc-bronze)",
+                          color: "var(--sc-page)",
+                          border: "2px solid var(--sc-bronze-deep)",
+                          borderRadius: "var(--r-button)",
+                          cursor: "pointer",
+                          boxShadow: "var(--sh-plate-sm)",
+                        }}
                       >
                         List on Marketplace
                       </button>
                     ) : kiosk.loaded ? (
-                      <p className="text-xs text-zinc-600 text-center">
+                      <p style={{ fontSize: 11, color: "var(--fg-3)", textAlign: "center", margin: 0 }}>
                         Open the Marketplace tab to create a Kiosk before listing.
                       </p>
                     ) : null}

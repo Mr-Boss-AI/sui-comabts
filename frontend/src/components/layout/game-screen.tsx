@@ -150,9 +150,23 @@ function ResetCharacterButton() {
 
   if (confirming) {
     return (
-      <div className="rounded border border-red-900/40 bg-red-950/20 p-3 space-y-2">
-        <p className="text-xs text-red-300">This will delete your character and let you create a new one under the current on-chain package. Your old character data will be lost.</p>
-        <div className="flex gap-2">
+      <div
+        style={{
+          background: "var(--sc-panel-2)",
+          border: "1px solid var(--sc-blood-deep)",
+          borderLeft: "3px solid var(--sc-blood)",
+          padding: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          fontFamily: "var(--font-ui)",
+        }}
+      >
+        <p style={{ margin: 0, fontSize: 11, color: "var(--sc-blood)", lineHeight: 1.45 }}>
+          This will delete your character and let you create a new one under
+          the current on-chain package. Your old character data will be lost.
+        </p>
+        <div style={{ display: "flex", gap: 6 }}>
           <Button variant="danger" size="sm" onClick={handleReset}>Confirm Reset</Button>
           <Button variant="secondary" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
         </div>
@@ -163,7 +177,22 @@ function ResetCharacterButton() {
   return (
     <button
       onClick={() => setConfirming(true)}
-      className="w-full text-xs text-zinc-600 hover:text-red-400 transition-colors py-2"
+      style={{
+        width: "100%",
+        background: "transparent",
+        border: 0,
+        color: "var(--fg-3)",
+        fontFamily: "var(--font-ui)",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "var(--ls-stamp)",
+        textTransform: "uppercase",
+        padding: "8px 0",
+        cursor: "pointer",
+        transition: "color var(--d-fast)",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--sc-blood)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--fg-3)"; }}
     >
       Reset Character (migrate to current package)
     </button>
