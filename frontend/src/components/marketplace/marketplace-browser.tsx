@@ -46,71 +46,169 @@ export function MarketplaceBrowser() {
   return (
     <>
       <Card>
-        <CardHeader className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-zinc-200">
-              Marketplace ({filtered.length} listings)
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <select
-              value={filterType}
-              onChange={(e) =>
-                setFilterType(e.target.value === "all" ? "all" : (Number(e.target.value) as ItemType))
-              }
-              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
-            >
-              <option value="all">All Types</option>
-              {Object.entries(ITEM_TYPE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
+        <CardHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <span
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: 20,
+                  color: "var(--sc-bronze)",
+                  letterSpacing: "0.01em",
+                }}
+              >
+                Marketplace
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 700,
+                  fontSize: 11,
+                  color: "var(--fg-3)",
+                }}
+              >
+                {filtered.length} listings
+              </span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+              {[
+                {
+                  value: filterType,
+                  onChange: (v: string) =>
+                    setFilterType(v === "all" ? "all" : (Number(v) as ItemType)),
+                  options: [["all", "All Types"], ...Object.entries(ITEM_TYPE_LABELS)] as [string, string][],
+                },
+                {
+                  value: filterRarity,
+                  onChange: (v: string) =>
+                    setFilterRarity(v === "all" ? "all" : (Number(v) as Rarity)),
+                  options: [["all", "All Rarities"], ...Object.entries(RARITY_LABELS)] as [string, string][],
+                },
+                {
+                  value: sortBy,
+                  onChange: (v: string) => setSortBy(v as SortKey),
+                  options: [
+                    ["newest", "Newest first"],
+                    ["price_asc", "Price: Low → High"],
+                    ["price_desc", "Price: High → Low"],
+                  ] as [string, string][],
+                },
+              ].map((s, i) => (
+                <select
+                  key={i}
+                  value={s.value}
+                  onChange={(e) => s.onChange(e.target.value)}
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 11,
+                    padding: "5px 9px",
+                    background: "var(--sc-panel-2)",
+                    color: "var(--sc-parchment)",
+                    border: "1px solid var(--sc-rim-2)",
+                    borderRadius: "var(--r-sm)",
+                    outline: "none",
+                    boxShadow: "var(--rim-top)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {s.options.map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
               ))}
-            </select>
-            <select
-              value={filterRarity}
-              onChange={(e) =>
-                setFilterRarity(e.target.value === "all" ? "all" : (Number(e.target.value) as Rarity))
-              }
-              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
-            >
-              <option value="all">All Rarities</option>
-              {Object.entries(RARITY_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortKey)}
-              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
-            >
-              <option value="newest">Newest first</option>
-              <option value="price_asc">Price: Low to High</option>
-              <option value="price_desc">Price: High to Low</option>
-            </select>
+            </div>
           </div>
         </CardHeader>
         <CardBody>
           {filtered.length === 0 ? (
-            <p className="text-zinc-500 text-sm text-center py-12">
+            <p
+              style={{
+                color: "var(--fg-3)",
+                fontSize: 13,
+                textAlign: "center",
+                padding: "40px 0",
+                fontStyle: "italic",
+              }}
+            >
               {listings.length === 0
                 ? "No items listed yet. Be the first — open My Kiosk on the right."
                 : "No listings match these filters."}
             </p>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[640px] overflow-y-auto scrollbar-thin pr-1">
+            <div
+              className="scroll-plate"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gap: 8,
+                maxHeight: 640,
+                overflowY: "auto",
+                paddingRight: 4,
+              }}
+            >
               {filtered.map((listing) => (
                 <button
                   key={listing.id}
                   type="button"
                   onClick={() => setSelected(listing)}
-                  className="text-left"
+                  style={{
+                    textAlign: "left",
+                    background: "transparent",
+                    border: 0,
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
                 >
-                  <div className="rounded border border-zinc-800/60 bg-[#0e0e12] hover:border-amber-700/60 hover:bg-zinc-900/60 transition-colors">
+                  <div
+                    style={{
+                      background: "var(--sc-panel)",
+                      border: "1px solid var(--sc-rim)",
+                      borderRadius: "var(--r-card)",
+                      boxShadow: "var(--rim-top), var(--rim-bottom)",
+                      transition: "border-color var(--d-fast), transform var(--d-fast)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "var(--sc-bronze)";
+                      e.currentTarget.style.transform = "translateY(-1px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "var(--sc-rim)";
+                      e.currentTarget.style.transform = "";
+                    }}
+                  >
                     <ItemCard item={listing.item} compact />
-                    <div className="flex items-center justify-between px-2.5 pb-2 pt-1 border-t border-zinc-800/60">
-                      <span className="text-[10px] text-zinc-500 truncate">
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "6px 10px",
+                        borderTop: "1px solid var(--sc-rim)",
+                        background: "var(--sc-panel-2)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: "var(--sc-steel)",
+                          fontFamily: "var(--font-mono)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
                         by {listing.sellerName}
                       </span>
-                      <span className="text-amber-400 font-bold text-sm">
+                      <span
+                        style={{
+                          color: "var(--sc-bronze)",
+                          fontFamily: "var(--font-mono)",
+                          fontWeight: 800,
+                          fontSize: 13,
+                        }}
+                      >
                         {listing.price.toFixed(4).replace(/\.?0+$/, "")} SUI
                       </span>
                     </div>

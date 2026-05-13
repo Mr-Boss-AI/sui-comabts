@@ -134,28 +134,67 @@ export function MyKioskPanel() {
     <>
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-semibold text-zinc-200">My Kiosk</span>
-            <span className="text-[10px] text-zinc-600">
-              {kiosk.listingCount} listed &middot; {kiosk.itemCount} items total
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 18,
+                color: "var(--sc-bronze)",
+              }}
+            >
+              My Kiosk
+            </span>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "var(--fg-3)",
+              }}
+            >
+              {kiosk.listingCount} listed &middot; {kiosk.itemCount} total
             </span>
           </div>
         </CardHeader>
-        <CardBody className="space-y-3">
+        <CardBody style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {/* Profits + withdraw */}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
+          <div
+            style={{
+              padding: "10px 12px",
+              background: "var(--sc-panel-2)",
+              border: "1px solid var(--sc-rim)",
+              borderLeft: "3px solid var(--rarity-uncommon)",
+              borderRadius: "var(--r-card)",
+              boxShadow: "var(--rim-top), var(--rim-bottom)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wide">
+                <div
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: "var(--ls-stamp)",
+                    textTransform: "uppercase",
+                    color: "var(--fg-3)",
+                  }}
+                >
                   Profits
                 </div>
-                <div className="text-emerald-400 font-bold text-base">
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 800,
+                    fontSize: 16,
+                    color: "var(--rarity-uncommon)",
+                    marginTop: 2,
+                  }}
+                >
                   {kiosk.profitsSui.toFixed(6).replace(/\.?0+$/, "")} SUI
                 </div>
               </div>
               <Button
                 size="sm"
-                variant="secondary"
+                variant="primary"
                 disabled={kiosk.profitsSui <= 0 || signing}
                 onClick={handleWithdraw}
               >
@@ -174,31 +213,59 @@ export function MyKioskPanel() {
           </Button>
 
           {/* My active listings */}
-          <div className="space-y-2">
-            <div className="text-[10px] text-zinc-500 uppercase tracking-wide font-semibold">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: "var(--ls-stamp)",
+                textTransform: "uppercase",
+                color: "var(--sc-bronze)",
+                borderBottom: "1px solid var(--sc-rim)",
+                paddingBottom: 4,
+              }}
+            >
               My Listings ({myListings.length})
             </div>
             {myListings.length === 0 ? (
-              <p className="text-xs text-zinc-600 text-center py-2">
+              <p style={{ fontSize: 11, color: "var(--fg-3)", textAlign: "center", padding: "8px 0", fontStyle: "italic" }}>
                 Nothing for sale yet.
               </p>
             ) : (
-              <div className="space-y-1.5 max-h-[300px] overflow-y-auto scrollbar-thin">
+              <div
+                className="scroll-plate"
+                style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 300, overflowY: "auto" }}
+              >
                 {myListings.map((listing) => (
                   <div
                     key={listing.id}
-                    className="rounded border border-zinc-800/60 bg-[#0e0e12] p-2"
+                    style={{
+                      background: "var(--sc-panel-2)",
+                      border: "1px solid var(--sc-rim)",
+                      borderRadius: "var(--r-card)",
+                      padding: 8,
+                      boxShadow: "var(--rim-top), var(--rim-bottom)",
+                    }}
                   >
-                    <div className="flex items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        {/* Listings are by definition `kioskListed: true` —
-                            stamp it so ItemCard renders the amber Listed
-                            badge instead of the gray In Kiosk badge. */}
-                        <ItemCard item={{ ...listing.item, kioskListed: true }} compact />
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-zinc-800/60">
-                      <span className="text-amber-400 font-bold text-sm">
+                    <ItemCard item={{ ...listing.item, kioskListed: true }} compact />
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginTop: 6,
+                        paddingTop: 6,
+                        borderTop: "1px solid var(--sc-rim)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: "var(--sc-bronze)",
+                          fontWeight: 800,
+                          fontSize: 13,
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
                         {listing.price.toFixed(4).replace(/\.?0+$/, "")} SUI
                       </span>
                       <Button
