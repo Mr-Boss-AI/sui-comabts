@@ -1,8 +1,17 @@
 "use client";
 
+/**
+ * Phase 2 v2 — Tavern Chat panel.
+ *
+ * Gunmetal background, parchment chat text, weathered-bronze sender
+ * names (bronze for global chat, blood for whispers, weathered for
+ * system). Bronze-rim input with bronze "Send" button.
+ */
+
 import { useState, useRef, useEffect } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { BronzeButton, V2Input } from "@/components/v2";
 
 export function ChatPanel() {
   const { state } = useGame();
@@ -36,34 +45,71 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        background: "var(--sc-panel)",
+        fontFamily: "var(--font-ui)",
+        color: "var(--sc-parchment)",
+      }}
+    >
       {/* Messages */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto space-y-1 p-3 min-h-0"
+        className="scroll-plate"
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: 12,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
       >
         {chatMessages.length === 0 && (
-          <p className="text-zinc-600 text-sm text-center py-4">
+          <p
+            style={{
+              color: "var(--fg-3)",
+              fontSize: 12,
+              textAlign: "center",
+              padding: "16px 0",
+              fontStyle: "italic",
+            }}
+          >
             No messages yet. Say hello!
           </p>
         )}
         {chatMessages.map((msg) => (
-          <div key={msg.id} className="text-sm break-words">
+          <div
+            key={msg.id}
+            style={{ fontSize: 13, wordBreak: "break-word", lineHeight: 1.45 }}
+          >
             {msg.type === "system" ? (
-              <span className="text-zinc-500 italic">{msg.content}</span>
+              <span style={{ color: "var(--fg-3)", fontStyle: "italic" }}>
+                {msg.content}
+              </span>
             ) : msg.type === "whisper" ? (
               <>
-                <span className="text-purple-400 font-medium">
-                  [whisper] {msg.sender === account?.address ? `To ${msg.target}` : msg.senderName}:
+                <span
+                  style={{ color: "var(--sc-blood)", fontWeight: 700 }}
+                >
+                  [whisper]{" "}
+                  {msg.sender === account?.address
+                    ? `To ${msg.target}`
+                    : msg.senderName}
+                  :
                 </span>{" "}
-                <span className="text-purple-200">{msg.content}</span>
+                <span style={{ color: "var(--sc-parchment)" }}>{msg.content}</span>
               </>
             ) : (
               <>
-                <span className="text-emerald-400 font-medium">
+                <span style={{ color: "var(--sc-bronze)", fontWeight: 700 }}>
                   {msg.senderName}:
                 </span>{" "}
-                <span className="text-zinc-300">{msg.content}</span>
+                <span style={{ color: "var(--sc-parchment)" }}>{msg.content}</span>
               </>
             )}
           </div>
@@ -71,43 +117,65 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-zinc-800 p-2 space-y-1">
+      <div
+        style={{
+          borderTop: "1px solid var(--sc-rim)",
+          padding: 8,
+          background: "var(--sc-panel-2)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
         {whisperTarget && (
-          <div className="flex items-center gap-1 text-xs">
-            <span className="text-purple-400">
-              Whispering to {whisperTarget.slice(0, 8)}...
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+            }}
+          >
+            <span style={{ color: "var(--sc-blood)", fontWeight: 700, letterSpacing: ".06em" }}>
+              [WHISPER → {whisperTarget.slice(0, 8)}…]
             </span>
             <button
               onClick={() => setWhisperTarget("")}
-              className="text-zinc-500 hover:text-zinc-300"
+              style={{
+                background: "transparent",
+                border: 0,
+                color: "var(--fg-3)",
+                cursor: "pointer",
+                padding: 0,
+                fontSize: 12,
+              }}
             >
-              &times;
+              ×
             </button>
           </div>
         )}
-        <div className="flex gap-1">
-          <input
-            type="text"
+        <div style={{ display: "flex", gap: 6 }}>
+          <V2Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={whisperTarget ? "Whisper..." : "Type a message..."}
+            placeholder={whisperTarget ? "Whisper…" : "Type a message…"}
             maxLength={500}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+            style={{ flex: 1 }}
           />
-          <button
+          <BronzeButton
             onClick={handleSend}
             disabled={!input.trim()}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-sm font-medium disabled:opacity-40"
+            size="sm"
           >
             Send
-          </button>
+          </BronzeButton>
         </div>
       </div>
     </div>
   );
 }
 
-export function setWhisperTargetGlobal(address: string) {
+export function setWhisperTargetGlobal(_address: string) {
   // Will be connected via context if needed
 }
