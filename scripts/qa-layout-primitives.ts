@@ -159,13 +159,17 @@ function main(): void {
   // ===========================================================================
   console.log('\n[7] Character — pixel-spec equipment frame');
   const char = readSrc('frontend/src/components/character/character-profile.tsx');
-  contains(char, 'const BIG = 216', 'BIG = 216');
-  contains(char, 'const RING = 64', 'RING = 64');
-  contains(char, 'const BELT_H = 102', 'BELT_H = 102');
-  contains(char, 'const CENTER = 462', 'CENTER = 462');
-  contains(char, 'const GAP = 6', 'GAP = 6');
-  // HP bar height
-  contains(char, 'height: 40,', 'HP bar height = 40');
+  // Phase 2-fix: pixel constants now flow through a `scale` prop so the
+  // frame can shrink into a 36% column without warping its proportions.
+  // The canonical reference numbers (216 / 64 / 102 / 462) are still pinned
+  // — they're just wrapped in round(n * scale).
+  contains(char, 'const BIG = round(216)', 'BIG = round(216)');
+  contains(char, 'const RING = round(64)', 'RING = round(64)');
+  contains(char, 'const BELT_H = round(102)', 'BELT_H = round(102)');
+  contains(char, 'const CENTER = round(462)', 'CENTER = round(462)');
+  contains(char, 'round(6)', 'GAP feeds through round(6)');
+  // HP bar height — clamped above 22 so it stays readable when scaled down.
+  contains(char, 'Math.max(22, round(40))', 'HP bar height = max(22, round(40))');
   // Portrait sized at CENTER × CENTER (allow any whitespace between
   // the width + height props — exact spacing depends on formatter).
   const portraitFrameUsage = /<PortraitFrame[\s\S]*?width=\{CENTER\}[\s\S]*?height=\{CENTER\}/m;
@@ -174,8 +178,8 @@ function main(): void {
   } else {
     fail('portrait dims', 'PortraitFrame width/height not both bound to CENTER');
   }
-  // Ornament height = 120
-  contains(char, 'height={120}', 'ornament height = 120');
+  // Ornament height — scaled, with min-clamp so it stays visible.
+  contains(char, 'Math.max(60, round(120))', 'ornament height = max(60, round(120))');
 
   // ===========================================================================
   // [8] Character — slot mapping flip preserved

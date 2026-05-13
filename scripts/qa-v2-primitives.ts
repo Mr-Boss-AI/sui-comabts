@@ -247,10 +247,11 @@ function main(): void {
   }
   // Phase 2 layout sweep bumped the spec to the exact Claude Design
   // pixel values: BIG = 216, CENTER (portrait + HP + ornament) = 462.
-  // The constants are inside `EquipmentFrame`; assert their presence.
-  contains(charProfile, 'const BIG = 216', 'BIG = 216 (layout sweep pixel spec)');
-  contains(charProfile, 'const CENTER = 462', 'CENTER = 462 (portrait square + HP bar width)');
-  contains(charProfile, 'const BELT_H = 102', 'BELT_H = 102 (bottom-left tile)');
+  // Phase 2-fix wraps them in round(n * scale) so the frame can shrink
+  // into a 36% column without distorting proportions.
+  contains(charProfile, 'const BIG = round(216)', 'BIG = round(216) (layout sweep pixel spec)');
+  contains(charProfile, 'const CENTER = round(462)', 'CENTER = round(462) (portrait + HP bar width)');
+  contains(charProfile, 'const BELT_H = round(102)', 'BELT_H = round(102) (bottom-left tile)');
 
   // ===========================================================================
   // [8] Hot-paths: every screen imports v2 primitives
