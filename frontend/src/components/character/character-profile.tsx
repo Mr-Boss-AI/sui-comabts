@@ -453,10 +453,11 @@ function TribalOrnament() {
       style={{
         flex: 1,
         height: "100%",
-        minHeight: 56,
+        minHeight: 88,
         background: "var(--sc-panel-3)",
-        border: "1px solid var(--sc-rim-2)",
-        boxShadow: "var(--rim-top), inset 0 -1px 0 rgba(0,0,0,.55)",
+        border: "1px solid var(--sc-bronze-deep)",
+        boxShadow:
+          "var(--rim-top), inset 0 -2px 0 rgba(0,0,0,.55), inset 0 0 0 1px rgba(200,154,63,.08)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -464,42 +465,69 @@ function TribalOrnament() {
       }}
       aria-hidden
     >
+      {/* Bold tribal flourish — bronze hardline, twin-prong wings
+          extending from the central SUI medallion. Sized via viewBox so
+          it scales with the bottom-row height. */}
       <svg
-        viewBox="0 0 360 60"
+        viewBox="0 0 480 110"
         width="100%"
         height="100%"
         preserveAspectRatio="xMidYMid meet"
         fill="none"
       >
+        {/* Outer halo */}
         <g
-          stroke="var(--sc-rim-2)"
-          strokeWidth={1.5}
+          stroke="var(--sc-bronze-deep)"
+          strokeWidth={2.5}
           strokeLinecap="round"
+          fill="none"
+          opacity={0.55}
         >
-          {/* Left flourish */}
-          <path d="M40 30 Q 80 8 130 22 Q 160 30 170 30" />
-          <path d="M40 30 Q 80 52 130 38 Q 160 30 170 30" />
-          <path d="M70 12 L 60 24 M 90 18 L 78 28 M 50 18 L 62 30" />
-          {/* Right flourish (mirrored) */}
-          <path d="M320 30 Q 280 8 230 22 Q 200 30 190 30" />
-          <path d="M320 30 Q 280 52 230 38 Q 200 30 190 30" />
-          <path d="M290 12 L 300 24 M 270 18 L 282 28 M 310 18 L 298 30" />
+          {/* LEFT flourish — twin upward sweeps + tooth accents */}
+          <path d="M40 55 Q 110 14 180 38 Q 215 50 225 55" />
+          <path d="M40 55 Q 110 96 180 72 Q 215 60 225 55" />
+          <path d="M70 22 L 56 40 M 100 30 L 84 46 M 130 36 L 116 52 M 50 32 L 66 50" />
+          <path d="M70 88 L 56 70 M 100 80 L 84 64 M 130 74 L 116 58" />
+          {/* RIGHT flourish (mirrored) */}
+          <path d="M440 55 Q 370 14 300 38 Q 265 50 255 55" />
+          <path d="M440 55 Q 370 96 300 72 Q 265 60 255 55" />
+          <path d="M410 22 L 424 40 M 380 30 L 396 46 M 350 36 L 364 52 M 430 32 L 414 50" />
+          <path d="M410 88 L 424 70 M 380 80 L 396 64 M 350 74 L 364 58" />
         </g>
-        <g stroke="var(--sc-bronze)" strokeWidth={1.5} fill="none">
-          <circle cx="180" cy="30" r="14" />
-          <circle cx="180" cy="30" r="9" />
+        {/* Tooth/spike accents — bronze hardline */}
+        <g
+          stroke="var(--sc-bronze)"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          fill="none"
+        >
+          <path d="M155 28 L 165 42 L 175 28 M 175 82 L 165 68 L 155 82" />
+          <path d="M325 28 L 315 42 L 305 28 M 305 82 L 315 68 L 325 82" />
+        </g>
+        {/* Central medallion — bronze double-ring with SUI mark */}
+        <g fill="none">
+          <circle cx="240" cy="55" r="26" stroke="var(--sc-bronze)" strokeWidth={2.2} />
+          <circle cx="240" cy="55" r="20" stroke="var(--sc-bronze-deep)" strokeWidth={1.4} />
+          <circle cx="240" cy="55" r="14" stroke="var(--sc-bronze)" strokeWidth={1.8} />
         </g>
         <text
-          x="180"
-          y="34"
+          x="240"
+          y="62"
           textAnchor="middle"
           fontFamily="var(--font-display)"
-          fontSize="13"
+          fontSize="20"
           fill="var(--sc-bronze)"
-          letterSpacing="1"
+          letterSpacing="0.05em"
         >
           SUI
         </text>
+        {/* Four corner studs */}
+        <g fill="var(--sc-bronze)">
+          <circle cx="14" cy="14" r="2.2" />
+          <circle cx="466" cy="14" r="2.2" />
+          <circle cx="14" cy="96" r="2.2" />
+          <circle cx="466" cy="96" r="2.2" />
+        </g>
       </svg>
     </div>
   );
@@ -781,17 +809,23 @@ export function CharacterProfile({
   ];
 
   // Slot dimensions — rectangular for body armor, square-ish for jewelry.
-  // Big slot ratio matches the reference image (≈ 1 : 1.13 W:H).
-  // The numbers are hand-tuned for a comfortable density on a 1280px
-  // viewport; the central portrait fills whatever remains.
-  const BIG_W = 88;
-  const BIG_H = 100;
-  const RING_W = 40;
-  const RING_H = 40;
-  const BOT_W = 88;
-  const BOT_H = 64;
+  // Sized to match the reference image directly: tall rectangular tiles
+  // ~145×170 (≈ 1 : 1.17 W:H, golden-ratio-ish). Reference shows the
+  // slots are the dominant visual element of the frame, not an
+  // afterthought next to the portrait. Bumped 88→145 (W) and 100→170 (H)
+  // after live QA — user said "make slots more to size of reference."
+  const BIG_W = 145;
+  const BIG_H = 170;
+  // 3-ring row inside the right column. Ring tiles are square so the
+  // whole row sits side-by-side at the same width as the big slots.
+  const RING_W = 44;
+  const RING_H = 44;
+  // Bottom row (Belt · Ornament · Boots) — shorter tiles since the
+  // ornament takes the middle. Matches reference bottom-row proportions.
+  const BOT_W = 145;
+  const BOT_H = 102;
   const COL_GAP = 6;
-  const SLOT_GAP = 5;
+  const SLOT_GAP = 6;
 
   // HP derived from combat stats. Server doesn't currently expose
   // current-HP outside a fight; we show full HP on the doll which is
@@ -965,14 +999,18 @@ export function CharacterProfile({
                 onClick={() => setSelectedSlot("helmet")}
                 emptyLabel="Helmet"
               />
+              {/* v5.1 Bracers — forearm armor; today's contract has no
+                  slot for these. Layout pre-allocates the space so v5.1
+                  lights up without restructure. Flipped from right col
+                  to left col per user QA 2026-05-13 (reference image
+                  shows the leather forearm bracers on the LEFT side). */}
               <SlotTile
-                slot="gloves"
-                item={eq.gloves}
+                slot={null}
+                item={null}
+                future
+                futureLabel="Bracers"
                 w={BIG_W}
                 h={BIG_H}
-                isDirty={dirtySlots.has("gloves")}
-                onClick={() => setSelectedSlot("gloves")}
-                emptyLabel="Gloves"
               />
               <SlotTile
                 slot="weapon"
@@ -1030,11 +1068,12 @@ export function CharacterProfile({
                 onClick={() => setSelectedSlot("necklace")}
                 emptyLabel="Necklace"
               />
-              {/* Ring row — 3 ring slots; ring3 reserved for v5.1. */}
+              {/* Ring row — 3 ring slots; ring3 reserved for v5.1.
+                  Three equal-width square tiles spanning the column. */}
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, 1fr)",
                   gap: SLOT_GAP,
                   height: RING_H,
                   width: BIG_W,
@@ -1043,7 +1082,7 @@ export function CharacterProfile({
                 <SlotTile
                   slot="ring1"
                   item={eq.ring1}
-                  w={RING_W * 0.65}
+                  w={(BIG_W - SLOT_GAP * 2) / 3}
                   h={RING_H}
                   isDirty={dirtySlots.has("ring1")}
                   onClick={() => setSelectedSlot("ring1")}
@@ -1051,7 +1090,7 @@ export function CharacterProfile({
                 <SlotTile
                   slot="ring2"
                   item={eq.ring2}
-                  w={RING_W * 0.65}
+                  w={(BIG_W - SLOT_GAP * 2) / 3}
                   h={RING_H}
                   isDirty={dirtySlots.has("ring2")}
                   onClick={() => setSelectedSlot("ring2")}
@@ -1061,20 +1100,22 @@ export function CharacterProfile({
                   item={null}
                   future
                   futureLabel="Ring 3"
-                  w={RING_W * 0.65}
+                  w={(BIG_W - SLOT_GAP * 2) / 3}
                   h={RING_H}
                 />
               </div>
-              {/* v5.1 Bracers — armlet/shoulder armor; today's contract
-                  has no slot for these. Layout pre-allocates the space
-                  so v5.1 lights up without restructure. */}
+              {/* Canonical Gloves slot — flipped from left col per user
+                  QA 2026-05-13 (reference image shows the red gauntlets
+                  on the RIGHT side; the left forearm bracers are v5.1
+                  future). */}
               <SlotTile
-                slot={null}
-                item={null}
-                future
-                futureLabel="Bracers"
+                slot="gloves"
+                item={eq.gloves}
                 w={BIG_W}
                 h={BIG_H}
+                isDirty={dirtySlots.has("gloves")}
+                onClick={() => setSelectedSlot("gloves")}
+                emptyLabel="Gloves"
               />
               <SlotTile
                 slot="offhand"
