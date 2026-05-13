@@ -14,6 +14,8 @@ import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager } from "@/lib/wager-accept-gate";
 import { computeBusyState, decideMatchmakingRender } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
+import { ScreenLayout, TopBanner, SectionHeader } from "@/components/v2/layout";
+import { BronzeButton, SecondaryButton, Stamp } from "@/components/v2";
 
 function suiFromMist(stakeMist: string): string {
   try {
@@ -432,60 +434,151 @@ export function MatchmakingQueue() {
     }
   }, [dAppKit, state.socket, dispatch]);
 
-  // Show queue status (friendly/ranked only)
+  // Show queue status (friendly/ranked only) — matches the Claude
+  // Design Arena screenshot: gunmetal panel, frog mascot top, Slackey
+  // "Looking for fighter…" headline, mono ETA, Cancel + Widen ELO
+  // Range action row.
   if (fightQueue) {
     return (
-      <Card glow>
-        <CardBody className="text-center space-y-4 py-8">
-          <div className="relative mx-auto w-16 h-16">
-            <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping" />
-            <div className="absolute inset-2 rounded-full border-2 border-emerald-500 animate-spin" style={{ borderTopColor: "transparent" }} />
-          </div>
-          <div>
-            <div className="text-lg font-semibold">Finding opponent...</div>
-            <div className="text-sm text-zinc-400 mt-1">
-              Queued for {fightQueue} fight
+      <ScreenLayout>
+        <TopBanner
+          title="Arena"
+          subtitle="Friendly · Ranked · Wager — pick your queue. Real SUI rides on wagers."
+          pill="testnet"
+          tone="blood"
+        />
+        <div>
+          <SectionHeader
+            title="Queue"
+            right={<Stamp tone="bronze">Searching…</Stamp>}
+            size="lg"
+          />
+          <div
+            style={{
+              background: "var(--sc-panel)",
+              border: "1px solid var(--sc-rim)",
+              borderRadius: "var(--r-card)",
+              boxShadow: "var(--sh-plate-lg), var(--rim-top), var(--rim-bottom)",
+              padding: "32px 24px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 14,
+              fontFamily: "var(--font-ui)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 80,
+                lineHeight: 1,
+                filter: "drop-shadow(0 4px 8px rgba(0,0,0,.5))",
+                animation: "queue-bob 2.2s ease-in-out infinite",
+              }}
+              aria-hidden
+            >
+              🐸
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 36,
+                color: "var(--sc-parchment)",
+                letterSpacing: "0.01em",
+                textAlign: "center",
+              }}
+            >
+              Looking for fighter…
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                color: "var(--fg-3)",
+                fontFamily: "var(--font-mono)",
+                textAlign: "center",
+              }}
+            >
+              Queued for {fightQueue} fight · matchmaking by ELO · ETA &lt; 60s
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <SecondaryButton onClick={handleCancel}>Cancel</SecondaryButton>
+              <BronzeButton onClick={handleCancel}>Widen ELO Range</BronzeButton>
             </div>
           </div>
-          <Button variant="secondary" onClick={handleCancel}>
-            Cancel
-          </Button>
-        </CardBody>
-      </Card>
+          <style>{`@keyframes queue-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
+        </div>
+      </ScreenLayout>
     );
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <span className="font-semibold">Find a Fight</span>
-      </CardHeader>
-      <CardBody className="space-y-3">
-        {/* Fight type selector — hidden when the player is busy in
-            another mode (Bucket 2 polish, 2026-05-04). The active state
-            (open wager, queue panel, fight) is self-explanatory and
-            cluttering the UI with greyed-out cards adds noise without
-            information. */}
+    <ScreenLayout>
+      <TopBanner
+        title="Arena"
+        subtitle="Friendly · Ranked · Wager — pick your queue. Real SUI rides on wagers."
+        pill="testnet"
+        tone="blood"
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Fight type selector — 3-up chunky tiles. Hidden when the
+            player is busy in another mode (Bucket 2 polish). */}
         {slots.showFightTypes && (
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 8,
+              gap: 16,
             }}
           >
             {FIGHT_TYPES.map(({ type, label, desc, minLevel }) => {
               const locked = level < minLevel;
               const active = selectedType === type;
-              // Tone-coded per fight type: friendly = steel-blue,
-              // ranked = bronze, wager = blood-red. Matches the
-              // design-tool ArenaScreen reference.
-              const tone =
+              // Tone palettes per the Arena screenshot:
+              //   friendly → parchment fill, page text, steel accent
+              //   ranked   → bronze fill, page text, bronze-deep border
+              //   wager    → blood-red fill, parchment text, blood-deep border
+              const palette =
                 type === "friendly"
-                  ? { active: "var(--sc-steel)", bg: "rgba(109,143,163,0.18)" }
-                  : type === "wager"
-                    ? { active: "var(--sc-blood)", bg: "rgba(181,61,44,0.16)" }
-                    : { active: "var(--sc-bronze)", bg: "rgba(200,154,63,0.18)" };
+                  ? {
+                      bg: "var(--sc-parchment)",
+                      text: "var(--sc-page)",
+                      sub: "rgba(10,13,18,0.65)",
+                      border: active ? "var(--sc-steel)" : "var(--sc-rim-2)",
+                      shadow: active
+                        ? "5px 5px 0 0 var(--sc-steel-deep)"
+                        : "3px 3px 0 0 #000",
+                      cta: "var(--sc-page)",
+                      ctaBg: "var(--sc-parchment)",
+                      ctaBorder: "var(--sc-rim-2)",
+                    }
+                  : type === "ranked"
+                    ? {
+                        bg: "var(--sc-bronze)",
+                        text: "var(--sc-page)",
+                        sub: "rgba(10,13,18,0.72)",
+                        border: active
+                          ? "var(--sc-page)"
+                          : "var(--sc-bronze-deep)",
+                        shadow: active
+                          ? "5px 5px 0 0 var(--sc-bronze-deep)"
+                          : "3px 3px 0 0 #000",
+                        cta: "var(--sc-bronze)",
+                        ctaBg: "var(--sc-page)",
+                        ctaBorder: "var(--sc-bronze)",
+                      }
+                    : {
+                        bg: "var(--sc-blood)",
+                        text: "var(--sc-parchment)",
+                        sub: "rgba(232,226,212,0.75)",
+                        border: active
+                          ? "var(--sc-parchment)"
+                          : "var(--sc-blood-deep)",
+                        shadow: active
+                          ? "5px 5px 0 0 var(--sc-blood-deep)"
+                          : "3px 3px 0 0 #000",
+                        cta: "var(--sc-page)",
+                        ctaBg: "var(--sc-bronze)",
+                        ctaBorder: "var(--sc-bronze-deep)",
+                      };
               return (
                 <button
                   key={type}
@@ -493,57 +586,133 @@ export function MatchmakingQueue() {
                   onClick={() => setSelectedType(type)}
                   style={{
                     textAlign: "left",
-                    padding: 14,
-                    border: `2px solid ${active ? tone.active : "var(--sc-rim-2)"}`,
-                    background: active ? tone.bg : "var(--sc-panel-2)",
-                    color: "var(--sc-parchment)",
-                    borderRadius: "var(--r-card)",
-                    boxShadow: active ? "var(--sh-plate-sm)" : "var(--rim-top), var(--rim-bottom)",
+                    padding: "24px 24px 20px",
+                    border: `3px solid ${palette.border}`,
+                    background: palette.bg,
+                    color: palette.text,
+                    borderRadius: "var(--r-sharp)",
+                    boxShadow: palette.shadow,
                     cursor: locked ? "not-allowed" : "pointer",
                     opacity: locked ? 0.4 : 1,
                     fontFamily: "var(--font-ui)",
-                    transition: "all var(--d-fast)",
+                    minHeight: 260,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    transition:
+                      "transform var(--d-base) var(--ease-pop), box-shadow var(--d-base) var(--ease-pop)",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!locked && !active) {
+                      e.currentTarget.style.transform = "translate(-1px,-1px)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "";
                   }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 4,
-                    }}
-                  >
-                    <span
+                  <div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 26,
+                          lineHeight: 1,
+                          fontFamily: "var(--font-display)",
+                          color: palette.text,
+                          opacity: 0.78,
+                        }}
+                        aria-hidden
+                      >
+                        {type === "friendly"
+                          ? "⚔"
+                          : type === "ranked"
+                            ? "♔"
+                            : "$"}
+                      </span>
+                      {active && (
+                        <span
+                          style={{
+                            fontFamily: "var(--font-ui)",
+                            fontWeight: 800,
+                            fontSize: 9,
+                            letterSpacing: "var(--ls-stamp)",
+                            textTransform: "uppercase",
+                            padding: "3px 9px",
+                            background: "var(--sc-page)",
+                            color: palette.cta === "var(--sc-page)" ? "var(--sc-bronze)" : palette.cta,
+                            border: `1px solid ${palette.cta === "var(--sc-page)" ? "var(--sc-bronze)" : palette.cta}`,
+                            borderRadius: "var(--r-pill)",
+                          }}
+                        >
+                          Selected
+                        </span>
+                      )}
+                      {locked && (
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: 11,
+                            color: palette.sub,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Lv.{minLevel}+
+                        </span>
+                      )}
+                    </div>
+                    <div
                       style={{
                         fontFamily: "var(--font-display)",
-                        fontSize: 18,
-                        color: active ? tone.active : "var(--sc-parchment)",
+                        fontSize: 52,
+                        lineHeight: 1,
+                        marginTop: 12,
+                        letterSpacing: "-0.01em",
+                        color: palette.text,
                       }}
                     >
                       {label}
-                    </span>
-                    {locked && (
-                      <span
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 10,
-                          color: "var(--fg-3)",
-                        }}
-                      >
-                        Lv.{minLevel}+
-                      </span>
-                    )}
+                    </div>
+                    <p
+                      style={{
+                        margin: "6px 0 0",
+                        fontSize: 14,
+                        color: palette.sub,
+                        lineHeight: 1.45,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {desc}
+                    </p>
                   </div>
-                  <p
+                  <div
                     style={{
-                      margin: 0,
-                      fontSize: 11,
-                      color: "var(--fg-3)",
-                      lineHeight: 1.4,
+                      fontFamily: "var(--font-ui)",
+                      fontWeight: 800,
+                      fontSize: 12,
+                      letterSpacing: "var(--ls-button)",
+                      textTransform: "uppercase",
+                      padding: "10px 14px",
+                      background: palette.ctaBg,
+                      color: palette.cta,
+                      border: `2px solid ${palette.ctaBorder}`,
+                      borderRadius: "var(--r-sharp)",
+                      textAlign: "center",
+                      boxShadow: "var(--sh-plate-sm)",
                     }}
                   >
-                    {desc}
-                  </p>
+                    {type === "friendly"
+                      ? "Find a sparring partner"
+                      : type === "ranked"
+                        ? "Enter Queue ▾"
+                        : "Create Wager ▾"}
+                  </div>
                 </button>
               );
             })}
@@ -781,7 +950,7 @@ export function MatchmakingQueue() {
             Enter Queue
           </Button>
         )}
-      </CardBody>
-    </Card>
+      </div>
+    </ScreenLayout>
   );
 }
