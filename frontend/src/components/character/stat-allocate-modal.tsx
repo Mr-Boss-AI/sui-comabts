@@ -124,39 +124,127 @@ export function StatAllocateModal({
     endurance: "Endurance",
   };
   const colors: Record<keyof CharacterStats, string> = {
-    strength: "text-red-400",
-    dexterity: "text-cyan-400",
-    intuition: "text-purple-400",
-    endurance: "text-amber-400",
+    strength: "var(--stat-str)",
+    dexterity: "var(--stat-dex)",
+    intuition: "var(--stat-int)",
+    endurance: "var(--stat-end)",
   };
 
   return (
     <Modal open onClose={onClose} title={`Allocate ${available} Stat Points`}>
-      <div className="space-y-4">
-        <p className="text-sm text-zinc-400">
-          Remaining: <span className="text-amber-400 font-bold">{remaining}</span>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          fontFamily: "var(--font-ui)",
+          color: "var(--sc-parchment)",
+        }}
+      >
+        <p
+          style={{
+            margin: 0,
+            fontSize: 12,
+            color: "var(--fg-2)",
+            fontFamily: "var(--font-ui)",
+          }}
+        >
+          Remaining:{" "}
+          <span
+            style={{
+              color: "var(--sc-bronze)",
+              fontWeight: 800,
+              fontFamily: "var(--font-mono)",
+              fontSize: 14,
+            }}
+          >
+            {remaining}
+          </span>
         </p>
         {stats.map((stat) => (
-          <div key={stat} className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className={`font-medium ${colors[stat]}`}>{labels[stat]}</span>
-              <span className="text-xs text-zinc-500">
-                ({character.stats[stat]} + {alloc[stat]})
+          <div
+            key={stat}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "6px 10px",
+              background: "var(--sc-panel-2)",
+              border: "1px solid var(--sc-rim)",
+              borderLeft: `3px solid ${colors[stat]}`,
+              borderRadius: "var(--r-card)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span
+                style={{
+                  fontWeight: 800,
+                  fontSize: 13,
+                  color: colors[stat],
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {labels[stat]}
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--fg-3)",
+                }}
+              >
+                {character.stats[stat]} + {alloc[stat]}
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <button
                 onClick={() => adjust(stat, -1)}
                 disabled={alloc[stat] <= 0 || signing}
-                className="w-7 h-7 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-sm font-bold"
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: "var(--sc-page)",
+                  color: "var(--sc-parchment)",
+                  border: `1px solid ${alloc[stat] > 0 ? "var(--sc-bronze)" : "var(--sc-rim-2)"}`,
+                  borderRadius: "var(--r-sm)",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  cursor: alloc[stat] > 0 ? "pointer" : "not-allowed",
+                  opacity: alloc[stat] > 0 ? 1 : 0.3,
+                  fontFamily: "var(--font-mono)",
+                }}
               >
-                -
+                −
               </button>
-              <span className="w-6 text-center font-mono">{alloc[stat]}</span>
+              <span
+                style={{
+                  width: 32,
+                  textAlign: "center",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 800,
+                  fontSize: 16,
+                  color: alloc[stat] > 0 ? "var(--sc-bronze)" : "var(--sc-parchment)",
+                }}
+              >
+                {alloc[stat]}
+              </span>
               <button
                 onClick={() => adjust(stat, 1)}
                 disabled={remaining <= 0 || signing}
-                className="w-7 h-7 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-sm font-bold"
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: remaining > 0 ? "var(--sc-bronze)" : "var(--sc-panel-2)",
+                  color: remaining > 0 ? "var(--sc-page)" : "var(--fg-3)",
+                  border: `1px solid ${remaining > 0 ? "var(--sc-bronze-deep)" : "var(--sc-rim-2)"}`,
+                  borderRadius: "var(--r-sm)",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  cursor: remaining > 0 ? "pointer" : "not-allowed",
+                  opacity: remaining > 0 ? 1 : 0.3,
+                  fontFamily: "var(--font-mono)",
+                  boxShadow: remaining > 0 ? "var(--sh-plate-sm)" : "none",
+                }}
               >
                 +
               </button>
@@ -164,19 +252,41 @@ export function StatAllocateModal({
           </div>
         ))}
         {characterObjectId && (
-          <p className="text-xs text-zinc-500">
+          <p
+            style={{
+              margin: 0,
+              fontSize: 11,
+              color: "var(--fg-3)",
+              lineHeight: 1.45,
+            }}
+          >
             This will open your wallet to sign the transaction on-chain.
           </p>
         )}
         {awaitingChain && (
-          <p className="text-xs text-amber-400">
+          <p
+            style={{
+              margin: 0,
+              fontSize: 11,
+              color: "var(--sc-bronze)",
+              padding: "8px 10px",
+              background: "rgba(200,154,63,.10)",
+              borderLeft: "3px solid var(--sc-bronze)",
+              borderRadius: "var(--r-sm)",
+              lineHeight: 1.45,
+            }}
+          >
             Chain state is catching up after your last fight. A few of your
             new points haven&apos;t landed on chain yet — they&apos;ll appear
             here in 5–10 seconds.
           </p>
         )}
-        <Button onClick={handleAllocate} disabled={used === 0 || signing} className="w-full">
-          {signing ? "Signing transaction..." : "Allocate Points"}
+        <Button
+          onClick={handleAllocate}
+          disabled={used === 0 || signing}
+          style={{ width: "100%" }}
+        >
+          {signing ? "Signing transaction…" : "Allocate Points"}
         </Button>
       </div>
     </Modal>
