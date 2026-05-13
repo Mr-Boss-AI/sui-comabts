@@ -1,29 +1,27 @@
 "use client";
 
 /**
- * Hall of Fame leaderboard — Bucket 3 #2.
+ * Phase 2 v2 — Hall of Fame leaderboard.
  *
- * Replaces the legacy flat table with:
- *   • Sort toggles on every column (Rank / Name / Lv / Rating / W / L /
- *     Win%). Clicking the active column flips direction; clicking a
- *     different column switches with that column's natural default.
- *   • Filter row — level bucket chips (matches Tavern's SIDEBAR_BUCKETS)
- *     + build classifier chips (Crit / Evasion / Tank / Hybrid) + a
- *     search box.
- *   • Live chip counts so the player sees how many entries match.
- *   • Click-through to the existing PlayerProfileModal — same component
- *     the Tavern sidebar uses; we just dispatch OPEN_PROFILE.
- *   • Pagination — 20 rows per page, "Load more" button below the table.
- *     No infinite scroll.
- *   • Empty + loading states.
- *
- * Pure helpers live in `lib/hall-of-fame-{sort,filter,display}.ts` so
- * the rendering logic is covered by `qa-hall-of-fame.ts`.
+ * Bronze-rim panel with the title in Slackey display font. Filter row
+ * uses V2Chip in tone-matched colours (level filters in steel,
+ * build filters in archetype hues). Column headers in uppercase
+ * weathered-bronze with sort indicators. Row hover lifts to gunmetal,
+ * row click opens the v2 PlayerProfileModal.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { useGame } from "@/hooks/useGameStore";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import {
+  RimFrame,
+  DisplayTitle,
+  Stamp,
+  V2Chip,
+  V2Input,
+  SectionLabel,
+  GhostButton,
+  BronzeButton,
+} from "@/components/v2";
 import {
   DEFAULT_DIR,
   nextSortState,
@@ -47,38 +45,49 @@ import {
   PAGE_SIZE,
   formatWinRatePct,
   paginateEntries,
-  rankColor,
 } from "@/lib/hall-of-fame-display";
 
 const COLUMN_LABELS: Record<SortKey, string> = {
   rank: "#",
-  level: "Level",
+  level: "Lv",
   rating: "Rating",
   wins: "W",
   losses: "L",
   winRate: "Win%",
 };
 
-const BUILD_BADGE_COLOR: Record<ReturnType<typeof classifyBuild>, string> = {
-  crit: "text-red-400",
-  evasion: "text-cyan-400",
-  tank: "text-amber-400",
-  hybrid: "text-zinc-400",
+const BUILD_COLOR: Record<ReturnType<typeof classifyBuild>, string> = {
+  crit: "var(--sc-blood)",
+  evasion: "var(--sc-steel)",
+  tank: "var(--sc-bronze)",
+  hybrid: "var(--fg-3)",
 };
-
-const BUILD_BADGE_LABEL: Record<ReturnType<typeof classifyBuild>, string> = {
+const BUILD_LABEL: Record<ReturnType<typeof classifyBuild>, string> = {
   crit: "Crit",
   evasion: "Eva",
   tank: "Tank",
   hybrid: "Hyb",
 };
+const BUILD_TONE: Record<BuildFilter, "blood" | "steel" | "bronze"> = {
+  all: "bronze",
+  crit: "blood",
+  evasion: "steel",
+  tank: "bronze",
+  hybrid: "steel",
+};
+
+function rankColorVar(rank: number): string {
+  if (rank === 1) return "var(--sc-bronze-glow)";
+  if (rank === 2) return "var(--sc-parchment)";
+  if (rank === 3) return "var(--sc-bronze-deep)";
+  return "var(--fg-3)";
+}
 
 export function Leaderboard() {
   const { state, dispatch } = useGame();
   const { leaderboard, socket } = state;
   const [loaded, setLoaded] = useState(false);
 
-  // Sort + filter + pagination state.
   const [sort, setSort] = useState<SortState>({
     key: "rating",
     dir: DEFAULT_DIR.rating,
@@ -95,9 +104,6 @@ export function Leaderboard() {
     }
   }, [socket.connected, socket]);
 
-  // Reset pagination when the filter changes — otherwise a player at
-  // page 3 of a 60-row list would see an empty body after filtering
-  // down to 10 rows.
   useEffect(() => {
     setPage(1);
   }, [levelFilter, buildFilter, search]);
@@ -117,10 +123,7 @@ export function Leaderboard() {
     () => filterEntries(leaderboard, filterState),
     [leaderboard, filterState],
   );
-  const sorted = useMemo(
-    () => sortLeaderboard(filtered, sort),
-    [filtered, sort],
-  );
+  const sorted = useMemo(() => sortLeaderboard(filtered, sort), [filtered, sort]);
   const view = useMemo(
     () => paginateEntries(sorted, { currentPage: page, pageSize: PAGE_SIZE }),
     [sorted, page],
@@ -129,175 +132,166 @@ export function Leaderboard() {
   function clickHeader(key: SortKey) {
     setSort((prev) => nextSortState(prev, key));
   }
-
   function openProfile(walletAddress: string) {
     dispatch({ type: "OPEN_PROFILE", walletAddress });
   }
 
-  // Initial loading state — server hasn't replied to get_leaderboard yet.
   const isLoading = !loaded || (leaderboard.length === 0 && !loaded);
   const isEmptyOverall = loaded && leaderboard.length === 0;
   const isEmptyAfterFilter = !isEmptyOverall && filtered.length === 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <span className="font-semibold">Hall of Fame — Top Fighters</span>
-          <span className="text-[11px] text-zinc-500">
-            {leaderboard.length} ranked
-          </span>
-        </div>
-      </CardHeader>
-      <CardBody>
-        {/* === Filter row === */}
-        <div className="space-y-2 mb-3">
-          <input
+    <RimFrame padless>
+      {/* Header */}
+      <div
+        style={{
+          padding: "12px 16px",
+          borderBottom: "1px solid var(--sc-rim)",
+          background: "var(--sc-panel-2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <DisplayTitle size="md">Hall of Fame — Top Fighters</DisplayTitle>
+        <Stamp tone="bronze">{leaderboard.length} ranked</Stamp>
+      </div>
+
+      <div style={{ padding: 14 }}>
+        {/* Filters */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+          <V2Input
             type="text"
             placeholder="Search by name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+            style={{ width: "100%" }}
           />
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-amber-700/80 font-bold mb-1">
-              Level
-            </div>
-            <div className="flex flex-wrap gap-1">
+            <SectionLabel>Level</SectionLabel>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {LEVEL_BUCKET_OPTIONS.map((opt) => {
-                const count = levelCounts[opt.key] ?? 0;
                 const range =
                   opt.key === "all"
                     ? ""
-                    : ` Lv ${opt.minLevel}${
-                        opt.maxLevel < 99 ? `-${opt.maxLevel}` : "+"
-                      }`;
+                    : ` Lv ${opt.minLevel}${opt.maxLevel < 99 ? `-${opt.maxLevel}` : "+"}`;
                 return (
-                  <button
+                  <V2Chip
                     key={opt.key}
+                    active={levelFilter === opt.key}
+                    tone="steel"
+                    count={levelCounts[opt.key] ?? 0}
                     onClick={() => setLevelFilter(opt.key)}
-                    className={`text-[11px] px-2 py-0.5 rounded font-medium transition-colors ${
-                      levelFilter === opt.key
-                        ? "bg-amber-700/40 text-amber-200 border border-amber-600"
-                        : "bg-zinc-900 text-zinc-500 border border-zinc-800 hover:text-zinc-300"
-                    }`}
                   >
                     {opt.label}
-                    {range && (
-                      <span className="text-zinc-600">
-                        {" "}
-                        ·{range}
-                      </span>
-                    )}
-                    <span className="ml-1 text-zinc-600">· {count}</span>
-                  </button>
+                    {range && <span style={{ color: "var(--fg-3)" }}>{range}</span>}
+                  </V2Chip>
                 );
               })}
             </div>
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-amber-700/80 font-bold mb-1">
-              Build
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {BUILD_FILTER_OPTIONS.map((opt) => {
-                const count = builds[opt.key] ?? 0;
-                return (
-                  <button
-                    key={opt.key}
-                    onClick={() => setBuildFilter(opt.key)}
-                    className={`text-[11px] px-2 py-0.5 rounded font-medium transition-colors ${
-                      buildFilter === opt.key
-                        ? "bg-emerald-700/40 text-emerald-200 border border-emerald-600"
-                        : "bg-zinc-900 text-zinc-500 border border-zinc-800 hover:text-zinc-300"
-                    }`}
-                  >
-                    {opt.label}
-                    <span className="ml-1 text-zinc-600">· {count}</span>
-                  </button>
-                );
-              })}
+            <SectionLabel>Build</SectionLabel>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {BUILD_FILTER_OPTIONS.map((opt) => (
+                <V2Chip
+                  key={opt.key}
+                  active={buildFilter === opt.key}
+                  tone={BUILD_TONE[opt.key]}
+                  count={builds[opt.key] ?? 0}
+                  onClick={() => setBuildFilter(opt.key)}
+                >
+                  {opt.label}
+                </V2Chip>
+              ))}
             </div>
           </div>
         </div>
 
-        {/* === Body === */}
+        {/* Body */}
         {isLoading && (
-          <div className="flex items-center justify-center py-10 text-sm text-zinc-500">
-            <div className="h-5 w-5 rounded-full border-2 border-zinc-700 border-t-emerald-400 animate-spin mr-3" />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 40,
+              gap: 12,
+              color: "var(--fg-3)",
+              fontSize: 12,
+            }}
+          >
+            <span
+              style={{
+                width: 16,
+                height: 16,
+                borderRadius: 999,
+                border: "2px solid var(--sc-rim-2)",
+                borderTopColor: "var(--sc-bronze)",
+                animation: "spin 1s linear infinite",
+              }}
+            />
+            <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
             Loading leaderboard…
           </div>
         )}
-
         {isEmptyOverall && (
-          <p className="text-zinc-500 text-sm text-center py-8">
-            No fighters yet — win a battle to claim your spot!
+          <p style={{ color: "var(--fg-3)", fontSize: 13, textAlign: "center", padding: "32px 0", fontStyle: "italic" }}>
+            No fighters yet — win a battle to claim your spot.
           </p>
         )}
-
         {isEmptyAfterFilter && (
-          <p className="text-zinc-500 text-sm text-center py-8">
+          <p style={{ color: "var(--fg-3)", fontSize: 13, textAlign: "center", padding: "32px 0", fontStyle: "italic" }}>
             No fighters match your filters.
           </p>
         )}
 
         {!isLoading && !isEmptyOverall && !isEmptyAfterFilter && (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontFamily: "var(--font-ui)",
+                }}
+              >
                 <thead>
-                  <tr className="text-zinc-500 text-xs uppercase border-b border-zinc-800">
-                    <SortHeader
-                      column="rank"
-                      sort={sort}
-                      onClick={clickHeader}
-                      align="left"
-                      width="w-10"
+                  <tr style={{ borderBottom: "2px solid var(--sc-bronze-deep)" }}>
+                    <SortHeader column="rank" sort={sort} onClick={clickHeader} align="left" width={48} />
+                    <th
+                      style={{
+                        padding: "8px 4px",
+                        textAlign: "left",
+                        color: "var(--fg-3)",
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: "var(--ls-stamp)",
+                        textTransform: "uppercase",
+                      }}
                     >
-                      #
-                    </SortHeader>
-                    <th className="py-2 text-left">Name</th>
-                    <SortHeader
-                      column="level"
-                      sort={sort}
-                      onClick={clickHeader}
-                      align="right"
+                      Name
+                    </th>
+                    <SortHeader column="level" sort={sort} onClick={clickHeader} align="right" />
+                    <th
+                      style={{
+                        padding: "8px 4px",
+                        textAlign: "right",
+                        color: "var(--fg-3)",
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: "var(--ls-stamp)",
+                        textTransform: "uppercase",
+                      }}
                     >
-                      Lv
-                    </SortHeader>
-                    <th className="py-2 text-right text-[10px]">Build</th>
-                    <SortHeader
-                      column="rating"
-                      sort={sort}
-                      onClick={clickHeader}
-                      align="right"
-                    >
-                      Rating
-                    </SortHeader>
-                    <SortHeader
-                      column="wins"
-                      sort={sort}
-                      onClick={clickHeader}
-                      align="right"
-                    >
-                      W
-                    </SortHeader>
-                    <SortHeader
-                      column="losses"
-                      sort={sort}
-                      onClick={clickHeader}
-                      align="right"
-                    >
-                      L
-                    </SortHeader>
-                    <SortHeader
-                      column="winRate"
-                      sort={sort}
-                      onClick={clickHeader}
-                      align="right"
-                    >
-                      Win%
-                    </SortHeader>
+                      Build
+                    </th>
+                    <SortHeader column="rating" sort={sort} onClick={clickHeader} align="right" />
+                    <SortHeader column="wins" sort={sort} onClick={clickHeader} align="right" />
+                    <SortHeader column="losses" sort={sort} onClick={clickHeader} align="right" />
+                    <SortHeader column="winRate" sort={sort} onClick={clickHeader} align="right" />
                   </tr>
                 </thead>
                 <tbody>
@@ -309,37 +303,94 @@ export function Leaderboard() {
                         key={`${entry.walletAddress}-${entry.rank}`}
                         onClick={() => openProfile(entry.walletAddress)}
                         title={`View ${entry.name}'s profile`}
-                        className="border-b border-zinc-800/50 hover:bg-zinc-800/40 cursor-pointer transition-colors"
+                        style={{
+                          borderBottom: "1px solid var(--sc-rim)",
+                          cursor: "pointer",
+                          transition: "background var(--d-fast)",
+                          fontSize: 13,
+                          color: "var(--sc-parchment)",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "var(--sc-panel-2)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                        }}
                       >
-                        <td className="py-2">
-                          <span className={rankColor(entry.rank)}>
-                            {entry.rank}
-                          </span>
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            color: rankColorVar(entry.rank),
+                            fontWeight: entry.rank <= 3 ? 800 : 700,
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
+                          {entry.rank}
                         </td>
-                        <td className="py-2 font-medium text-zinc-100">
-                          {entry.name}
-                        </td>
-                        <td className="py-2 text-right text-zinc-400">
+                        <td style={{ padding: "8px 4px", fontWeight: 700 }}>{entry.name}</td>
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            textAlign: "right",
+                            color: "var(--fg-3)",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
                           {entry.level}
                         </td>
-                        <td className="py-2 text-right">
+                        <td style={{ padding: "8px 4px", textAlign: "right" }}>
                           <span
-                            className={`text-[10px] font-bold ${BUILD_BADGE_COLOR[build]}`}
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 800,
+                              letterSpacing: ".08em",
+                              textTransform: "uppercase",
+                              color: BUILD_COLOR[build],
+                            }}
                             title={`${build} build`}
                           >
-                            {BUILD_BADGE_LABEL[build]}
+                            {BUILD_LABEL[build]}
                           </span>
                         </td>
-                        <td className="py-2 text-right text-amber-400 font-mono">
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            textAlign: "right",
+                            color: "var(--sc-bronze)",
+                            fontFamily: "var(--font-mono)",
+                            fontWeight: 700,
+                          }}
+                        >
                           {entry.rating}
                         </td>
-                        <td className="py-2 text-right text-emerald-400">
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            textAlign: "right",
+                            color: "var(--rarity-uncommon)",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
                           {entry.wins}
                         </td>
-                        <td className="py-2 text-right text-red-400">
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            textAlign: "right",
+                            color: "var(--sc-blood)",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
                           {entry.losses}
                         </td>
-                        <td className="py-2 text-right text-zinc-300">
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            textAlign: "right",
+                            color: "var(--sc-parchment)",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
                           {winPct}%
                         </td>
                       </tr>
@@ -349,24 +400,35 @@ export function Leaderboard() {
               </table>
             </div>
 
-            {/* === Pagination === */}
-            <div className="flex items-center justify-between mt-3 text-xs text-zinc-500">
+            {/* Pagination */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: 12,
+                fontSize: 11,
+                color: "var(--fg-3)",
+              }}
+            >
               <span>
-                Showing {view.totalShown} of {view.totalAvailable}
+                Showing <span style={{ color: "var(--sc-parchment)", fontWeight: 700 }}>{view.totalShown}</span> of{" "}
+                <span style={{ color: "var(--sc-parchment)", fontWeight: 700 }}>{view.totalAvailable}</span>
               </span>
-              {view.hasMore && (
-                <button
-                  onClick={() => setPage((p) => p + 1)}
-                  className="px-3 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 hover:border-amber-700/40 hover:text-amber-300 transition-colors text-xs font-medium"
-                >
+              {view.hasMore ? (
+                <BronzeButton size="sm" onClick={() => setPage((p) => p + 1)}>
                   Load more
-                </button>
+                </BronzeButton>
+              ) : (
+                <GhostButton size="sm" disabled>
+                  All loaded
+                </GhostButton>
               )}
             </div>
           </>
         )}
-      </CardBody>
-    </Card>
+      </div>
+    </RimFrame>
   );
 }
 
@@ -376,29 +438,53 @@ function SortHeader({
   onClick,
   align,
   width,
-  children,
 }: {
   column: SortKey;
   sort: SortState;
   onClick: (key: SortKey) => void;
   align: "left" | "right";
-  width?: string;
-  children: React.ReactNode;
+  width?: number;
 }) {
   const indicator = sortIndicator(sort, column);
   const isActive = sort.key === column;
-  const alignCls = align === "right" ? "text-right" : "text-left";
   return (
-    <th className={`py-2 ${alignCls} ${width ?? ""}`}>
+    <th
+      style={{
+        padding: "8px 4px",
+        textAlign: align,
+        width: width ? `${width}px` : undefined,
+      }}
+    >
       <button
         onClick={() => onClick(column)}
         title={`Sort by ${COLUMN_LABELS[column]}`}
-        className={`inline-flex items-center gap-1 hover:text-zinc-100 transition-colors uppercase text-xs ${
-          isActive ? "text-amber-300" : "text-zinc-500"
-        }`}
+        style={{
+          background: "transparent",
+          border: 0,
+          padding: 0,
+          fontFamily: "var(--font-ui)",
+          fontSize: 10,
+          fontWeight: 800,
+          letterSpacing: "var(--ls-stamp)",
+          textTransform: "uppercase",
+          color: isActive ? "var(--sc-bronze)" : "var(--fg-3)",
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          transition: "color var(--d-fast)",
+        }}
       >
-        {children}
-        <span className="text-[10px] w-2 inline-block text-right">
+        {COLUMN_LABELS[column]}
+        <span
+          style={{
+            display: "inline-block",
+            width: 8,
+            textAlign: "right",
+            color: "var(--sc-bronze)",
+            fontSize: 10,
+          }}
+        >
           {indicator}
         </span>
       </button>
