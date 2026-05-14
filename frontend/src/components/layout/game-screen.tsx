@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { Navbar } from "./navbar";
-import { TownNav } from "./town-hub";
 import { CharacterCreation } from "@/components/character/character-creation";
 import { LandingPage } from "@/components/landing/landing-page";
 import type { AuthPhase } from "@/hooks/useGameStore";
@@ -330,7 +329,6 @@ export function GameScreen() {
           <span style={{ color: "var(--fg-3)", margin: "0 8px" }}>—</span>
           characters and items reset on server restart
         </div>
-        <TownNav />
         <div style={{ height: 16 }} />
         <AreaContent />
       </div>

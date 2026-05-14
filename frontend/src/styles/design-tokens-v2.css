@@ -55,6 +55,17 @@
   --sc-steel-deep:     #4a6577;          /* darker steel for borders */
   --sc-steel-low:      #1f2a32;          /* background-tint steel */
 
+  /* ---------- Grape (INT / CRIT family per Character spec) ---------- */
+  --sc-grape:          #8a6abf;          /* amethyst — INT bar, CRIT, Epic */
+
+  /* ---------- Victory (WIN outcome) ---------- */
+  --sc-victory:        #5a8a3a;          /* deep victory green — WIN badge */
+
+  /* ---------- Muted parchment & dim outline ---------- */
+  --sc-parchment-dim:  #c8c1b0;          /* secondary text on dark */
+  --sc-muted:          #8a8474;          /* labels / metadata (alias --fg-3) */
+  --sc-dim:            #5e5a52;          /* deepest empty-slot outline */
+
   /* ---------- Rims & ashes ---------- */
   --sc-rim:            #2c333d;          /* default steel rim, 1-2px */
   --sc-rim-2:          #3a414c;          /* slightly lighter rim */

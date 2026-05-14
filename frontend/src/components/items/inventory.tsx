@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { useKiosk } from "@/hooks/useKiosk";
 import { useMarketplaceActions } from "@/hooks/useMarketplaceActions";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { ItemCard } from "./item-card";
 import { ItemDetailModal } from "./item-detail-modal";
 import { ListItemModal } from "@/components/marketplace/list-item-modal";
 import {
@@ -19,6 +18,137 @@ import {
   type Item,
   type EquipmentSlots,
 } from "@/types/game";
+
+/**
+ * Spec: design_v2/specs/character_v2_measurements.md  §Section 5 (60-67)
+ * 84.14×84.14 square slot, 1 px solid rarity border, image objectFit contain,
+ * label below in Poppins 8/700 uppercase bronze.
+ *
+ * Epic rarity uses --sc-grape (#8a6abf) per spec global tokens. Other rarity
+ * tokens are inherited from --rarity-{common,uncommon,rare,legendary}.
+ */
+const INV_TILE_BORDER: Record<number, string> = {
+  1: "var(--rarity-common)",
+  2: "var(--rarity-uncommon)",
+  3: "var(--rarity-rare)",
+  4: "var(--sc-grape)",
+  5: "var(--rarity-legendary)",
+};
+
+const INV_TILE_TYPE_LABEL: Record<number, string> = {
+  [ITEM_TYPES.WEAPON]: "WEAPON",
+  [ITEM_TYPES.SHIELD]: "OFFHAND",
+  [ITEM_TYPES.HELMET]: "HELMET",
+  [ITEM_TYPES.CHEST]: "CHEST",
+  [ITEM_TYPES.GLOVES]: "GLOVES",
+  [ITEM_TYPES.BOOTS]: "BOOTS",
+  [ITEM_TYPES.BELT]: "BELT",
+  [ITEM_TYPES.RING]: "RING",
+  [ITEM_TYPES.NECKLACE]: "NECKLACE",
+};
+
+function InventoryTileGrid({
+  items,
+  onSelect,
+}: {
+  items: Item[];
+  onSelect: (item: Item) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+        gap: 8,
+      }}
+    >
+      {items.map((item) => {
+        const borderColor = INV_TILE_BORDER[item.rarity] ?? "var(--sc-rim-2)";
+        const label = INV_TILE_TYPE_LABEL[item.itemType] ?? "ITEM";
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onSelect(item)}
+            title={item.name}
+            style={{
+              padding: 0,
+              cursor: "pointer",
+              background: "var(--sc-panel-2)",
+              border: `1px solid ${borderColor}`,
+              borderRadius: 2,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "stretch",
+              fontFamily: "var(--font-ui)",
+              transition: "transform var(--d-fast)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-1px)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "";
+            }}
+          >
+            <div
+              style={{
+                width: "100%",
+                aspectRatio: "1 / 1",
+                position: "relative",
+                overflow: "hidden",
+                background: "var(--sc-page)",
+              }}
+            >
+              {item.imageUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={item.imageUrl}
+                  alt={item.name}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                  }}
+                />
+              ) : (
+                <span
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 20,
+                    color: borderColor,
+                    opacity: 0.7,
+                  }}
+                >
+                  ◆
+                </span>
+              )}
+            </div>
+            <span
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 8,
+                fontWeight: 700,
+                letterSpacing: "0.10em",
+                textTransform: "uppercase",
+                color: "var(--sc-bronze)",
+                textAlign: "center",
+                padding: "4px 0 5px",
+              }}
+            >
+              {label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 type Category = "all" | "weapons" | "armor" | "jewelry";
 
@@ -45,67 +175,6 @@ function getSlotsForItem(item: Item): (keyof EquipmentSlots)[] {
     }
   }
   return slots;
-}
-
-const ITEM_HEIGHT = 80;
-const OVERSCAN = 4;
-
-function VirtualList({ items, renderItem, maxHeight }: {
-  items: Item[];
-  renderItem: (item: Item, index: number) => React.ReactNode;
-  maxHeight: number;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-
-  const handleScroll = useCallback(() => {
-    if (containerRef.current) {
-      setScrollTop(containerRef.current.scrollTop);
-    }
-  }, []);
-
-  const totalHeight = items.length * ITEM_HEIGHT;
-  const startIndex = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
-  const visibleCount = Math.ceil(maxHeight / ITEM_HEIGHT) + OVERSCAN * 2;
-  const endIndex = Math.min(items.length, startIndex + visibleCount);
-
-  // For small lists, skip virtualization
-  if (items.length <= 20) {
-    return (
-      <div className="space-y-1.5 max-h-[500px] overflow-y-auto scrollbar-thin" ref={containerRef}>
-        {items.map((item, i) => (
-          <div key={item.id}>{renderItem(item, i)}</div>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      onScroll={handleScroll}
-      className="overflow-y-auto scrollbar-thin"
-      style={{ maxHeight, position: "relative" }}
-    >
-      <div style={{ height: totalHeight, position: "relative" }}>
-        {items.slice(startIndex, endIndex).map((item, i) => (
-          <div
-            key={item.id}
-            style={{
-              position: "absolute",
-              top: (startIndex + i) * ITEM_HEIGHT,
-              left: 0,
-              right: 0,
-              height: ITEM_HEIGHT,
-              padding: "3px 0",
-            }}
-          >
-            {renderItem(item, startIndex + i)}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 export function Inventory() {
@@ -174,13 +243,15 @@ export function Inventory() {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {/* Spec §[59] — Poppins 36/400 parchment, tracking -0.36px. */}
                 <span
                   style={{
-                    fontFamily: "var(--font-display)",
-                    fontSize: 26,
-                    lineHeight: 1.0,
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 36,
+                    fontWeight: 400,
+                    lineHeight: 1.15,
                     color: "var(--sc-parchment)",
-                    letterSpacing: "0.01em",
+                    letterSpacing: "-0.36px",
                   }}
                 >
                   Inventory
@@ -263,16 +334,9 @@ export function Inventory() {
               No items found
             </p>
           ) : (
-            <VirtualList
+            <InventoryTileGrid
               items={filtered}
-              maxHeight={500}
-              renderItem={(item) => (
-                <ItemCard
-                  item={item}
-                  compact
-                  onClick={() => setSelectedItem(item)}
-                />
-              )}
+              onSelect={setSelectedItem}
             />
           )}
         </CardBody>

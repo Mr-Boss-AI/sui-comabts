@@ -100,20 +100,24 @@ export type BannerTone = "bronze" | "blood" | "gunmetal";
 export type PillKind = "onChain" | "testnet" | null;
 
 const BANNER_BG: Record<BannerTone, string> = {
-  bronze:
-    "linear-gradient(110deg, var(--sc-bronze-deep) 0%, var(--sc-bronze) 100%)",
-  blood:
-    "linear-gradient(110deg, #7d2618 0%, var(--sc-blood) 100%)",
-  gunmetal:
-    "linear-gradient(180deg, var(--sc-panel-2) 0%, var(--sc-panel) 100%)",
+  bronze: "var(--sc-bronze)",
+  blood: "var(--sc-blood)",
+  gunmetal: "var(--sc-panel-2)",
 };
 
 const BANNER_TEXT: Record<BannerTone, string> = {
-  bronze: "var(--sc-page)",
+  bronze: "var(--sc-parchment)",
   blood: "var(--sc-parchment)",
   gunmetal: "var(--sc-parchment)",
 };
 
+/**
+ * Spec: design_v2/specs/character_v2_measurements.md  §Section 2
+ *   - Banner BG solid bronze, border-bottom 2px parchment
+ *   - Heading: Poppins 48/800 parchment, tracking -0.96px
+ *   - Subtitle: Poppins 16/400 parchment
+ *   - "ON CHAIN" pill: Poppins 14/700, bronze on page-black, 116×37
+ */
 export function TopBanner({
   title,
   subtitle,
@@ -126,15 +130,16 @@ export function TopBanner({
   tone?: BannerTone;
 }) {
   const fg = BANNER_TEXT[tone];
-  const subtleFg = tone === "bronze" ? "rgba(10,13,18,0.72)" : "rgba(232,226,212,0.78)";
+  const subtleFg =
+    tone === "bronze"
+      ? "var(--sc-parchment)"
+      : "rgba(232,226,212,0.85)";
   return (
     <div
       style={{
         position: "relative",
         background: BANNER_BG[tone],
-        borderTop: `2px solid ${tone === "bronze" ? "var(--sc-bronze-deep)" : tone === "blood" ? "var(--sc-blood-deep)" : "var(--sc-rim)"}`,
-        borderBottom: `2px solid ${tone === "bronze" ? "var(--sc-bronze-deep)" : tone === "blood" ? "var(--sc-blood-deep)" : "var(--sc-rim)"}`,
-        boxShadow: "var(--sh-plate-sm)",
+        borderBottom: `2px solid ${tone === "bronze" ? "var(--sc-parchment)" : tone === "blood" ? "var(--sc-blood-deep)" : "var(--sc-rim)"}`,
         padding: "20px 26px",
         display: "flex",
         alignItems: "center",
@@ -150,15 +155,12 @@ export function TopBanner({
         <h1
           style={{
             margin: 0,
-            fontFamily: "var(--font-display)",
-            fontSize: 44,
+            fontFamily: "var(--font-ui)",
+            fontSize: 48,
+            fontWeight: 800,
             lineHeight: 1.05,
             color: fg,
-            letterSpacing: "0.01em",
-            textShadow:
-              tone === "bronze"
-                ? "2px 2px 0 rgba(0,0,0,.18)"
-                : "2px 2px 0 rgba(0,0,0,.4)",
+            letterSpacing: "-0.96px",
           }}
         >
           {title}
@@ -167,10 +169,10 @@ export function TopBanner({
           <div
             style={{
               marginTop: 6,
-              fontSize: 14,
-              fontWeight: 600,
+              fontSize: 16,
+              fontWeight: 400,
               color: subtleFg,
-              letterSpacing: "0.005em",
+              letterSpacing: 0,
               lineHeight: 1.4,
               maxWidth: 720,
             }}
@@ -190,16 +192,21 @@ function BannerPill({ kind }: { kind: NonNullable<PillKind> }) {
     <span
       style={{
         fontFamily: "var(--font-ui)",
-        fontWeight: 800,
-        fontSize: 11,
+        fontWeight: 700,
+        fontSize: 14,
         letterSpacing: "var(--ls-stamp)",
         textTransform: "uppercase",
-        padding: "9px 22px",
+        padding: "8px 14px",
+        width: 116,
+        height: 37,
+        boxSizing: "border-box",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         background: isOnChain ? "var(--sc-page)" : "var(--sc-blood-deep)",
         color: isOnChain ? "var(--sc-bronze)" : "var(--sc-parchment)",
-        border: `2px solid ${isOnChain ? "var(--sc-bronze)" : "var(--sc-parchment)"}`,
+        border: `1px solid ${isOnChain ? "var(--sc-bronze)" : "var(--sc-parchment)"}`,
         borderRadius: "var(--r-pill)",
-        boxShadow: "var(--sh-plate-sm)",
         whiteSpace: "nowrap",
         flexShrink: 0,
       }}

@@ -110,6 +110,16 @@ function SlotTile({
   const w = typeof size === "number" ? size : size.w;
   const h = typeof size === "number" ? size : size.h;
   const rarityColor = item ? RARITY_BORDER_HEX[item.rarity] : null;
+  // Inner inset so the item is visually framed by the tile rim
+  // (matches design_v2/screenshopts/character_layout_reference.jpeg
+  // where every gear piece sits inside its tile with breathing room).
+  // Scales with tile size: ~8% of the smaller side, clamped to 4–10px.
+  const itemInset = Math.min(10, Math.max(4, Math.round(Math.min(w, h) * 0.08)));
+  // Spec §[24]/[30] — empty slot fill is page-black at 45% opacity,
+  // radius 2px, padding 0. Filled slots keep --sc-panel-2 so the item
+  // image stays legible.
+  const emptyBg = "rgba(10, 13, 18, 0.45)";
+  const filledBg = "var(--sc-panel-2)";
   const title = future
     ? `${futureLabel ?? "Slot"} — unlocks in v5.1 contract bundle`
     : item
@@ -128,13 +138,13 @@ function SlotTile({
         height: h,
         padding: 0,
         cursor: future ? "not-allowed" : "pointer",
-        background: future ? "var(--sc-page)" : "var(--sc-panel-2)",
+        background: item ? filledBg : emptyBg,
         border: `2px solid ${rarityColor ?? "var(--sc-rim-2)"}`,
         borderRadius: 2,
-        opacity: future ? 0.35 : 1,
+        opacity: future ? 0.55 : 1,
         boxShadow: isDirty
-          ? "0 0 0 1px var(--sc-bronze), var(--rim-top), var(--rim-bottom), var(--sh-plate-sm)"
-          : "var(--rim-top), var(--rim-bottom), var(--sh-plate-sm)",
+          ? "0 0 0 1px var(--sc-bronze), inset 0 0 0 1px rgba(0,0,0,.55), inset 0 2px 6px rgba(0,0,0,.55), var(--sh-plate-sm)"
+          : "inset 0 0 0 1px rgba(0,0,0,.55), inset 0 2px 6px rgba(0,0,0,.55), var(--sh-plate-sm)",
         position: "relative",
         overflow: "hidden",
         display: "flex",
@@ -142,8 +152,8 @@ function SlotTile({
         justifyContent: "center",
         transition:
           "transform var(--d-base) var(--ease-pop), border-color var(--d-fast), box-shadow var(--d-fast)",
-        fontFamily: "var(--font-ui)",
-        color: "var(--fg-3)",
+        fontFamily: "var(--font-mono)",
+        color: "var(--sc-muted)",
       }}
       onMouseEnter={(e) => {
         if (future) return;
@@ -163,22 +173,27 @@ function SlotTile({
             alt={item.name}
             style={{
               position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
+              top: itemInset,
+              left: itemInset,
+              right: itemInset,
+              bottom: itemInset,
+              width: `calc(100% - ${itemInset * 2}px)`,
+              height: `calc(100% - ${itemInset * 2}px)`,
+              objectFit: "contain",
               objectPosition: "center",
               padding: 0,
-              filter: "drop-shadow(0 2px 3px rgba(0,0,0,.55))",
+              filter: "drop-shadow(0 2px 4px rgba(0,0,0,.65))",
             }}
           />
         ) : (
-          <SlotGlyph size={Math.min(w, h) * 0.42} color={rarityColor ?? "var(--sc-ash)"} />
+          <SlotGlyph size={Math.min(w, h) * 0.42} color={rarityColor ?? "var(--sc-muted)"} />
         )
       ) : (
+        // Spec §[22]/[23] — empty slot SVG stroke uses --sc-muted (active)
+        // or --sc-dim (future / v5.1 placeholders).
         <SlotGlyph
           size={Math.min(w, h) * 0.36}
-          color={future ? "var(--sc-ash-2)" : "var(--sc-ash)"}
+          color={future ? "var(--sc-dim)" : "var(--sc-muted)"}
         />
       )}
       {future && (
@@ -208,15 +223,15 @@ function SlotTile({
             bottom: 5,
             left: 6,
             right: 6,
-            fontFamily: "var(--font-ui)",
+            fontFamily: "var(--font-mono)",
             fontSize: 9,
             fontWeight: 700,
-            color: "var(--fg-3)",
+            color: "var(--sc-muted)",
             letterSpacing: ".10em",
             textTransform: "uppercase",
             textAlign: "center",
             lineHeight: 1,
-            opacity: 0.55,
+            opacity: 0.7,
             pointerEvents: "none",
           }}
         >
@@ -245,12 +260,13 @@ function SlotTile({
 function SlotGlyph({ size, color }: { size: number; color: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      {/* Spec §[22]/[23] — stroke width 2.2 px on empty-slot glyphs. */}
       <path
         d="M12 3 L12 21 M3 12 L21 12"
         stroke={color}
-        strokeWidth={1.6}
+        strokeWidth={2.2}
         strokeLinecap="round"
-        opacity={0.55}
+        opacity={0.8}
       />
     </svg>
   );
@@ -347,9 +363,9 @@ function PortraitFrame({
         padding: 0,
         cursor: "pointer",
         overflow: "hidden",
-        background: portrait ? "var(--sc-page)" : "#080a0e",
+        background: portrait ? "var(--sc-page)" : "rgba(10, 13, 18, 0.45)",
         border: "2px solid var(--sc-bronze)",
-        borderRadius: 0,
+        borderRadius: 2,
         boxShadow:
           "inset 0 0 0 1px rgba(0,0,0,.4), inset 0 2px 4px rgba(0,0,0,.6), var(--sh-plate-lg)",
         display: "flex",
@@ -416,51 +432,66 @@ function PortraitFrame({
         </>
       ) : (
         <>
-          <div
-            style={{
-              width: 80,
-              height: 80,
-              border: "2px solid var(--sc-bronze)",
-              color: "var(--sc-bronze)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: 0.6,
-              fontSize: 44,
-              fontWeight: 300,
-              lineHeight: 1,
-            }}
-            aria-hidden
-          >
-            +
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontWeight: 800,
-              fontSize: 16,
-              letterSpacing: ".18em",
-              textTransform: "uppercase",
-              color: "var(--sc-ash)",
-              textAlign: "center",
-            }}
-          >
-            Place your NFT here
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: 12,
-              color: "var(--sc-ash-2)",
-              textAlign: "center",
-              maxWidth: 280,
-              lineHeight: 1.45,
-              marginTop: -6,
-            }}
-          >
-            Click to choose a portrait —<br />
-            cosmetic only
-          </div>
+          {(() => {
+            // Scale the empty-state widgets with the portrait so the
+            // plus icon + labels stay proportional whether the frame
+            // is 254px (xl, scale 0.55) or 462px (1024 reference).
+            const plusBox = Math.round(width * 0.22);
+            const plusFont = Math.round(width * 0.14);
+            const titleFont = Math.max(11, Math.round(width * 0.058));
+            const subFont = Math.max(10, Math.round(width * 0.044));
+            return (
+              <>
+                <div
+                  style={{
+                    width: plusBox,
+                    height: plusBox,
+                    border: "2px solid var(--sc-bronze)",
+                    color: "var(--sc-bronze)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: 0.6,
+                    fontSize: plusFont,
+                    fontWeight: 300,
+                    lineHeight: 1,
+                  }}
+                  aria-hidden
+                >
+                  +
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 700,
+                    fontSize: titleFont,
+                    letterSpacing: ".18em",
+                    textTransform: "uppercase",
+                    color: "var(--sc-parchment-dim)",
+                    textAlign: "center",
+                    padding: "0 12px",
+                  }}
+                >
+                  Place your NFT here
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: subFont,
+                    color: "var(--sc-muted)",
+                    textAlign: "center",
+                    maxWidth: width - 32,
+                    lineHeight: 1.45,
+                    marginTop: -6,
+                    padding: "0 12px",
+                  }}
+                >
+                  Click to choose a portrait —<br />
+                  cosmetic only
+                </div>
+              </>
+            );
+          })()}
         </>
       )}
     </button>
@@ -547,11 +578,18 @@ function TribalOrnament({ width, height }: { width: number; height: number }) {
 
 /* ─────────────────────── Frame Title ───────────────────────────── */
 
+/**
+ * Spec: design_v2/specs/character_v2_measurements.md  §Section 3
+ *   [16] Class label "Bruiser" — Slackey 26px / 400, color --sc-bronze,
+ *        letter-spacing 0.52px
+ *   [17] Level [14] — JetBrains Mono 18px / 700, --sc-bronze, opacity 0.85
+ *   [18] ⓘ info icon — small steel-blue square i-button on the right
+ */
 function FrameTitle({
-  name,
-  level,
   archetype,
+  level,
 }: {
+  /** Character display name — passed for tooltip / aria only. */
   name: string;
   level: number;
   archetype: string;
@@ -562,14 +600,14 @@ function FrameTitle({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 12,
-        padding: "12px 0",
+        gap: 10,
+        padding: "10px 0",
         fontFamily: "var(--font-ui)",
       }}
     >
       <svg
-        width={26}
-        height={26}
+        width={22}
+        height={22}
         viewBox="0 0 24 24"
         fill="var(--sc-bronze)"
         stroke="var(--sc-page)"
@@ -581,20 +619,21 @@ function FrameTitle({
       <span
         style={{
           fontFamily: "var(--font-display)",
-          fontSize: 32,
+          fontSize: 26,
+          fontWeight: 400,
           lineHeight: 1,
           color: "var(--sc-bronze)",
-          letterSpacing: "0.02em",
+          letterSpacing: "0.52px",
         }}
         title={`${archetype} archetype`}
       >
-        {name}
+        {archetype}
       </span>
       <span
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 700,
-          fontSize: 20,
+          fontSize: 18,
           color: "var(--sc-bronze)",
           opacity: 0.85,
         }}
@@ -606,8 +645,8 @@ function FrameTitle({
         title={`${archetype} build · Lv ${level}`}
         aria-label="Build info"
         style={{
-          width: 26,
-          height: 26,
+          width: 22,
+          height: 22,
           padding: 0,
           background: "var(--sc-steel)",
           color: "var(--sc-parchment)",
@@ -618,7 +657,7 @@ function FrameTitle({
           justifyContent: "center",
           fontFamily: "var(--font-display)",
           fontWeight: 900,
-          fontSize: 16,
+          fontSize: 14,
           fontStyle: "italic",
           borderRadius: 2,
         }}
@@ -644,6 +683,14 @@ function sumEquipmentStat(
 
 /* ─────────────────────── Recent Fights ────────────────────────── */
 
+/**
+ * Spec: design_v2/specs/character_v2_measurements.md  §Section 6 (68-73)
+ *   [68] Heading "Recent fights" Poppins 36/400 parchment, tracking -0.36
+ *   [69-70][72] WIN: badge 60×22 Poppins 10/700 parchment on victory-green,
+ *               opponent Poppins 13/700 parchment, score JetBrains Mono 13/700
+ *               victory-green, result Poppins 11/400 muted right-aligned
+ *   [71][73] LOSS: badge fill blood, score blood-red
+ */
 function RecentFights() {
   const { state } = useGame();
   const account = useCurrentAccount();
@@ -653,6 +700,22 @@ function RecentFights() {
     if (!state.socket.authenticated) return;
     state.socket.send({ type: "get_fight_history" });
   }, [state.socket]);
+
+  const heading = (
+    <h2
+      style={{
+        margin: "0 0 12px",
+        fontFamily: "var(--font-ui)",
+        fontSize: 36,
+        fontWeight: 400,
+        lineHeight: 1.15,
+        color: "var(--sc-parchment)",
+        letterSpacing: "-0.36px",
+      }}
+    >
+      Recent fights
+    </h2>
+  );
 
   if (!fightHistory.length) {
     return (
@@ -665,10 +728,10 @@ function RecentFights() {
           boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
         }}
       >
-        <SectionHeader title="Recent fights" />
+        {heading}
         <p
           style={{
-            color: "var(--fg-3)",
+            color: "var(--sc-muted)",
             fontSize: 13,
             textAlign: "center",
             padding: "20px 0",
@@ -692,75 +755,89 @@ function RecentFights() {
         boxShadow: "var(--sh-plate), var(--rim-top), var(--rim-bottom)",
       }}
     >
-      <SectionHeader title="Recent fights" />
+      {heading}
       <div style={{ display: "flex", flexDirection: "column" }}>
         {fightHistory.slice(0, 8).map((fight, i) => {
           const won = fight.winner === account?.address;
           const isA = fight.playerA.walletAddress === account?.address;
           const opponent = isA ? fight.playerB : fight.playerA;
           const isLast = i === Math.min(7, fightHistory.length - 1);
+          const badgeBg = won ? "var(--sc-victory)" : "var(--sc-blood)";
+          const scoreColor = won ? "var(--sc-victory)" : "var(--sc-blood)";
+          // Derive a +/- delta if we ever stash one on the fight record;
+          // until then surface turn count as a stable per-row metric.
+          const scoreText = (fight as unknown as { eloDelta?: number }).eloDelta
+            ? `${(fight as unknown as { eloDelta: number }).eloDelta > 0 ? "+" : ""}${
+                (fight as unknown as { eloDelta: number }).eloDelta
+              }`
+            : `${fight.turns}t`;
           return (
             <div
               key={fight.id}
               style={{
                 display: "grid",
-                gridTemplateColumns: "auto 1fr auto auto",
+                gridTemplateColumns: "60px 1fr auto auto",
                 alignItems: "center",
                 gap: 16,
-                padding: "12px 14px",
+                padding: "10px 12px",
                 borderBottom: isLast ? "none" : "1px solid var(--sc-rim)",
                 background: "transparent",
                 fontFamily: "var(--font-ui)",
               }}
             >
-              {/* WIN / LOSS stamp */}
+              {/* §[69]/[71] WIN / LOSS pill — 60×22, parchment on green/blood. */}
               <span
                 style={{
                   fontFamily: "var(--font-ui)",
-                  fontWeight: 800,
-                  fontSize: 11,
-                  letterSpacing: "var(--ls-stamp)",
+                  fontWeight: 700,
+                  fontSize: 10,
+                  letterSpacing: "1.4px",
                   textTransform: "uppercase",
-                  padding: "5px 12px",
-                  background: won ? "var(--rarity-uncommon)" : "var(--sc-blood)",
                   color: "var(--sc-parchment)",
-                  border: `1px solid ${
-                    won ? "var(--rarity-uncommon)" : "var(--sc-blood-deep)"
-                  }`,
-                  borderRadius: "var(--r-sm)",
-                  minWidth: 56,
-                  textAlign: "center",
+                  background: badgeBg,
+                  border: `1px solid ${badgeBg}`,
+                  width: 60,
+                  height: 22,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: "var(--r-pill)",
                 }}
               >
                 {won ? "Win" : "Loss"}
               </span>
-              {/* Opponent name */}
-              <span style={{ fontWeight: 700, fontSize: 14 }}>
-                vs <span style={{ color: "var(--sc-parchment)" }}>{opponent.name}</span>
+              {/* §[69] opponent — Poppins 13/700 parchment. */}
+              <span
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--sc-parchment)",
+                }}
+              >
+                vs {opponent.name}
               </span>
-              {/* Turn count / fight type */}
+              {/* §[69] score — JetBrains Mono 13/700 coloured. */}
               <span
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontWeight: 700,
-                  fontSize: 12,
-                  color: "var(--fg-3)",
+                  fontSize: 13,
+                  color: scoreColor,
                   minWidth: 60,
                   textAlign: "right",
                 }}
               >
-                {fight.turns} turns
+                {scoreText}
               </span>
-              {/* Outcome note */}
+              {/* §[69] result note — Poppins 11/400 muted right-aligned. */}
               <span
                 style={{
-                  fontSize: 12,
-                  color: fight.wagerAmount
-                    ? "var(--sc-bronze)"
-                    : "var(--fg-3)",
-                  fontFamily: "var(--font-mono)",
-                  fontWeight: fight.wagerAmount ? 800 : 600,
-                  minWidth: 140,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 11,
+                  fontWeight: 400,
+                  color: "var(--sc-muted)",
+                  minWidth: 120,
                   textAlign: "right",
                 }}
               >
@@ -1087,6 +1164,31 @@ const ARCHETYPE_TONE: Record<string, "blood" | "steel" | "bronze" | "default"> =
   Hybrid: "default",
 };
 
+/**
+ * Spec: design_v2/specs/character_v2_measurements.md  §Section 4 (elements 31-58)
+ *   Card BG --sc-panel-2, padding 20/24/56/24
+ *   [31] BRUISER pill Poppins 10/700 parchment on blood, 71×22, padding 3/9, tracking 1.4
+ *   [32] +N PTS button Poppins 11/700 parchment on panel-2, 80×33, padding 6/12, gap 8
+ *   [33] Character name Slackey 36/400 bronze, margin-top 6
+ *   [34][35] LV / ELO bronze pills, page-black text
+ *   [36] Record Poppins 12/600 parchment-dim
+ *   [37] "PRIMARY ATTRIBUTES" Poppins 10/700 muted, tracking 1
+ *   [38-47] STR/DEX/INT/END rows — label Poppins 12/800 semantic-coloured,
+ *           bar 5px tall, value JetBrains Mono 12/700 semantic-coloured
+ *   [48] "COMBAT STATS" Poppins 10/700 muted
+ *   [49-56] 4×2 grid — HP/ATK blood, CRIT/CRIT× grape, EVADE/ARMOR muted,
+ *           DEF blood, LV parchment.  Cell value JetBrains Mono 16/700.
+ *   [57] XP labels Poppins 10/700 muted
+ *   [58] XP bar 8 px striped gold gradient
+ */
+
+const STAT_COLORS: Record<"STR" | "DEX" | "INT" | "END", string> = {
+  STR: "var(--sc-blood)",
+  DEX: "var(--sc-steel)",
+  INT: "var(--sc-grape)",
+  END: "var(--sc-bronze)",
+};
+
 function CenterInfoCard({
   character,
   derived,
@@ -1111,39 +1213,46 @@ function CenterInfoCard({
   const endBonus = eq ? sumEquipmentStat(eq, "enduranceBonus") : 0;
 
   const statRows: Array<{
-    label: string;
+    label: "STR" | "DEX" | "INT" | "END";
     base: number;
     bonus: number;
     color: string;
-    icon: string;
   }> = [
-    { label: "STR", base: character.stats.strength, bonus: strBonus, color: "var(--stat-str)", icon: "⚔" },
-    { label: "DEX", base: character.stats.dexterity, bonus: dexBonus, color: "var(--stat-dex)", icon: "⚡" },
-    { label: "INT", base: character.stats.intuition, bonus: intBonus, color: "var(--stat-int)", icon: "✦" },
-    { label: "END", base: character.stats.endurance, bonus: endBonus, color: "var(--stat-end)", icon: "❖" },
+    { label: "STR", base: character.stats.strength, bonus: strBonus, color: STAT_COLORS.STR },
+    { label: "DEX", base: character.stats.dexterity, bonus: dexBonus, color: STAT_COLORS.DEX },
+    { label: "INT", base: character.stats.intuition, bonus: intBonus, color: STAT_COLORS.INT },
+    { label: "END", base: character.stats.endurance, bonus: endBonus, color: STAT_COLORS.END },
   ];
 
+  // Spec §[49]-[56] — 4 cells per row, two rows, semantic-coloured.
   const combatGrid: Array<[string, string | number, string]> = [
-    ["HP", derived.maxHp, "var(--stat-hp)"],
+    ["HP", derived.maxHp, "var(--sc-blood)"],
     ["ATK", derived.attackPower, "var(--sc-blood)"],
-    ["CRIT", `${derived.critChance}%`, "var(--stat-int)"],
-    ["CRIT ×", `${derived.critMultiplier}x`, "var(--stat-int)"],
-    ["EVADE", `${derived.evasionChance}%`, "var(--stat-dex)"],
-    ["ARMOR", derived.armor, "var(--sc-steel)"],
-    ["DEF", derived.defense, "var(--sc-bronze)"],
+    ["CRIT", `${derived.critChance}%`, "var(--sc-grape)"],
+    ["CRIT ×", `${derived.critMultiplier}x`, "var(--sc-grape)"],
+    ["EVADE", `${derived.evasionChance}%`, "var(--sc-parchment)"],
+    ["ARMOR", derived.armor, "var(--sc-parchment)"],
+    ["DEF", derived.defense, "var(--sc-blood)"],
     ["LV", character.level, "var(--sc-parchment)"],
   ];
 
-  const archetypeTone = ARCHETYPE_TONE[archetype] ?? "default";
+  // Archetype label classified onto the BRUISER-pill colour family.
+  // Anything that doesn't map to a known archetype falls back to blood.
+  const archetypePillFill =
+    ARCHETYPE_TONE[archetype] === "steel"
+      ? "var(--sc-steel)"
+      : ARCHETYPE_TONE[archetype] === "bronze"
+        ? "var(--sc-bronze)"
+        : "var(--sc-blood)";
 
   return (
     <div
       style={{
-        background: "var(--sc-panel)",
+        background: "var(--sc-panel-2)",
         border: "1px solid var(--sc-rim)",
         borderRadius: "var(--r-card)",
         boxShadow: "var(--sh-plate-lg), var(--rim-top), var(--rim-bottom)",
-        padding: "18px 20px",
+        padding: "20px 24px 56px 24px",
         display: "flex",
         flexDirection: "column",
         gap: 14,
@@ -1152,7 +1261,7 @@ function CenterInfoCard({
         minWidth: 0,
       }}
     >
-      {/* Header row — archetype + "+N pts" / save controls */}
+      {/* §[31] BRUISER class pill · §[32] +N PTS button */}
       <div
         style={{
           display: "flex",
@@ -1162,23 +1271,63 @@ function CenterInfoCard({
           flexWrap: "wrap",
         }}
       >
-        <Stamp tone={archetypeTone}>{archetype}</Stamp>
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontWeight: 700,
+            fontSize: 10,
+            letterSpacing: "1.4px",
+            textTransform: "uppercase",
+            color: "var(--sc-parchment)",
+            background: archetypePillFill,
+            padding: "3px 9px",
+            height: 22,
+            display: "inline-flex",
+            alignItems: "center",
+            lineHeight: 1,
+            borderRadius: "var(--r-pill)",
+          }}
+        >
+          {archetype}
+        </span>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {unallocatedPoints > 0 && (
-            <BronzeButton size="sm" onClick={onAllocateClick}>
+            <button
+              type="button"
+              onClick={onAllocateClick}
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontWeight: 700,
+                fontSize: 11,
+                color: "var(--sc-parchment)",
+                background: "var(--sc-panel-2)",
+                border: "1px solid var(--sc-rim-2)",
+                padding: "6px 12px",
+                height: 33,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                cursor: "pointer",
+                borderRadius: 2,
+                boxShadow: "var(--sh-plate-sm)",
+                whiteSpace: "nowrap",
+              }}
+            >
               + {unallocatedPoints} pts
-            </BronzeButton>
+            </button>
           )}
           {saveControls}
         </div>
       </div>
 
-      {/* Slackey character name */}
+      {/* §[33] Slackey character name — bronze, 36/400, margin-top 6. */}
       <h2
         style={{
-          margin: 0,
+          margin: "6px 0 0",
           fontFamily: "var(--font-display)",
-          fontSize: 44,
+          fontSize: 36,
+          fontWeight: 400,
           lineHeight: 1.0,
           color: "var(--sc-bronze)",
           letterSpacing: "0.01em",
@@ -1188,7 +1337,7 @@ function CenterInfoCard({
         {character.name}
       </h2>
 
-      {/* Lv + ELO + W/L summary */}
+      {/* §[34][35][36] LV + ELO bronze pills + record. */}
       <div
         style={{
           display: "flex",
@@ -1197,26 +1346,72 @@ function CenterInfoCard({
           flexWrap: "wrap",
         }}
       >
-        <Stamp tone="bronze">Lv {character.level}</Stamp>
-        <Stamp tone="default" outline>
-          {character.rating} ELO
-        </Stamp>
         <span
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            color: "var(--fg-3)",
+            fontFamily: "var(--font-ui)",
             fontWeight: 700,
-            letterSpacing: ".02em",
+            fontSize: 10,
+            letterSpacing: "1.4px",
+            textTransform: "uppercase",
+            color: "var(--sc-page)",
+            background: "var(--sc-bronze)",
+            padding: "3px 9px",
+            height: 22,
+            display: "inline-flex",
+            alignItems: "center",
+            lineHeight: 1,
+            borderRadius: 0,
           }}
         >
-          {character.wins}w · {character.losses}l · {winRate}%
+          LV {character.level}
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontWeight: 700,
+            fontSize: 10,
+            letterSpacing: "1.4px",
+            textTransform: "uppercase",
+            color: "var(--sc-page)",
+            background: "var(--sc-bronze)",
+            padding: "3px 9px",
+            height: 22,
+            display: "inline-flex",
+            alignItems: "center",
+            lineHeight: 1,
+            borderRadius: 0,
+          }}
+        >
+          {character.rating} ELO
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--sc-parchment-dim)",
+            letterSpacing: 0,
+          }}
+        >
+          {character.wins}W · {character.losses}L · {winRate}%
         </span>
       </div>
 
-      {/* Primary Attributes */}
+      {/* §[37]-[47] Primary attributes — semantic-coloured rows, 5 px bar. */}
       <div>
-        <SectionLabel>Primary Attributes</SectionLabel>
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontWeight: 700,
+            fontSize: 10,
+            letterSpacing: "1px",
+            textTransform: "uppercase",
+            color: "var(--sc-muted)",
+            margin: "8px 0 10px",
+          }}
+        >
+          Primary Attributes
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {statRows.map((row) => {
             const total = row.base + row.bonus;
@@ -1233,24 +1428,21 @@ function CenterInfoCard({
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 6,
-                    width: 72,
+                    width: 48,
                     color: row.color,
                     fontWeight: 800,
-                    fontSize: 11,
-                    letterSpacing: ".08em",
+                    fontSize: 12,
+                    letterSpacing: "0.96px",
                     textTransform: "uppercase",
                   }}
                 >
-                  <span style={{ fontSize: 12, opacity: 0.85 }}>{row.icon}</span>
                   {row.label}
                 </span>
                 <div
                   style={{
                     flex: 1,
-                    height: 8,
-                    background: "var(--sc-page)",
-                    border: "1px solid var(--sc-rim-2)",
+                    height: 5,
+                    background: "rgba(10, 13, 18, 0.6)",
                     borderRadius: 1,
                     overflow: "hidden",
                   }}
@@ -1267,8 +1459,8 @@ function CenterInfoCard({
                 <span
                   style={{
                     fontFamily: "var(--font-mono)",
-                    fontWeight: 800,
-                    fontSize: 14,
+                    fontWeight: 700,
+                    fontSize: 12,
                     color: row.color,
                     minWidth: 56,
                     textAlign: "right",
@@ -1279,7 +1471,7 @@ function CenterInfoCard({
                       {row.base}
                       <span
                         style={{
-                          color: "var(--rarity-uncommon)",
+                          color: "var(--sc-victory)",
                           marginLeft: 4,
                           fontSize: 11,
                         }}
@@ -1297,9 +1489,21 @@ function CenterInfoCard({
         </div>
       </div>
 
-      {/* Combat Stats — 4-col grid, 2 rows */}
+      {/* §[48]-[56] Combat stats — 4×2 grid, semantic-coloured values. */}
       <div>
-        <SectionLabel>Combat Stats</SectionLabel>
+        <div
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontWeight: 700,
+            fontSize: 10,
+            letterSpacing: "1px",
+            textTransform: "uppercase",
+            color: "var(--sc-muted)",
+            margin: "8px 0 10px",
+          }}
+        >
+          Combat Stats
+        </div>
         <div
           style={{
             display: "grid",
@@ -1320,11 +1524,12 @@ function CenterInfoCard({
             >
               <div
                 style={{
-                  fontSize: 9,
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 10,
                   fontWeight: 700,
-                  letterSpacing: ".12em",
+                  letterSpacing: "0.12em",
                   textTransform: "uppercase",
-                  color: "var(--fg-3)",
+                  color: "var(--sc-muted)",
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -1335,8 +1540,8 @@ function CenterInfoCard({
               <div
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontWeight: 800,
-                  fontSize: 18,
+                  fontWeight: 700,
+                  fontSize: 16,
                   color,
                   marginTop: 2,
                   whiteSpace: "nowrap",
@@ -1351,17 +1556,18 @@ function CenterInfoCard({
         </div>
       </div>
 
-      {/* XP bar */}
+      {/* §[57][58] XP bar — Poppins 10/700 muted labels, 8 px striped gold. */}
       <div>
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
+            fontFamily: "var(--font-ui)",
             fontSize: 10,
             fontWeight: 700,
-            letterSpacing: ".10em",
+            letterSpacing: "0.10em",
             textTransform: "uppercase",
-            color: "var(--fg-3)",
+            color: "var(--sc-muted)",
             marginBottom: 4,
           }}
         >
