@@ -291,6 +291,53 @@ function main(): void {
   contains(arena, 'Widen ELO Range', 'queue panel widen button');
 
   // ===========================================================================
+  // [9b] Inventory — filter row is icon toggles (polish pass)
+  // ===========================================================================
+  // Pin the icon-toggle filter row added by feat(phase-2-polish). Verifies
+  // the state machine, accessibility, color routing, and size/border spec
+  // so a future "let's add a 5th category" PR doesn't accidentally drift
+  // back to the old text-chip layout.
+  console.log('\n[9b] Inventory — icon-toggle filter row');
+  const inv = readSrc('frontend/src/components/items/inventory.tsx');
+  // Four-icon set declared in order: Weapons / Armor / Jewelry / All.
+  contains(inv, 'const FILTER_ICONS', 'FILTER_ICONS list declared');
+  contains(inv, 'id: "weapons"', 'icon row includes Weapons');
+  contains(inv, 'id: "armor"', 'icon row includes Armor');
+  contains(inv, 'id: "jewelry"', 'icon row includes Jewelry');
+  contains(inv, 'id: "all"', 'icon row includes All');
+  // Spec colour routing per family.
+  contains(inv, '"var(--sc-blood)"', 'Weapons icon uses --sc-blood');
+  contains(inv, '"var(--sc-steel)"', 'Armor icon uses --sc-steel');
+  contains(inv, '"var(--sc-grape)"', 'Jewelry icon uses --sc-grape');
+  // FilterIconToggle structural pins.
+  contains(inv, 'function FilterIconToggle', 'FilterIconToggle component defined');
+  contains(inv, 'width: 32,', 'icon toggle width = 32');
+  contains(inv, 'height: 32,', 'icon toggle height = 32');
+  contains(inv, 'borderRadius: 3,', 'icon toggle border-radius = 3');
+  contains(
+    inv,
+    '`2px solid ${active ? "var(--sc-bronze)" : "var(--sc-rim)"}`',
+    'icon toggle border swaps bronze ↔ rim on active',
+  );
+  contains(
+    inv,
+    'active ? "var(--sc-panel)" : "var(--sc-panel-2)"',
+    'icon toggle bg swaps panel ↔ panel-2 on active',
+  );
+  contains(inv, 'role="radio"', 'icon toggle exposes role=radio');
+  contains(inv, 'aria-checked={active}', 'icon toggle exposes aria-checked');
+  contains(inv, 'aria-label={`Filter inventory: ${label}`}', 'icon toggle has aria-label per icon');
+  contains(inv, 'role="radiogroup"', 'icon row uses role=radiogroup');
+  // Click handler must call setCategory with the icon's id.
+  contains(inv, 'onClick={() => setCategory(ic.id)}', 'icon toggle wires setCategory');
+  // The legacy text chip row must be gone.
+  if (!/const TABS:\s*\{\s*id:\s*Category/.test(inv)) {
+    ok('legacy TABS text-chip row removed');
+  } else {
+    fail('inventory filter row', 'TABS text-chip array still present');
+  }
+
+  // ===========================================================================
   // [10] Market — ListingCard + ThreeColumn
   // ===========================================================================
   console.log('\n[10] Market — ListingCard + ThreeColumn composition');

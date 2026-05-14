@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { useKiosk } from "@/hooks/useKiosk";
@@ -159,12 +159,131 @@ const CATEGORY_TYPES: Record<Category, ItemType[] | null> = {
   jewelry: [ITEM_TYPES.RING, ITEM_TYPES.NECKLACE],
 };
 
-const TABS: { id: Category; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "weapons", label: "Weapons" },
-  { id: "armor", label: "Armor" },
-  { id: "jewelry", label: "Jewelry" },
+/**
+ * Inventory filter row — icon toggles.
+ *
+ * Lucide stroke paths inlined (no runtime dep — lucide-react isn't in
+ * package.json). Each icon ships at 18 px inside a 32×32 button per
+ * the polish spec. Colors tie to the stat-family tokens so the icons
+ * read as "what kind of items" at a glance.
+ *
+ *   Weapons → Sword icon, --sc-blood (STR family)
+ *   Armor   → Shield icon, --sc-steel (DEX/defense family)
+ *   Jewelry → Gem icon, --sc-grape (INT/magic family)
+ *   All     → Grid3x3 icon, --sc-bronze (neutral)
+ */
+const FILTER_ICONS: { id: Category; label: string; color: string; path: ReactNode }[] = [
+  {
+    id: "weapons",
+    label: "Weapons",
+    color: "var(--sc-blood)",
+    path: (
+      <>
+        <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" />
+        <line x1="13" y1="19" x2="19" y2="13" />
+        <line x1="16" y1="16" x2="20" y2="20" />
+        <line x1="19" y1="21" x2="21" y2="19" />
+      </>
+    ),
+  },
+  {
+    id: "armor",
+    label: "Armor",
+    color: "var(--sc-steel)",
+    path: (
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+    ),
+  },
+  {
+    id: "jewelry",
+    label: "Jewelry",
+    color: "var(--sc-grape)",
+    path: (
+      <>
+        <path d="M6 3h12l4 6-10 13L2 9Z" />
+        <path d="M11 3 8 9l4 13 4-13-3-6" />
+        <path d="M2 9h20" />
+      </>
+    ),
+  },
+  {
+    id: "all",
+    label: "All",
+    color: "var(--sc-bronze)",
+    path: (
+      <>
+        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <path d="M3 9h18" />
+        <path d="M3 15h18" />
+        <path d="M9 3v18" />
+        <path d="M15 3v18" />
+      </>
+    ),
+  },
 ];
+
+function FilterIconToggle({
+  active,
+  label,
+  color,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  color: string;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      role="radio"
+      aria-checked={active}
+      aria-label={`Filter inventory: ${label}`}
+      title={label}
+      style={{
+        width: 32,
+        height: 32,
+        padding: 0,
+        cursor: "pointer",
+        background: active ? "var(--sc-panel)" : "var(--sc-panel-2)",
+        border: `2px solid ${active ? "var(--sc-bronze)" : "var(--sc-rim)"}`,
+        borderRadius: 3,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "border-color .15s, background .15s",
+        boxSizing: "border-box",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) {
+          e.currentTarget.style.borderColor = "rgba(200,154,63,0.6)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!active) {
+          e.currentTarget.style.borderColor = "var(--sc-rim)";
+        }
+      }}
+    >
+      <svg
+        width={18}
+        height={18}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        {children}
+      </svg>
+    </button>
+  );
+}
 
 // Item type -> compatible equipment slots
 function getSlotsForItem(item: Item): (keyof EquipmentSlots)[] {
@@ -240,92 +359,97 @@ export function Inventory() {
     <>
       <Card>
         <CardHeader>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {/* Spec §[59] — Poppins 36/400 parchment, tracking -0.36px. */}
-                <span
-                  style={{
-                    fontFamily: "var(--font-ui)",
-                    fontSize: 36,
-                    fontWeight: 400,
-                    lineHeight: 1.15,
-                    color: "var(--sc-parchment)",
-                    letterSpacing: "-0.36px",
-                  }}
-                >
-                  Inventory
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    minWidth: 26,
-                    height: 22,
-                    padding: "0 8px",
-                    background: "var(--sc-page)",
-                    color: "var(--sc-bronze)",
-                    border: "1.5px solid var(--sc-bronze)",
-                    borderRadius: "var(--r-pill)",
-                    fontFamily: "var(--font-mono)",
-                    fontWeight: 800,
-                    fontSize: 12,
-                  }}
-                >
-                  {allItems.length}
-                </span>
-              </div>
-              <select
-                value={filterRarity}
-                onChange={(e) =>
-                  setFilterRarity(e.target.value === "all" ? "all" : (Number(e.target.value) as Rarity))
-                }
+          {/* Polish: single inline row — title · icon toggles · rarity dropdown.
+              Layout target:
+                Inventory (8)   [⚔] [🛡] [💎] [▦]              [All Rarities ▾]
+              Title cluster on the left, icon toggles centered-left, rarity
+              dropdown right via justify-content: space-between. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {/* Spec §[59] — Poppins 36/400 parchment, tracking -0.36px. */}
+              <span
                 style={{
                   fontFamily: "var(--font-ui)",
-                  fontSize: 11,
-                  padding: "4px 8px",
-                  background: "var(--sc-panel-2)",
+                  fontSize: 36,
+                  fontWeight: 400,
+                  lineHeight: 1.15,
                   color: "var(--sc-parchment)",
-                  border: "1px solid var(--sc-rim-2)",
-                  borderRadius: "var(--r-sm)",
-                  cursor: "pointer",
+                  letterSpacing: "-0.36px",
                 }}
               >
-                <option value="all">All Rarities</option>
-                {Object.entries(RARITY_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
+                Inventory
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: 26,
+                  height: 22,
+                  padding: "0 8px",
+                  background: "var(--sc-page)",
+                  color: "var(--sc-bronze)",
+                  border: "1.5px solid var(--sc-bronze)",
+                  borderRadius: "var(--r-pill)",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 800,
+                  fontSize: 12,
+                }}
+              >
+                {allItems.length}
+              </span>
             </div>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {TABS.map((tab) => {
-                const active = category === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setCategory(tab.id)}
-                    style={{
-                      padding: "4px 10px",
-                      fontFamily: "var(--font-ui)",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: ".04em",
-                      border: `1px solid ${active ? "var(--sc-bronze)" : "var(--sc-rim-2)"}`,
-                      background: active ? "rgba(200,154,63,0.20)" : "var(--sc-panel-2)",
-                      color: active ? "var(--sc-bronze)" : "var(--fg-2)",
-                      borderRadius: "var(--r-card)",
-                      cursor: "pointer",
-                      transition: "all var(--d-fast)",
-                    }}
-                  >
-                    {tab.label}
-                  </button>
-                );
-              })}
+
+            {/* Icon toggles — Weapons / Armor / Jewelry / All. */}
+            <div
+              role="radiogroup"
+              aria-label="Filter inventory by category"
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              {FILTER_ICONS.map((ic) => (
+                <FilterIconToggle
+                  key={ic.id}
+                  active={category === ic.id}
+                  label={ic.label}
+                  color={ic.color}
+                  onClick={() => setCategory(ic.id)}
+                >
+                  {ic.path}
+                </FilterIconToggle>
+              ))}
             </div>
+
+            <select
+              value={filterRarity}
+              onChange={(e) =>
+                setFilterRarity(e.target.value === "all" ? "all" : (Number(e.target.value) as Rarity))
+              }
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 11,
+                padding: "4px 8px",
+                background: "var(--sc-panel-2)",
+                color: "var(--sc-parchment)",
+                border: "1px solid var(--sc-rim-2)",
+                borderRadius: "var(--r-sm)",
+                cursor: "pointer",
+              }}
+            >
+              <option value="all">All Rarities</option>
+              {Object.entries(RARITY_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
           </div>
         </CardHeader>
         <CardBody>
