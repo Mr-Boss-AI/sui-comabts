@@ -200,58 +200,52 @@ function main(): void {
   contains(uiModal, '2px solid var(--sc-bronze)', 'modal: 2px bronze rim');
 
   // ===========================================================================
-  // [7] Character screen — slot mapping flip preserved
+  // [7] Character screen — slot mapping pinned to extracted spec
   // ===========================================================================
-  console.log('\n[7] character-profile — slot mapping flip');
+  // Pin re-anchored to
+  //   design_v2/specs/character_equipment_frame_extracted.md
+  // — values come from App.jsx TWEAK_DEFAULTS in the live design source.
+  console.log('\n[7] character-profile — extracted slot mapping');
   const charProfile = readSrc('frontend/src/components/character/character-profile.tsx');
-  // Left col: helmet → bracers-future → weapon → chest
-  // (matches reference image after the 075606a flip)
+  // Left col (extracted): helmet → shoulders* → weapon → chest → belt
   const leftOrderIdx = {
-    helmet:  charProfile.indexOf('slot="helmet"'),
-    bracers: charProfile.indexOf('futureLabel="Bracers"'),
-    weapon:  charProfile.indexOf('slot="weapon"'),
-    chest:   charProfile.indexOf('slot="chest"'),
+    helmet:    charProfile.indexOf('slot="helmet"'),
+    shoulders: charProfile.indexOf('futureLabel="Shoulders"'),
+    weapon:    charProfile.indexOf('slot="weapon"'),
+    chest:     charProfile.indexOf('slot="chest"'),
   };
   if (
     leftOrderIdx.helmet > 0 &&
-    leftOrderIdx.bracers > leftOrderIdx.helmet &&
-    leftOrderIdx.weapon > leftOrderIdx.bracers &&
+    leftOrderIdx.shoulders > leftOrderIdx.helmet &&
+    leftOrderIdx.weapon > leftOrderIdx.shoulders &&
     leftOrderIdx.chest > leftOrderIdx.weapon
   ) {
-    ok('left col order: helmet → bracers → weapon → chest');
+    ok('left col order: helmet → shoulders* → weapon → chest');
   } else {
     fail(
       'left col order',
-      `helmet=${leftOrderIdx.helmet}, bracers=${leftOrderIdx.bracers}, weapon=${leftOrderIdx.weapon}, chest=${leftOrderIdx.chest}`,
+      `helmet=${leftOrderIdx.helmet}, shoulders=${leftOrderIdx.shoulders}, weapon=${leftOrderIdx.weapon}, chest=${leftOrderIdx.chest}`,
     );
   }
-  // Bracers must be a future placeholder, NOT canonical Gloves
-  contains(charProfile, 'futureLabel="Bracers"', 'left col[2] is future Bracers');
-  // Canonical gloves must live in the right column area (after the
-  // ring cluster, before off-hand). The Phase 2 layout sweep renamed
-  // the comment from "Ring row — 3 ring slots" to "Ring cluster" —
-  // accept either spelling.
-  const ringRowIdx = Math.max(
-    charProfile.indexOf('Ring row — 3 ring slots'),
-    charProfile.indexOf('Ring cluster'),
-  );
+  contains(charProfile, 'futureLabel="Shoulders"', 'left col[2] is future Shoulders (v5.1)');
+  // Right col: necklace → ring row → gloves → off-hand → pants* → boots
+  const ringRowIdx = charProfile.indexOf('Ring row');
   const glovesIdx = charProfile.indexOf('slot="gloves"');
   const offhandIdx = charProfile.indexOf('slot="offhand"');
   if (ringRowIdx > 0 && glovesIdx > ringRowIdx && offhandIdx > glovesIdx) {
-    ok('right col: Ring cluster → Gloves (canonical) → Off-hand');
+    ok('right col: Ring row → Gloves → Off-hand');
   } else {
     fail(
       'right col gloves ordering',
       `ringRow=${ringRowIdx}, gloves=${glovesIdx}, offhand=${offhandIdx}`,
     );
   }
-  // Phase 2 layout sweep bumped the spec to the exact Claude Design
-  // pixel values: BIG = 216, CENTER (portrait + HP + ornament) = 462.
-  // Phase 2-fix wraps them in round(n * scale) so the frame can shrink
-  // into a 36% column without distorting proportions.
-  contains(charProfile, 'const BIG = round(216)', 'BIG = round(216) (layout sweep pixel spec)');
-  contains(charProfile, 'const CENTER = round(462)', 'CENTER = round(462) (portrait + HP bar width)');
-  contains(charProfile, 'const BELT_H = round(102)', 'BELT_H = round(102) (bottom-left tile)');
+  // Extracted-spec pixel values from TWEAK_DEFAULTS in App.jsx — bigSlotW
+  // 96, bigSlotH 108, beltSlotH 56. The center column is now 1fr, not a
+  // fixed CENTER constant (which was the diagnosed root cause).
+  contains(charProfile, 'bigSlotW: 96', 'TWEAK_DEFAULTS.bigSlotW = 96');
+  contains(charProfile, 'bigSlotH: 108', 'TWEAK_DEFAULTS.bigSlotH = 108');
+  contains(charProfile, 'beltSlotH: 56', 'TWEAK_DEFAULTS.beltSlotH = 56');
 
   // ===========================================================================
   // [8] Hot-paths: every screen imports v2 primitives

@@ -155,142 +155,120 @@ function main(): void {
   }
 
   // ===========================================================================
-  // [7] Character — exact pixel-spec equipment frame
+  // [7] Character — extracted-spec equipment frame
   // ===========================================================================
-  console.log('\n[7] Character — pixel-spec equipment frame');
+  // Pin re-anchored to the extracted Equipment Frame spec at
+  //   design_v2/specs/character_equipment_frame_extracted.md
+  // — values come from App.jsx TWEAK_DEFAULTS in the live design source.
+  console.log('\n[7] Character — extracted-spec equipment frame');
   const char = readSrc('frontend/src/components/character/character-profile.tsx');
-  // Phase 2-fix: pixel constants now flow through a `scale` prop so the
-  // frame can shrink into a 36% column without warping its proportions.
-  // The canonical reference numbers (216 / 64 / 102 / 462) are still pinned
-  // — they're just wrapped in round(n * scale).
-  contains(char, 'const BIG = round(216)', 'BIG = round(216)');
-  contains(char, 'const RING = round(64)', 'RING = round(64)');
-  contains(char, 'const BELT_H = round(102)', 'BELT_H = round(102)');
-  contains(char, 'const CENTER = round(462)', 'CENTER = round(462)');
-  contains(char, 'round(6)', 'GAP feeds through round(6)');
-  // HP bar height — clamped above 22 so it stays readable when scaled down.
-  contains(char, 'Math.max(22, round(40))', 'HP bar height = max(22, round(40))');
-  // Phase 2-fix: NFT portrait is no longer a square — it's a 3:4
-  // vertical rectangle so vertically-oriented NFT art shows
-  // beautifully. Width stays at CENTER (=462 canonical); height
-  // grows to round(CENTER * 4 / 3) ≈ 616. PORTRAIT_W + PORTRAIT_H
-  // constants feed the PortraitFrame component.
-  contains(char, 'const PORTRAIT_W = CENTER', 'PORTRAIT_W = CENTER (width unchanged)');
+  // TWEAK_DEFAULTS constants — bigSlotW 96, bigSlotH 108, ringSlotSize 44,
+  // beltSlotH 56, colGap 8, slotGap 6, framePad 12, statRowPad 4.
+  contains(char, 'bigSlotW: 96', 'TWEAK_DEFAULTS.bigSlotW = 96');
+  contains(char, 'bigSlotH: 108', 'TWEAK_DEFAULTS.bigSlotH = 108');
+  contains(char, 'ringSlotSize: 44', 'TWEAK_DEFAULTS.ringSlotSize = 44');
+  contains(char, 'beltSlotH: 56', 'TWEAK_DEFAULTS.beltSlotH = 56');
+  contains(char, 'colGap: 8', 'TWEAK_DEFAULTS.colGap = 8');
+  contains(char, 'slotGap: 6', 'TWEAK_DEFAULTS.slotGap = 6');
+  contains(char, 'framePad: 12', 'TWEAK_DEFAULTS.framePad = 12');
+  // Critical: grid template uses 1fr for the center column so the
+  // portrait + ornament stretch. Fixed-pixel CENTER was the root cause
+  // of the previous misalignment.
   contains(
     char,
-    'const PORTRAIT_H = Math.round(CENTER * 4 / 3)',
-    'PORTRAIT_H = round(CENTER * 4 / 3) — 3:4 portrait ratio',
+    '`${bigSlotW}px ${colGap}px 1fr ${colGap}px ${bigSlotW}px`',
+    'grid-template-columns = 96px 8px 1fr 8px 96px (center is 1fr)',
   );
-  const portraitFrameUsage = /<PortraitFrame[\s\S]*?width=\{PORTRAIT_W\}[\s\S]*?height=\{PORTRAIT_H\}/m;
-  if (portraitFrameUsage.test(char)) {
-    ok('PortraitFrame wired to PORTRAIT_W × PORTRAIT_H (3:4 vertical)');
+  // No legacy CENTER constant — it would re-introduce the fixed-width regression.
+  if (!/const CENTER = round\(462\)/.test(char)) {
+    ok('legacy CENTER = round(462) removed — center column is 1fr');
   } else {
-    fail(
-      'portrait dims',
-      'PortraitFrame width/height not bound to PORTRAIT_W/PORTRAIT_H constants',
-    );
+    fail('center column', 'CENTER = round(462) re-introduced; center must stay 1fr');
   }
-  // CSS aspectRatio belt-and-suspenders inside PortraitFrame so the
-  // ratio holds even if dimensions get resized via flex/grid.
-  contains(char, 'aspectRatio: "3 / 4"', 'CSS aspectRatio "3 / 4" locked on PortraitFrame');
-  // Ornament height — scaled, with min-clamp so it stays visible.
-  contains(char, 'Math.max(60, round(120))', 'ornament height = max(60, round(120))');
+  // HP bar height 22 per extracted spec.
+  contains(char, 'height = 22', 'HpBar height = 22');
+  // Ornament height 56 per extracted spec.
+  contains(char, '<TribalOrnament height={56} />', 'Ornament height = 56');
 
   // -------------------------------------------------------------------------
-  // [7b] Phase 2-fix: edge-to-edge slot fit
+  // [7b] SlotTile — extracted shadow + image recipe
   // -------------------------------------------------------------------------
-  // Equipped NFT img inside SlotTile fills the tile edge-to-edge:
-  // objectFit cover + padding 0 + absolute inset so the rarity
-  // border becomes the visual edge of the artwork.
-  console.log('\n[7b] Character — slot tiles render edge-to-edge');
-  contains(char, 'objectFit: "cover"', 'slot img objectFit = cover (edge-to-edge)');
-  contains(char, 'objectPosition: "center"', 'slot img centered when cropped');
-  contains(char, 'padding: 0,', 'slot img zero padding (touches rarity border)');
-  // The img must be positioned absolute so it fills the full slot
-  // even when the button is a flex parent centered on placeholders.
-  contains(char, 'position: "absolute"', 'slot img positioned absolute inside tile');
-  // Ensure the legacy contain+padding-6 combo is gone.
-  if (!/objectFit:\s*"contain"[\s\S]{0,80}padding:\s*6/.test(char)) {
-    ok('legacy objectFit:contain + padding:6 removed from slot img');
-  } else {
-    fail('legacy slot img style', 'still has contain+padding:6 — edge-to-edge not applied');
-  }
-
-  // -------------------------------------------------------------------------
-  // [7c] Phase 2-fix: row-aligned grid (left col = right col, row-by-row)
-  // -------------------------------------------------------------------------
-  console.log('\n[7c] Character — explicit grid rows align left + right columns');
-  // SIDE_ROWS template: 5 explicit BIG-tall row tracks shared by
-  // both side columns so every row's Y origin matches.
+  // Per spec: contained image, padding 4, drop-shadow filter; empty
+  // shadow recipe pins the chunky inset look from the design source.
+  console.log('\n[7b] Character — SlotTile recipe pinned to extracted spec');
+  contains(char, 'objectFit: "contain"', 'slot img objectFit = contain (extracted spec)');
+  contains(char, 'padding: 4,', 'slot img padding 4');
   contains(
     char,
-    'const SIDE_ROWS = `${BIG}px ${BIG}px ${BIG}px ${BIG}px ${BIG}px`',
-    'SIDE_ROWS template — 5× BIG-tall explicit row tracks',
+    'inset 0 1px 0 rgba(255,255,255,.05), inset 0 -1px 0 rgba(0,0,0,.55), 1px 1px 0 rgba(0,0,0,.6)',
+    'empty SlotTile shadow recipe pinned',
   );
-  // Both side columns reference the same SIDE_ROWS template — count
-  // exactly two occurrences (one for left, one for right).
-  const sideRowsUsages = (char.match(/gridTemplateRows: SIDE_ROWS/g) ?? []).length;
-  if (sideRowsUsages === 2) {
-    ok('SIDE_ROWS applied to BOTH side columns (left + right)');
+  contains(
+    char,
+    '"0 0 0 1px var(--sc-bronze)"',
+    'dirty/equipped SlotTile shadow = 0 0 0 1px var(--sc-bronze)',
+  );
+
+  // -------------------------------------------------------------------------
+  // [7c] PortraitFrame — flex:1 inside center column
+  // -------------------------------------------------------------------------
+  console.log('\n[7c] Character — PortraitFrame stretches inside center column');
+  contains(char, 'flex: 1,', 'PortraitFrame uses flex: 1 (no fixed height)');
+  contains(char, 'minHeight: 0,', 'PortraitFrame min-height: 0 so flex can shrink');
+  // No aspectRatio 3/4 lock — the portrait now stretches to fill the
+  // center column; spec says width:100% + flex:1.
+  if (!/aspectRatio:\s*"3 \/ 4"/.test(char)) {
+    ok('aspectRatio 3/4 lock removed — portrait stretches via flex');
   } else {
-    fail(
-      'SIDE_ROWS usage count',
-      `expected 2 gridTemplateRows: SIDE_ROWS occurrences (left + right), got ${sideRowsUsages}`,
-    );
-  }
-  // Belt anchors top of its BIG-tall row so its top edge matches
-  // boots' top edge on the right column.
-  contains(char, 'alignSelf: "start"', 'belt alignSelf: start — top-anchored in row 5');
-  // Ring cluster centers vertically inside its BIG-tall row so its
-  // centerline matches bracers on the left column.
-  contains(char, 'alignSelf: "center"', 'ring cluster alignSelf: center — vertical-center in row 2');
-  // The flex-column legacy stack (gap: GAP with display: "flex") on
-  // the side columns should be gone — replaced by explicit grid.
-  if (!/gridColumn: 1,\s*gridRow: 2,\s*display: "flex"/.test(char)) {
-    ok('left column no longer uses flex-column (uses explicit grid)');
-  } else {
-    fail('left col layout', 'left column still uses flex-column instead of grid');
-  }
-  if (!/gridColumn: 3,\s*gridRow: 2,\s*display: "flex"/.test(char)) {
-    ok('right column no longer uses flex-column (uses explicit grid)');
-  } else {
-    fail('right col layout', 'right column still uses flex-column instead of grid');
+    fail('portrait sizing', 'aspectRatio 3/4 still pinned; should be flex:1');
   }
 
   // ===========================================================================
-  // [8] Character — slot mapping flip preserved
+  // [8] Character — extracted slot order (left + right column)
   // ===========================================================================
-  console.log('\n[8] Character — slot mapping flip preserved');
-  // Left col contains Bracers as v5.1 future right after Helmet
+  console.log('\n[8] Character — slot mapping per extracted column layout');
+  // Left: Helmet · Shoulders* · Weapon · Chest · Belt(56)
   const helmetIdx = char.indexOf('slot="helmet"');
-  const bracersIdx = char.indexOf('futureLabel="Bracers"');
+  const shouldersIdx = char.indexOf('futureLabel="Shoulders"');
   const weaponIdx = char.indexOf('slot="weapon"');
   if (
     helmetIdx > 0 &&
-    bracersIdx > helmetIdx &&
-    weaponIdx > bracersIdx
+    shouldersIdx > helmetIdx &&
+    weaponIdx > shouldersIdx
   ) {
-    ok('left col: helmet → bracers → weapon (mapping flip intact)');
+    ok('left col: helmet → shoulders* → weapon (extracted order)');
   } else {
     fail(
       'left col order',
-      `helmet=${helmetIdx}, bracers=${bracersIdx}, weapon=${weaponIdx}`,
+      `helmet=${helmetIdx}, shoulders=${shouldersIdx}, weapon=${weaponIdx}`,
     );
   }
-  // Right col has canonical Gloves AFTER the ring row
-  const ringIdx = char.indexOf('Ring cluster');
+  // Right: Necklace · [Ring1 Ring2 Ring3*] · Gloves · Off-hand · Pants* · Boots
+  const necklaceIdx = char.indexOf('slot="necklace"');
   const glovesIdx = char.indexOf('slot="gloves"');
   const offhandIdx = char.indexOf('slot="offhand"');
-  if (ringIdx > 0 && glovesIdx > ringIdx && offhandIdx > glovesIdx) {
-    ok('right col: rings → Gloves → Off-hand → Boots');
+  const pantsIdx = char.indexOf('futureLabel="Pants"');
+  const bootsIdx = char.indexOf('slot="boots"');
+  if (
+    necklaceIdx > 0 &&
+    glovesIdx > necklaceIdx &&
+    offhandIdx > glovesIdx &&
+    pantsIdx > offhandIdx &&
+    bootsIdx > pantsIdx
+  ) {
+    ok('right col: necklace → rings → gloves → offhand → pants* → boots');
   } else {
     fail(
       'right col order',
-      `rings=${ringIdx}, gloves=${glovesIdx}, offhand=${offhandIdx}`,
+      `necklace=${necklaceIdx}, gloves=${glovesIdx}, offhand=${offhandIdx}, pants=${pantsIdx}, boots=${bootsIdx}`,
     );
   }
-  // Belt at bottom of left column (216 × 102)
-  contains(char, '{ w: BIG, h: BELT_H }', 'Belt sized 216×102');
+  // Belt sized w:bigSlotW, h:beltSlotH per extracted spec.
+  contains(
+    char,
+    '{ w: bigSlotW, h: beltSlotH }',
+    'Belt sized bigSlotW × beltSlotH (96 × 56)',
+  );
 
   // ===========================================================================
   // [9] Arena — 3-up fight tile row tone-coded

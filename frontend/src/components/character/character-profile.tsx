@@ -97,6 +97,23 @@ interface SlotTileProps {
   emptyLabel?: string;
 }
 
+/**
+ * Spec: design_v2/specs/character_equipment_frame_extracted.md  §SlotTile
+ *
+ *   - border        2px solid {rarityColor}  (filled)
+ *                   1px solid var(--sc-rim-2) (empty)
+ *   - border-radius 2 px
+ *   - padding       0 (image sits with internal padding: 4)
+ *   - bg            empty → var(--sc-panel-2)  /  future → var(--sc-page)
+ *   - opacity       future slot → 0.45
+ *   - shadow empty  inset 0 1px 0 rgba(255,255,255,.05),
+ *                   inset 0 -1px 0 rgba(0,0,0,.55),
+ *                   1px 1px 0 rgba(0,0,0,.6)
+ *   - shadow dirty  0 0 0 1px var(--sc-bronze)
+ *   - transition    transform .15s, border-color .15s, box-shadow .15s
+ *   - image         100% / 100%, objectFit:contain, padding:4, drop-shadow
+ *   - empty icon    IconComp at Math.min(w, h) * 0.42
+ */
 function SlotTile({
   slot,
   item,
@@ -110,16 +127,11 @@ function SlotTile({
   const w = typeof size === "number" ? size : size.w;
   const h = typeof size === "number" ? size : size.h;
   const rarityColor = item ? RARITY_BORDER_HEX[item.rarity] : null;
-  // Inner inset so the item is visually framed by the tile rim
-  // (matches design_v2/screenshopts/character_layout_reference.jpeg
-  // where every gear piece sits inside its tile with breathing room).
-  // Scales with tile size: ~8% of the smaller side, clamped to 4–10px.
-  const itemInset = Math.min(10, Math.max(4, Math.round(Math.min(w, h) * 0.08)));
-  // Spec §[24]/[30] — empty slot fill is page-black at 45% opacity,
-  // radius 2px, padding 0. Filled slots keep --sc-panel-2 so the item
-  // image stays legible.
-  const emptyBg = "rgba(10, 13, 18, 0.45)";
-  const filledBg = "var(--sc-panel-2)";
+
+  const SHADOW_EMPTY =
+    "inset 0 1px 0 rgba(255,255,255,.05), inset 0 -1px 0 rgba(0,0,0,.55), 1px 1px 0 rgba(0,0,0,.6)";
+  const SHADOW_DIRTY = "0 0 0 1px var(--sc-bronze)";
+
   const title = future
     ? `${futureLabel ?? "Slot"} — unlocks in v5.1 contract bundle`
     : item
@@ -127,6 +139,9 @@ function SlotTile({
       : slot
         ? `${EQUIPMENT_SLOT_LABELS[slot]} (click to equip)`
         : "Empty slot";
+
+  const filled = item != null;
+
   return (
     <button
       type="button"
@@ -138,22 +153,22 @@ function SlotTile({
         height: h,
         padding: 0,
         cursor: future ? "not-allowed" : "pointer",
-        background: item ? filledBg : emptyBg,
-        border: `2px solid ${rarityColor ?? "var(--sc-rim-2)"}`,
+        background: future ? "var(--sc-page)" : "var(--sc-panel-2)",
+        border: filled
+          ? `2px solid ${rarityColor}`
+          : "1px solid var(--sc-rim-2)",
         borderRadius: 2,
-        opacity: future ? 0.55 : 1,
-        boxShadow: isDirty
-          ? "0 0 0 1px var(--sc-bronze), inset 0 0 0 1px rgba(0,0,0,.55), inset 0 2px 6px rgba(0,0,0,.55), var(--sh-plate-sm)"
-          : "inset 0 0 0 1px rgba(0,0,0,.55), inset 0 2px 6px rgba(0,0,0,.55), var(--sh-plate-sm)",
+        opacity: future ? 0.45 : 1,
+        boxShadow: isDirty ? SHADOW_DIRTY : SHADOW_EMPTY,
         position: "relative",
         overflow: "hidden",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         transition:
-          "transform var(--d-base) var(--ease-pop), border-color var(--d-fast), box-shadow var(--d-fast)",
+          "transform .15s, border-color .15s, box-shadow .15s",
         fontFamily: "var(--font-mono)",
-        color: "var(--sc-muted)",
+        color: "var(--sc-ash)",
       }}
       onMouseEnter={(e) => {
         if (future) return;
@@ -172,28 +187,21 @@ function SlotTile({
             src={item.imageUrl}
             alt={item.name}
             style={{
-              position: "absolute",
-              top: itemInset,
-              left: itemInset,
-              right: itemInset,
-              bottom: itemInset,
-              width: `calc(100% - ${itemInset * 2}px)`,
-              height: `calc(100% - ${itemInset * 2}px)`,
+              width: "100%",
+              height: "100%",
               objectFit: "contain",
-              objectPosition: "center",
-              padding: 0,
+              padding: 4,
+              boxSizing: "border-box",
               filter: "drop-shadow(0 2px 4px rgba(0,0,0,.65))",
             }}
           />
         ) : (
-          <SlotGlyph size={Math.min(w, h) * 0.42} color={rarityColor ?? "var(--sc-muted)"} />
+          <SlotGlyph size={Math.min(w, h) * 0.42} color={rarityColor ?? "var(--sc-ash)"} />
         )
       ) : (
-        // Spec §[22]/[23] — empty slot SVG stroke uses --sc-muted (active)
-        // or --sc-dim (future / v5.1 placeholders).
         <SlotGlyph
-          size={Math.min(w, h) * 0.36}
-          color={future ? "var(--sc-dim)" : "var(--sc-muted)"}
+          size={Math.min(w, h) * 0.42}
+          color={future ? "var(--sc-ash-2)" : "var(--sc-ash)"}
         />
       )}
       {future && (
@@ -274,15 +282,22 @@ function SlotGlyph({ size, color }: { size: number; color: string }) {
 
 /* ─────────────────────────── HP bar ───────────────────────────────── */
 
+/**
+ * Spec: design_v2/specs/character_equipment_frame_extracted.md  §HpBar
+ *
+ *   - height 22 px
+ *   - bg var(--sc-page) · border 2px solid var(--sc-bronze)
+ *   - inset 0 1px 0 rgba(255,255,255,.06), inset 0 -2px 0 rgba(0,0,0,.55)
+ *   - fill gradient #7ba84a → #5a8a3a → #3f6b29
+ *   - text JetBrains Mono 13 / 700, --sc-parchment, letter-spacing 0.06em
+ */
 function HpBar({
   current,
   max,
-  width,
-  height = 40,
+  height = 22,
 }: {
   current: number;
   max: number;
-  width: number;
   height?: number;
 }) {
   const pct = max > 0 ? Math.min(100, (current / max) * 100) : 0;
@@ -290,12 +305,14 @@ function HpBar({
     <div
       style={{
         position: "relative",
-        width,
+        width: "100%",
         height,
         background: "var(--sc-page)",
         border: "2px solid var(--sc-bronze)",
-        boxShadow: "var(--rim-top), inset 0 -2px 0 rgba(0,0,0,.55)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,.06), inset 0 -2px 0 rgba(0,0,0,.55)",
         overflow: "hidden",
+        boxSizing: "border-box",
       }}
     >
       <div
@@ -305,8 +322,6 @@ function HpBar({
           width: `${pct}%`,
           background:
             "linear-gradient(180deg, #7ba84a 0%, #5a8a3a 50%, #3f6b29 100%)",
-          boxShadow:
-            "inset 0 1px 0 rgba(255,255,255,.25), inset 0 -1px 0 rgba(0,0,0,.45)",
           transition: "width var(--d-slow) var(--ease-out)",
         }}
       />
@@ -317,12 +332,13 @@ function HpBar({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontFamily: "var(--font-display)",
-          fontSize: 22,
+          fontFamily: "var(--font-mono)",
+          fontSize: 13,
+          fontWeight: 700,
           color: "var(--sc-parchment)",
-          textShadow: "0 0 4px rgba(0,0,0,.9), 2px 2px 0 #000",
-          letterSpacing: "0.02em",
+          letterSpacing: "0.06em",
           pointerEvents: "none",
+          textShadow: "0 1px 0 rgba(0,0,0,.6)",
         }}
       >
         {current.toLocaleString()} / {max.toLocaleString()}
@@ -333,16 +349,24 @@ function HpBar({
 
 /* ──────────────────────── Portrait Frame ──────────────────────────── */
 
+/**
+ * Spec: design_v2/specs/character_equipment_frame_extracted.md  §PortraitFrame
+ *
+ *   - width 100% of center column
+ *   - min-height 0, flex: 1 (grows to fill — set by parent grid cell)
+ *   - bg empty #0a0a0c · border 2px solid var(--sc-bronze) · border-radius 0
+ *   - inset 0 0 0 1px rgba(0,0,0,.4), inset 0 2px 4px rgba(0,0,0,.6)
+ *   - "Portrait" badge: bronze bg / parchment-on-page text / 3 8 pad / 1px bronze border
+ *   - Plus icon: 60×60, 2px solid bronze, opacity 0.55, IPlus 36
+ *   - "PLACE YOUR NFT HERE": font-ui 14/800 uppercase --sc-ash
+ *   - subtitle: font-ui 11 --sc-ash-2, max-width 200, line-height 1.45
+ */
 function PortraitFrame({
   portrait,
   onClick,
-  width,
-  height,
 }: {
   portrait: NftCandidate | null;
   onClick: () => void;
-  width: number;
-  height: number;
 }) {
   return (
     <button
@@ -354,29 +378,27 @@ function PortraitFrame({
           : "Click to set a portrait NFT"
       }
       style={{
-        width,
-        height,
-        // 3:4 portrait ratio — explicit pixel height feeds this in,
-        // CSS aspectRatio belt-and-suspenders so the frame stays
-        // locked at vertical 3:4 if it ever resizes via flex/grid.
-        aspectRatio: "3 / 4",
+        width: "100%",
+        flex: 1,
+        minHeight: 0,
         padding: 0,
         cursor: "pointer",
         overflow: "hidden",
-        background: portrait ? "var(--sc-page)" : "rgba(10, 13, 18, 0.45)",
+        background: portrait ? "var(--sc-page)" : "#0a0a0c",
         border: "2px solid var(--sc-bronze)",
-        borderRadius: 2,
+        borderRadius: 0,
         boxShadow:
-          "inset 0 0 0 1px rgba(0,0,0,.4), inset 0 2px 4px rgba(0,0,0,.6), var(--sh-plate-lg)",
+          "inset 0 0 0 1px rgba(0,0,0,.4), inset 0 2px 4px rgba(0,0,0,.6)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 18,
+        gap: 12,
         position: "relative",
         fontFamily: "var(--font-ui)",
         color: "var(--sc-parchment)",
         transition: "border-color var(--d-fast)",
+        boxSizing: "border-box",
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = "var(--sc-bronze-hot)";
@@ -402,7 +424,7 @@ function PortraitFrame({
             <div
               style={{
                 fontFamily: "var(--font-display)",
-                fontSize: 48,
+                fontSize: 36,
                 color: "var(--sc-bronze)",
                 textAlign: "center",
                 padding: 16,
@@ -421,9 +443,9 @@ function PortraitFrame({
               fontWeight: 700,
               letterSpacing: ".14em",
               textTransform: "uppercase",
-              color: "var(--sc-bronze)",
-              background: "rgba(10,13,18,.85)",
-              padding: "3px 10px",
+              color: "rgba(10,13,18,.85)",
+              background: "var(--sc-bronze)",
+              padding: "3px 8px",
               border: "1px solid var(--sc-bronze)",
             }}
           >
@@ -432,66 +454,55 @@ function PortraitFrame({
         </>
       ) : (
         <>
-          {(() => {
-            // Scale the empty-state widgets with the portrait so the
-            // plus icon + labels stay proportional whether the frame
-            // is 254px (xl, scale 0.55) or 462px (1024 reference).
-            const plusBox = Math.round(width * 0.22);
-            const plusFont = Math.round(width * 0.14);
-            const titleFont = Math.max(11, Math.round(width * 0.058));
-            const subFont = Math.max(10, Math.round(width * 0.044));
-            return (
-              <>
-                <div
-                  style={{
-                    width: plusBox,
-                    height: plusBox,
-                    border: "2px solid var(--sc-bronze)",
-                    color: "var(--sc-bronze)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: 0.6,
-                    fontSize: plusFont,
-                    fontWeight: 300,
-                    lineHeight: 1,
-                  }}
-                  aria-hidden
-                >
-                  +
-                </div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontWeight: 700,
-                    fontSize: titleFont,
-                    letterSpacing: ".18em",
-                    textTransform: "uppercase",
-                    color: "var(--sc-parchment-dim)",
-                    textAlign: "center",
-                    padding: "0 12px",
-                  }}
-                >
-                  Place your NFT here
-                </div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: subFont,
-                    color: "var(--sc-muted)",
-                    textAlign: "center",
-                    maxWidth: width - 32,
-                    lineHeight: 1.45,
-                    marginTop: -6,
-                    padding: "0 12px",
-                  }}
-                >
-                  Click to choose a portrait —<br />
-                  cosmetic only
-                </div>
-              </>
-            );
-          })()}
+          {/* Plus icon — fixed 60×60 per spec. */}
+          <div
+            style={{
+              width: 60,
+              height: 60,
+              border: "2px solid var(--sc-bronze)",
+              color: "var(--sc-bronze)",
+              opacity: 0.55,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 36,
+              fontWeight: 300,
+              lineHeight: 1,
+            }}
+            aria-hidden
+          >
+            +
+          </div>
+          {/* "PLACE YOUR NFT HERE" — font-ui 14/800 uppercase --sc-ash. */}
+          <div
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontWeight: 800,
+              fontSize: 14,
+              letterSpacing: ".14em",
+              textTransform: "uppercase",
+              color: "var(--sc-ash)",
+              textAlign: "center",
+              padding: "0 12px",
+            }}
+          >
+            Place your NFT here
+          </div>
+          {/* Subtitle — font-ui 11 --sc-ash-2, max-width 200. */}
+          <div
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11,
+              color: "var(--sc-ash-2)",
+              textAlign: "center",
+              maxWidth: 200,
+              lineHeight: 1.45,
+              padding: "0 12px",
+            }}
+          >
+            Click to choose a portrait —<br />
+            cosmetic only
+          </div>
         </>
       )}
     </button>
@@ -500,20 +511,29 @@ function PortraitFrame({
 
 /* ──────────────────────── Tribal ornament ────────────────────────── */
 
-function TribalOrnament({ width, height }: { width: number; height: number }) {
+/**
+ * Spec: design_v2/specs/character_equipment_frame_extracted.md  §Ornament
+ *
+ *   - height 56 px (caller sets it)
+ *   - bg var(--sc-panel-3) · border 1px solid var(--sc-rim-2)
+ *   - inset 0 1px 0 rgba(255,255,255,.04), inset 0 -1px 0 rgba(0,0,0,.55)
+ *   - SVG tribal/heraldic decoration, bronze strokes
+ */
+function TribalOrnament({ height }: { height: number }) {
   return (
     <div
       style={{
-        width,
+        width: "100%",
         height,
         background: "var(--sc-panel-3)",
-        border: "1px solid var(--sc-bronze-deep)",
+        border: "1px solid var(--sc-rim-2)",
         boxShadow:
-          "var(--rim-top), inset 0 -2px 0 rgba(0,0,0,.55), inset 0 0 0 1px rgba(200,154,63,.08)",
+          "inset 0 1px 0 rgba(255,255,255,.04), inset 0 -1px 0 rgba(0,0,0,.55)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         overflow: "hidden",
+        boxSizing: "border-box",
       }}
       aria-hidden
     >
@@ -856,23 +876,32 @@ function RecentFights() {
 /* ─────────────────────── Equipment Frame ───────────────────────── */
 
 /**
- * The big bronze-rimmed frame. Sized at the 1024px reference width
- * directly — the parent container clamps total content width via
- * `ScreenLayout`'s 1440px max, and the right-side stat column floats
- * next to it at xl viewports.
+ * EquipmentFrame — ported one-to-one from the live Claude Design
+ * `CharacterScreen.jsx` React source.  Architecture spec lives at
+ * `design_v2/specs/character_equipment_frame_extracted.md`.
  *
- * Pixel spec recap (all at 1024px reference):
- *   side col width = 216
- *   center col width = 462
- *   gap = 6
- *   big slot = 216×216
- *   belt = 216×102
- *   3-ring row = 3 × 64 with gaps → fills 216 width
- *   HP bar = 462×40
- *   portrait = 462×462 (square)
- *   ornament = 462×120
- *   frame inner padding = 14
+ * Critical:  the center column is `1fr` — NOT a fixed pixel width.
+ * Fixed widths there were the root cause of the prior misalignment.
+ *
+ * Tweak defaults (from `App.jsx` `TWEAK_DEFAULTS`, ported verbatim):
+ *   bigSlotW      96   — every main slot width
+ *   bigSlotH     108   — main slot height (vertical rectangle)
+ *   ringSlotSize  44   — Ring 1 / Ring 2 / Ring 3 square
+ *   beltSlotH     56   — Belt slot height (same width as bigSlotW)
+ *   colGap         8   — gap between left / center / right columns
+ *   slotGap        6   — vertical gap within a column
+ *   framePad      12   — frame inner padding
  */
+const TWEAK_DEFAULTS = {
+  bigSlotW: 96,
+  bigSlotH: 108,
+  ringSlotSize: 44,
+  beltSlotH: 56,
+  colGap: 8,
+  slotGap: 6,
+  framePad: 12,
+  statRowPad: 4,
+} as const;
 
 function EquipmentFrame({
   eq,
@@ -882,7 +911,6 @@ function EquipmentFrame({
   onPortrait,
   player,
   hp,
-  scale = 1,
 }: {
   eq: EquipmentSlots;
   dirtySlots: Set<keyof EquipmentSlots>;
@@ -891,35 +919,21 @@ function EquipmentFrame({
   onPortrait: () => void;
   player: { name: string; level: number; archetype: string };
   hp: { current: number; max: number };
-  /** Multiplier applied to every tile + portrait + gap dimension.
-   *  1.0 = the canonical 1024px reference (BIG=216, CENTER=462).
-   *  0.55 ≈ 498px total frame width — fits the 36% column at
-   *  1440px viewport (~520px column inner). Aspect ratios stay
-   *  locked because every pixel constant flows through `scale`. */
-  scale?: number;
 }) {
-  // Canonical pixel spec — see file-header doc comment.
-  const round = (n: number) => Math.round(n * scale);
-  const BIG = round(216);
-  const RING = round(64);
-  const BELT_H = round(102);
-  const CENTER = round(462);
-  const GAP = Math.max(4, round(6));
-  const PAD = Math.max(8, round(14));
-  // Phase 2-fix: NFT portrait is a 3:4 vertical rectangle, not a
-  // square — width stays at CENTER, height grows by 4/3 so vertical
-  // NFT art shows beautifully and the empty-state plus stack stays
-  // visually centered. Belt/Boots row alignment is enforced by the
-  // SIDE_ROWS template below.
-  const PORTRAIT_W = CENTER;
-  const PORTRAIT_H = Math.round(CENTER * 4 / 3);
-  // Side columns share one explicit grid-template-rows track list so
-  // every row Y-origin is identical on both sides. Row 5 is BIG-tall
-  // to give boots its full square; belt anchors top-of-row inside it.
-  const SIDE_ROWS = `${BIG}px ${BIG}px ${BIG}px ${BIG}px ${BIG}px`;
+  const {
+    bigSlotW,
+    bigSlotH,
+    ringSlotSize,
+    beltSlotH,
+    colGap,
+    slotGap,
+    framePad,
+  } = TWEAK_DEFAULTS;
+
+  const bigSize = { w: bigSlotW, h: bigSlotH };
 
   return (
-    <div style={{ width: "fit-content", maxWidth: "100%" }}>
+    <div style={{ width: "100%", maxWidth: 520 }}>
       <FrameTitle
         name={player.name}
         level={player.level}
@@ -930,42 +944,31 @@ function EquipmentFrame({
           background: "var(--sc-panel)",
           border: "2px solid var(--sc-bronze-deep)",
           boxShadow:
-            "0 0 0 1px var(--sc-rim) inset, var(--sh-plate-lg), var(--rim-top)",
-          padding: PAD,
+            "0 0 0 1px var(--sc-rim), inset 0 1px 0 rgba(255,255,255,.04), inset 0 -2px 0 rgba(0,0,0,.55)",
+          padding: framePad,
+          // Spec-critical grid template: 96px 8px 1fr 8px 96px.
+          // Center is `1fr` so the portrait + ornament stretch to
+          // fill the leftover width. Don't replace the 1fr with a
+          // fixed pixel value or the doll collapses.
           display: "grid",
-          gridTemplateColumns: `${BIG}px ${CENTER}px ${BIG}px`,
-          gridTemplateRows: "auto auto auto",
-          columnGap: GAP,
-          rowGap: GAP,
+          gridTemplateColumns: `${bigSlotW}px ${colGap}px 1fr ${colGap}px ${bigSlotW}px`,
+          alignItems: "stretch",
+          boxSizing: "border-box",
         }}
       >
-        {/* HP bar — spans all 3 cols */}
-        <div style={{ gridColumn: "1 / -1" }}>
-          <HpBar
-            current={hp.current}
-            max={hp.max}
-            width={BIG + GAP + CENTER + GAP + BIG}
-            height={Math.max(22, round(40))}
-          />
-        </div>
-
-        {/* LEFT COLUMN — explicit grid rows so each row's Y origin
-            matches the right column. Belt sits at the top of row 5
-            (BIG-tall track) leaving its shorter footprint anchored
-            level with the boots top edge on the right. */}
+        {/* LEFT COLUMN — Helmet · Shoulders* · Weapon · Chest · Belt(h:56) */}
         <div
           style={{
             gridColumn: 1,
-            gridRow: 2,
-            display: "grid",
-            gridTemplateRows: SIDE_ROWS,
-            rowGap: GAP,
+            display: "flex",
+            flexDirection: "column",
+            gap: slotGap,
           }}
         >
           <SlotTile
             slot="helmet"
             item={eq.helmet}
-            size={BIG}
+            size={bigSize}
             isDirty={dirtySlots.has("helmet")}
             onClick={() => onSlot("helmet")}
             emptyLabel="Helmet"
@@ -974,13 +977,13 @@ function EquipmentFrame({
             slot={null}
             item={null}
             future
-            futureLabel="Bracers"
-            size={BIG}
+            futureLabel="Shoulders"
+            size={bigSize}
           />
           <SlotTile
             slot="weapon"
             item={eq.weapon}
-            size={BIG}
+            size={bigSize}
             isDirty={dirtySlots.has("weapon")}
             onClick={() => onSlot("weapon")}
             emptyLabel="Weapon"
@@ -988,99 +991,77 @@ function EquipmentFrame({
           <SlotTile
             slot="chest"
             item={eq.chest}
-            size={BIG}
+            size={bigSize}
             isDirty={dirtySlots.has("chest")}
             onClick={() => onSlot("chest")}
             emptyLabel="Chest"
           />
-          {/* Belt is shorter than other tiles — anchor it to the top
-              of its BIG-tall row track so its top edge is level with
-              the boots top edge on the right column. */}
-          <div style={{ alignSelf: "start" }}>
-            <SlotTile
-              slot="belt"
-              item={eq.belt}
-              size={{ w: BIG, h: BELT_H }}
-              isDirty={dirtySlots.has("belt")}
-              onClick={() => onSlot("belt")}
-              emptyLabel="Belt"
-            />
-          </div>
-        </div>
-
-        {/* CENTER COLUMN — portrait stretches to fill remaining height */}
-        <div
-          style={{
-            gridColumn: 2,
-            gridRow: 2,
-            display: "flex",
-            flexDirection: "column",
-            gap: GAP,
-            alignItems: "stretch",
-          }}
-        >
-          <PortraitFrame
-            portrait={portrait}
-            onClick={onPortrait}
-            width={PORTRAIT_W}
-            height={PORTRAIT_H}
+          <SlotTile
+            slot="belt"
+            item={eq.belt}
+            size={{ w: bigSlotW, h: beltSlotH }}
+            isDirty={dirtySlots.has("belt")}
+            onClick={() => onSlot("belt")}
+            emptyLabel="Belt"
           />
-          <TribalOrnament width={CENTER} height={Math.max(60, round(120))} />
-          {/* Spacer to push ornament down so the column heights match
-              roughly. Left col total = 4*216 + 102 + 4*6 = 990; center
-              total so far = 462 + 6 + 120 = 588; ring-row + spacer
-              calibration covers the remaining ~402 by making the
-              right col absorb. We add a fixed spacer when the right
-              column has extra slots beyond the ring row. */}
-          <div style={{ flex: 1, minHeight: 4 }} />
         </div>
 
-        {/* RIGHT COLUMN — same explicit grid track as the left so
-            every row aligns. Row 2 contains the 3-ring cluster
-            (RING-tall) centered vertically inside its BIG-tall row
-            so it lines up with bracers (left col row 2). */}
+        {/* CENTER COLUMN — HpBar(22) · PortraitFrame(flex:1) · Ornament(56) */}
         <div
           style={{
             gridColumn: 3,
-            gridRow: 2,
-            display: "grid",
-            gridTemplateRows: SIDE_ROWS,
-            rowGap: GAP,
+            display: "flex",
+            flexDirection: "column",
+            gap: slotGap,
+            minWidth: 0,
+            minHeight: 0,
+          }}
+        >
+          <HpBar current={hp.current} max={hp.max} />
+          <PortraitFrame portrait={portrait} onClick={onPortrait} />
+          <TribalOrnament height={56} />
+        </div>
+
+        {/* RIGHT COLUMN — Necklace · [Ring1 Ring2 Ring3*] · Gloves · Off-hand · Pants* + Boots */}
+        <div
+          style={{
+            gridColumn: 5,
+            display: "flex",
+            flexDirection: "column",
+            gap: slotGap,
           }}
         >
           <SlotTile
             slot="necklace"
             item={eq.necklace}
-            size={BIG}
+            size={bigSize}
             isDirty={dirtySlots.has("necklace")}
             onClick={() => onSlot("necklace")}
             emptyLabel="Necklace"
           />
-          {/* Ring cluster — 3 small tiles in a row, BIG wide, RING
-              tall. alignSelf: center vertically anchors the 64-tall
-              cluster in the middle of the BIG-tall row track so its
-              centerline matches bracers on the left. */}
+          {/* Ring row — 3 × 44²; spec says these are 44-square,
+              not flex-distributed across the column. Center the row
+              horizontally inside the 96-wide track. */}
           <div
             style={{
-              alignSelf: "center",
-              width: BIG,
-              height: RING,
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: GAP,
+              display: "flex",
+              justifyContent: "center",
+              gap: slotGap,
+              width: bigSlotW,
+              height: ringSlotSize,
             }}
           >
             <SlotTile
               slot="ring1"
               item={eq.ring1}
-              size={{ w: (BIG - GAP * 2) / 3, h: RING }}
+              size={ringSlotSize}
               isDirty={dirtySlots.has("ring1")}
               onClick={() => onSlot("ring1")}
             />
             <SlotTile
               slot="ring2"
               item={eq.ring2}
-              size={{ w: (BIG - GAP * 2) / 3, h: RING }}
+              size={ringSlotSize}
               isDirty={dirtySlots.has("ring2")}
               onClick={() => onSlot("ring2")}
             />
@@ -1089,13 +1070,13 @@ function EquipmentFrame({
               item={null}
               future
               futureLabel="Ring 3"
-              size={{ w: (BIG - GAP * 2) / 3, h: RING }}
+              size={ringSlotSize}
             />
           </div>
           <SlotTile
             slot="gloves"
             item={eq.gloves}
-            size={BIG}
+            size={bigSize}
             isDirty={dirtySlots.has("gloves")}
             onClick={() => onSlot("gloves")}
             emptyLabel="Gloves"
@@ -1103,15 +1084,22 @@ function EquipmentFrame({
           <SlotTile
             slot="offhand"
             item={eq.offhand}
-            size={BIG}
+            size={bigSize}
             isDirty={dirtySlots.has("offhand")}
             onClick={() => onSlot("offhand")}
             emptyLabel="Off-hand"
           />
           <SlotTile
+            slot={null}
+            item={null}
+            future
+            futureLabel="Pants"
+            size={bigSize}
+          />
+          <SlotTile
             slot="boots"
             item={eq.boots}
-            size={BIG}
+            size={bigSize}
             isDirty={dirtySlots.has("boots")}
             onClick={() => onSlot("boots")}
             emptyLabel="Boots"
@@ -2119,14 +2107,13 @@ export function CharacterProfile({
   // EquipmentFrame scale factor from a single decision so the doll
   // never overflows its column.
   //
-  //   xl (≥ 1440) — 3-col 36/42/22, frame scaled 0.55 (498px wide,
-  //                 fits the ~520px column inner)
-  //   lg (≥ 1024) — 2-col Equipment+Stats; Inventory + Recent Fights
-  //                 stack below. Frame scale 0.6.
-  //   md / sm     — single column stack; frame scales down further.
+  //   xl (≥ 1440) — 3-col 36/42/22 layout. EquipmentFrame now uses the
+  //                 extracted TWEAK_DEFAULTS (96/108/1fr grid) and keeps
+  //                 a 520px max-width — it no longer needs a scale prop.
+  //   lg (≥ 1024) — 2-col Equipment+Stats; Inventory + Recent Fights below
+  //   md / sm     — single column stack
   const isXl = bpGte("xl", bp);
   const isLg = bpGte("lg", bp);
-  const frameScale = isXl ? 0.55 : isLg ? 0.6 : bpGte("md", bp) ? 0.7 : 0.8;
 
   const outerCols = isXl
     ? "36% 42% 22%"
@@ -2157,9 +2144,8 @@ export function CharacterProfile({
             alignItems: "start",
           }}
         >
-          {/* LEFT — Equipment Frame (36% at xl). Scale factor keeps
-              the canonical pixel spec proportional while fitting the
-              narrower column.  */}
+          {/* LEFT — Equipment Frame (36% at xl). Pixel-spec values
+              live in TWEAK_DEFAULTS inside EquipmentFrame (96/108/1fr). */}
           <div style={{ display: "flex", justifyContent: "center" }}>
             <EquipmentFrame
               eq={eq}
@@ -2169,7 +2155,6 @@ export function CharacterProfile({
               onPortrait={() => setPickerOpen(true)}
               player={{ name: character.name, level: character.level, archetype }}
               hp={{ current: derived.maxHp, max: derived.maxHp }}
-              scale={frameScale}
             />
           </div>
 
