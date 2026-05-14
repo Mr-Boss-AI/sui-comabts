@@ -19,10 +19,14 @@ interface ModalProps {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  /** Bumps maxWidth from 460 → 720. */
   wide?: boolean;
+  /** Bumps maxWidth from 460 → 960 — used by the Player Profile modal
+   *  to host the mini equipment frame side-by-side with the stats column. */
+  extraWide?: boolean;
 }
 
-export function Modal({ open, onClose, title, children, wide }: ModalProps) {
+export function Modal({ open, onClose, title, children, wide, extraWide }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -67,7 +71,7 @@ export function Modal({ open, onClose, title, children, wide }: ModalProps) {
           borderRadius: "var(--r-sharp)",
           boxShadow: "var(--sh-pop), var(--rim-top)",
           width: "100%",
-          maxWidth: wide ? 720 : 460,
+          maxWidth: extraWide ? 960 : wide ? 720 : 460,
           margin: "0 16px",
           maxHeight: "88vh",
           display: "flex",

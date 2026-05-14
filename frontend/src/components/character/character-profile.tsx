@@ -74,7 +74,7 @@ import {
 } from "@/components/v2/layout";
 import { Inventory } from "@/components/items/inventory";
 
-const RARITY_BORDER_HEX: Record<Rarity, string> = {
+export const RARITY_BORDER_HEX: Record<Rarity, string> = {
   1: "var(--rarity-common)",
   2: "var(--rarity-uncommon)",
   3: "var(--rarity-rare)",
@@ -84,7 +84,7 @@ const RARITY_BORDER_HEX: Record<Rarity, string> = {
 
 /* ─────────────────────────── slot tile ─────────────────────────────── */
 
-interface SlotTileProps {
+export interface SlotTileProps {
   slot: keyof EquipmentSlots | null;
   item: Item | null;
   future?: boolean;
@@ -114,7 +114,7 @@ interface SlotTileProps {
  *   - image         100% / 100%, objectFit:contain, padding:4, drop-shadow
  *   - empty icon    IconComp at Math.min(w, h) * 0.42
  */
-function SlotTile({
+export function SlotTile({
   slot,
   item,
   future,
@@ -291,7 +291,7 @@ function SlotGlyph({ size, color }: { size: number; color: string }) {
  *   - fill gradient #7ba84a → #5a8a3a → #3f6b29
  *   - text JetBrains Mono 13 / 700, --sc-parchment, letter-spacing 0.06em
  */
-function HpBar({
+export function HpBar({
   current,
   max,
   height = 22,
@@ -361,28 +361,48 @@ function HpBar({
  *   - "PLACE YOUR NFT HERE": font-ui 14/800 uppercase --sc-ash
  *   - subtitle: font-ui 11 --sc-ash-2, max-width 200, line-height 1.45
  */
-function PortraitFrame({
+export interface PortraitFrameProps {
+  portrait: NftCandidate | null;
+  /** When omitted the frame renders as a read-only `<div>` instead of
+   *  a `<button>` — used by the Player Profile mini frame. */
+  onClick?: () => void;
+  /** Override the "Place your NFT here" headline. */
+  emptyTitle?: string;
+  /** Override the "Click to choose…" subtitle. Pass empty string to hide. */
+  emptySubtitle?: ReactNode;
+  /** Hide the bronze "+" placeholder (used when the empty state is purely
+   *  informational, e.g. read-only profile of another player). */
+  hidePlusIcon?: boolean;
+}
+
+export function PortraitFrame({
   portrait,
   onClick,
-}: {
-  portrait: NftCandidate | null;
-  onClick: () => void;
-}) {
+  emptyTitle,
+  emptySubtitle,
+  hidePlusIcon,
+}: PortraitFrameProps) {
+  const interactive = typeof onClick === "function";
+  const Tag = (interactive ? "button" : "div") as "button" | "div";
   return (
-    <button
-      type="button"
+    <Tag
+      type={interactive ? "button" : undefined}
       onClick={onClick}
       title={
-        portrait
-          ? `${portrait.name} — click to change`
-          : "Click to set a portrait NFT"
+        interactive
+          ? portrait
+            ? `${portrait.name} — click to change`
+            : "Click to set a portrait NFT"
+          : portrait
+            ? portrait.name
+            : undefined
       }
       style={{
         width: "100%",
         flex: 1,
         minHeight: 0,
         padding: 0,
-        cursor: "pointer",
+        cursor: interactive ? "pointer" : "default",
         overflow: "hidden",
         background: portrait ? "var(--sc-page)" : "#0a0a0c",
         border: "2px solid var(--sc-bronze)",
@@ -401,9 +421,11 @@ function PortraitFrame({
         boxSizing: "border-box",
       }}
       onMouseEnter={(e) => {
+        if (!interactive) return;
         e.currentTarget.style.borderColor = "var(--sc-bronze-hot)";
       }}
       onMouseLeave={(e) => {
+        if (!interactive) return;
         e.currentTarget.style.borderColor = "var(--sc-bronze)";
       }}
     >
@@ -454,26 +476,30 @@ function PortraitFrame({
         </>
       ) : (
         <>
-          {/* Plus icon — fixed 60×60 per spec. */}
-          <div
-            style={{
-              width: 60,
-              height: 60,
-              border: "2px solid var(--sc-bronze)",
-              color: "var(--sc-bronze)",
-              opacity: 0.55,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 36,
-              fontWeight: 300,
-              lineHeight: 1,
-            }}
-            aria-hidden
-          >
-            +
-          </div>
-          {/* "PLACE YOUR NFT HERE" — font-ui 14/800 uppercase --sc-ash. */}
+          {/* Plus icon — fixed 60×60 per spec. Hidden in read-only mode. */}
+          {!hidePlusIcon && (
+            <div
+              style={{
+                width: 60,
+                height: 60,
+                border: "2px solid var(--sc-bronze)",
+                color: "var(--sc-bronze)",
+                opacity: 0.55,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 36,
+                fontWeight: 300,
+                lineHeight: 1,
+              }}
+              aria-hidden
+            >
+              +
+            </div>
+          )}
+          {/* Headline — defaults to "Place your NFT here" but read-only
+              callers (Player Profile mini frame) override with "No
+              portrait set". */}
           <div
             style={{
               fontFamily: "var(--font-ui)",
@@ -486,26 +512,32 @@ function PortraitFrame({
               padding: "0 12px",
             }}
           >
-            Place your NFT here
+            {emptyTitle ?? "Place your NFT here"}
           </div>
           {/* Subtitle — font-ui 11 --sc-ash-2, max-width 200. */}
-          <div
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: 11,
-              color: "var(--sc-ash-2)",
-              textAlign: "center",
-              maxWidth: 200,
-              lineHeight: 1.45,
-              padding: "0 12px",
-            }}
-          >
-            Click to choose a portrait —<br />
-            cosmetic only
-          </div>
+          {emptySubtitle !== "" && (
+            <div
+              style={{
+                fontFamily: "var(--font-ui)",
+                fontSize: 11,
+                color: "var(--sc-ash-2)",
+                textAlign: "center",
+                maxWidth: 200,
+                lineHeight: 1.45,
+                padding: "0 12px",
+              }}
+            >
+              {emptySubtitle ?? (
+                <>
+                  Click to choose a portrait —<br />
+                  cosmetic only
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
-    </button>
+    </Tag>
   );
 }
 
@@ -519,7 +551,7 @@ function PortraitFrame({
  *   - inset 0 1px 0 rgba(255,255,255,.04), inset 0 -1px 0 rgba(0,0,0,.55)
  *   - SVG tribal/heraldic decoration, bronze strokes
  */
-function TribalOrnament({ height }: { height: number }) {
+export function TribalOrnament({ height }: { height: number }) {
   return (
     <div
       style={{
@@ -892,7 +924,7 @@ function RecentFights() {
  *   slotGap        6   — vertical gap within a column
  *   framePad      12   — frame inner padding
  */
-const TWEAK_DEFAULTS = {
+export const TWEAK_DEFAULTS = {
   bigSlotW: 96,
   bigSlotH: 108,
   ringSlotSize: 44,

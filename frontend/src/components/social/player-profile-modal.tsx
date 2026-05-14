@@ -3,14 +3,38 @@
 /**
  * Phase 2 v2 — Player Profile modal.
  *
- * Shared surface used by Tavern (sidebar click) and Hall of Fame
- * (row click). Bronze-rim modal, 10-slot equipment doll on the
- * left, primary attributes + combat stats + W/L on the right, and
- * three primary actions at the bottom (Send Message · Wager
- * Challenge · Friendly Fight).
+ * Shared surface used by Tavern (sidebar click), Hall of Fame (row
+ * click), and any other "click a player → see their build" entry
+ * point. Visually a scaled-down Character page:
  *
- * All slot rendering reads from var(--rarity-*) and uses the
- * chunky 2px rim treatment matching the Character screen frame.
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │  PLAYER PROFILE                                          ✕   │
+ *   ├──────────────────────────────────────────────────────────────┤
+ *   │  [ARCHETYPE]                            31·25  56 fights     │
+ *   │  Mr_Boss_v5.1  [LV 6]  [1016 ELO]                 55% win    │
+ *   │  0x06d6cb…239624                                              │
+ *   ├──────────────────────────────────────────────────────────────┤
+ *   │  ┌─ MiniEquipmentFrame ──────────┐ │  PRIMARY ATTRIBUTES     │
+ *   │  │  Helmet · HP · Necklace        │ │  STR …  DEX …  INT …   │
+ *   │  │  Shldr* · Portrait · 3 rings   │ │                         │
+ *   │  │  Weapon · ornament · Gloves    │ │  COMBAT STATS  (4×2)    │
+ *   │  │  Chest             · Off-hand  │ │  HP / ATK / CRIT / …    │
+ *   │  │  Belt              · Pants*    │ │                         │
+ *   │  │                    · Boots     │ │  W·L  ·  Win%           │
+ *   │  └────────────────────────────────┘ │                         │
+ *   ├──────────────────────────────────────────────────────────────┤
+ *   │  [SEND MESSAGE]   [WAGER CHALLENGE]   [FRIENDLY FIGHT]       │
+ *   └──────────────────────────────────────────────────────────────┘
+ *
+ * Reuses the canonical equipment-frame primitives (SlotTile, HpBar,
+ * PortraitFrame, TribalOrnament) via `MiniEquipmentFrame`, in
+ * read-only mode — no click handlers, no equip flow fires from here.
+ *
+ * Portrait status: the player's chosen portrait NFT currently lives
+ * in localStorage on the picker's browser (see lib/nft-portrait.ts);
+ * `PlayerProfileWire` carries no `portraitNftId`. Until a future
+ * server-side hookup populates `portraitImageUrl`, the mini frame
+ * renders its read-only "No portrait set" empty state.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -23,104 +47,24 @@ import {
   SteelButton,
   Stamp,
   V2Input,
-  SectionLabel,
 } from "@/components/v2";
-import {
-  EQUIPMENT_SLOT_LABELS,
-  RARITY_LABELS,
-  type EquipmentSlots,
-  type Item,
-  type Rarity,
-} from "@/types/game";
+import type { Item } from "@/types/game";
 import { computeDerivedStats } from "@/lib/combat";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
-
-const RARITY_BORDER: Record<Rarity, string> = {
-  1: "var(--rarity-common)",
-  2: "var(--rarity-uncommon)",
-  3: "var(--rarity-rare)",
-  4: "var(--rarity-epic)",
-  5: "var(--rarity-legendary)",
-};
+import { MiniEquipmentFrame } from "./mini-equipment-frame";
 
 function truncateAddress(addr: string): string {
   if (addr.length <= 14) return addr;
   return `${addr.slice(0, 8)}…${addr.slice(-6)}`;
 }
 
-function ProfileSlot({
-  slot,
-  item,
-}: {
-  slot: keyof EquipmentSlots;
-  item: Item | null;
-}) {
-  const border = item ? RARITY_BORDER[item.rarity] : "var(--sc-rim-2)";
-  return (
-    <div
-      title={
-        item
-          ? `${item.name} (${RARITY_LABELS[item.rarity]} Lv.${item.levelReq})`
-          : EQUIPMENT_SLOT_LABELS[slot]
-      }
-      style={{
-        width: 50,
-        height: 56,
-        border: `2px solid ${border}`,
-        background: "var(--sc-page)",
-        borderRadius: 2,
-        boxShadow: "var(--rim-top), var(--rim-bottom)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        overflow: "hidden",
-      }}
-    >
-      {item ? (
-        item.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={item.imageUrl}
-            alt={item.name}
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-              padding: 3,
-            }}
-          />
-        ) : (
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: border as string,
-              letterSpacing: ".06em",
-              textTransform: "uppercase",
-              padding: 2,
-              textAlign: "center",
-              lineHeight: 1.1,
-            }}
-          >
-            {EQUIPMENT_SLOT_LABELS[slot].slice(0, 4)}
-          </span>
-        )
-      ) : (
-        <span
-          style={{
-            fontSize: 9,
-            fontWeight: 700,
-            color: "var(--fg-3)",
-            letterSpacing: ".10em",
-            textTransform: "uppercase",
-          }}
-        >
-          {EQUIPMENT_SLOT_LABELS[slot].slice(0, 3)}
-        </span>
-      )}
-    </div>
-  );
-}
+/** Same semantic colour palette as the main Character page Section 4. */
+const STAT_COLORS = {
+  STR: "var(--sc-blood)",
+  DEX: "var(--sc-steel)",
+  INT: "var(--sc-grape)",
+  END: "var(--sc-bronze)",
+} as const;
 
 export function PlayerProfileModal() {
   const { state, dispatch } = useGame();
@@ -182,10 +126,11 @@ export function PlayerProfileModal() {
     const out = { strength: 0, dexterity: 0, intuition: 0, endurance: 0 };
     for (const slot of Object.values(profile.equipment)) {
       if (!slot) continue;
-      out.strength += slot.statBonuses.strengthBonus || 0;
-      out.dexterity += slot.statBonuses.dexterityBonus || 0;
-      out.intuition += slot.statBonuses.intuitionBonus || 0;
-      out.endurance += slot.statBonuses.enduranceBonus || 0;
+      const item = slot as Item;
+      out.strength += item.statBonuses.strengthBonus || 0;
+      out.dexterity += item.statBonuses.dexterityBonus || 0;
+      out.intuition += item.statBonuses.intuitionBonus || 0;
+      out.endurance += item.statBonuses.enduranceBonus || 0;
     }
     return out;
   }, [profile]);
@@ -228,7 +173,7 @@ export function PlayerProfileModal() {
   if (!open) return null;
 
   return (
-    <Modal open={open} onClose={close} title="Player Profile" wide>
+    <Modal open={open} onClose={close} title="Player Profile" extraWide>
       {!profile && (
         <div
           style={{
@@ -256,8 +201,8 @@ export function PlayerProfileModal() {
         </div>
       )}
       {profile && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* Header */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 18 }}>
+          {/* Header — name + LV/ELO pills · wallet · W/L right-aligned */}
           <div
             style={{
               display: "flex",
@@ -273,7 +218,7 @@ export function PlayerProfileModal() {
                   style={{
                     margin: 0,
                     fontFamily: "var(--font-display)",
-                    fontSize: 24,
+                    fontSize: 28,
                     lineHeight: 1,
                     color: "var(--sc-bronze)",
                     letterSpacing: "0.01em",
@@ -323,7 +268,7 @@ export function PlayerProfileModal() {
               }}
             >
               <div>
-                <span style={{ color: "var(--rarity-uncommon)", fontWeight: 800 }}>
+                <span style={{ color: "var(--sc-victory)", fontWeight: 800 }}>
                   {profile.wins}
                 </span>
                 <span style={{ color: "var(--sc-rim-2)", margin: "0 6px" }}>·</span>
@@ -332,8 +277,7 @@ export function PlayerProfileModal() {
                 </span>
               </div>
               <div style={{ marginTop: 3 }}>
-                {profile.totalFights} fight
-                {profile.totalFights === 1 ? "" : "s"}
+                {profile.totalFights} fight{profile.totalFights === 1 ? "" : "s"}
               </div>
               <div style={{ marginTop: 3, color: "var(--sc-parchment)" }}>
                 {Math.round(profile.winRate * 100)}% win
@@ -341,153 +285,205 @@ export function PlayerProfileModal() {
             </div>
           </div>
 
-          {/* Body: doll + stats */}
+          {/* Body — MiniEquipmentFrame · Stats column */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
+              gridTemplateColumns: "minmax(0, 360px) minmax(0, 1fr)",
               gap: 18,
               alignItems: "start",
             }}
           >
-            {/* Equipment doll */}
-            <div>
-              <SectionLabel>Equipped Loadout</SectionLabel>
-              <div
+            {/* LEFT — Equipped loadout */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <span
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(5, 1fr)",
-                  gap: 6,
+                  fontFamily: "var(--font-ui)",
+                  fontWeight: 700,
+                  fontSize: 10,
+                  letterSpacing: "1px",
+                  textTransform: "uppercase",
+                  color: "var(--sc-muted)",
                 }}
               >
-                {(Object.keys(EQUIPMENT_SLOT_LABELS) as Array<keyof EquipmentSlots>).map((slot) => (
-                  <div
-                    key={slot}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: 3,
-                    }}
-                  >
-                    <ProfileSlot slot={slot} item={profile.equipment[slot]} />
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        color: "var(--fg-3)",
-                        letterSpacing: ".08em",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      {EQUIPMENT_SLOT_LABELS[slot]}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                Equipped Loadout
+              </span>
+              <MiniEquipmentFrame
+                equipment={profile.equipment}
+                currentHp={derived?.maxHp ?? 0}
+                maxHp={derived?.maxHp ?? 0}
+              />
             </div>
 
-            {/* Stats */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* RIGHT — Primary Attributes + Combat Stats column (Character-page parity) */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div>
-                <SectionLabel>Primary Attributes</SectionLabel>
-                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <div
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontWeight: 700,
+                    fontSize: 10,
+                    letterSpacing: "1px",
+                    textTransform: "uppercase",
+                    color: "var(--sc-muted)",
+                    margin: "0 0 10px",
+                  }}
+                >
+                  Primary Attributes
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {(
                     [
-                      ["STR", profile.stats.strength, eqBonusSum?.strength ?? 0, "var(--stat-str)"],
-                      ["DEX", profile.stats.dexterity, eqBonusSum?.dexterity ?? 0, "var(--stat-dex)"],
-                      ["INT", profile.stats.intuition, eqBonusSum?.intuition ?? 0, "var(--stat-int)"],
-                      ["END", profile.stats.endurance, eqBonusSum?.endurance ?? 0, "var(--stat-end)"],
+                      ["STR", profile.stats.strength, eqBonusSum?.strength ?? 0, STAT_COLORS.STR],
+                      ["DEX", profile.stats.dexterity, eqBonusSum?.dexterity ?? 0, STAT_COLORS.DEX],
+                      ["INT", profile.stats.intuition, eqBonusSum?.intuition ?? 0, STAT_COLORS.INT],
+                      ["END", profile.stats.endurance, eqBonusSum?.endurance ?? 0, STAT_COLORS.END],
                     ] as const
-                  ).map(([label, base, bonus, color]) => (
-                    <div
-                      key={label as string}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        fontSize: 12,
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: "var(--fg-3)",
-                          fontWeight: 800,
-                          fontSize: 11,
-                          letterSpacing: ".06em",
-                        }}
+                  ).map(([label, base, bonus, color]) => {
+                    const total = base + bonus;
+                    const pct = Math.min(100, (total / 20) * 100);
+                    return (
+                      <div
+                        key={label}
+                        style={{ display: "flex", alignItems: "center", gap: 12 }}
                       >
-                        {label}
-                      </span>
-                      <span
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontWeight: 700,
-                          fontSize: 12,
-                          color: color as string,
-                        }}
-                      >
-                        {bonus > 0 ? (
-                          <>
-                            {base}{" "}
-                            <span style={{ color: "var(--rarity-uncommon)" }}>
-                              +{bonus}
-                            </span>
-                          </>
-                        ) : (
-                          base
-                        )}
-                      </span>
-                    </div>
-                  ))}
+                        <span
+                          style={{
+                            width: 36,
+                            color: color,
+                            fontWeight: 800,
+                            fontSize: 12,
+                            letterSpacing: "0.96px",
+                            textTransform: "uppercase",
+                            fontFamily: "var(--font-ui)",
+                          }}
+                        >
+                          {label}
+                        </span>
+                        <div
+                          style={{
+                            flex: 1,
+                            height: 5,
+                            background: "rgba(10, 13, 18, 0.6)",
+                            borderRadius: 1,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${pct}%`,
+                              height: "100%",
+                              background: color,
+                              transition: "width var(--d-slow) var(--ease-out)",
+                            }}
+                          />
+                        </div>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontWeight: 700,
+                            fontSize: 12,
+                            color: color,
+                            minWidth: 48,
+                            textAlign: "right",
+                          }}
+                        >
+                          {bonus > 0 ? (
+                            <>
+                              {base}
+                              <span
+                                style={{
+                                  color: "var(--sc-victory)",
+                                  marginLeft: 4,
+                                  fontSize: 11,
+                                }}
+                              >
+                                +{bonus}
+                              </span>
+                            </>
+                          ) : (
+                            base
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
               {derived && (
                 <div>
-                  <SectionLabel>Combat Stats</SectionLabel>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontWeight: 700,
+                      fontSize: 10,
+                      letterSpacing: "1px",
+                      textTransform: "uppercase",
+                      color: "var(--sc-muted)",
+                      margin: "0 0 10px",
+                    }}
+                  >
+                    Combat Stats
+                  </div>
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(2, 1fr)",
-                      gap: 4,
-                      fontSize: 11,
+                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gap: 6,
                     }}
                   >
                     {(
                       [
-                        ["HP", derived.maxHp, "var(--stat-hp)"],
+                        ["HP", derived.maxHp, "var(--sc-blood)"],
                         ["ATK", derived.attackPower, "var(--sc-blood)"],
-                        ["Crit%", `${derived.critChance}%`, "var(--stat-int)"],
-                        ["Crit×", `${derived.critMultiplier}x`, "var(--stat-int)"],
-                        ["Evade", `${derived.evasionChance}%`, "var(--stat-dex)"],
-                        ["Armor", derived.armor, "var(--sc-steel)"],
-                        ["Def", derived.defense, "var(--sc-bronze)"],
+                        ["CRIT", `${derived.critChance}%`, "var(--sc-grape)"],
+                        ["CRIT ×", `${derived.critMultiplier}x`, "var(--sc-grape)"],
+                        ["EVADE", `${derived.evasionChance}%`, "var(--sc-parchment)"],
+                        ["ARMOR", derived.armor, "var(--sc-parchment)"],
+                        ["DEF", derived.defense, "var(--sc-blood)"],
+                        ["LV", profile.level, "var(--sc-parchment)"],
                       ] as const
                     ).map(([label, val, color]) => (
                       <div
-                        key={label as string}
+                        key={label}
                         style={{
                           background: "var(--sc-page)",
                           border: "1px solid var(--sc-rim-2)",
-                          padding: "4px 8px",
-                          display: "flex",
-                          justifyContent: "space-between",
                           borderRadius: 2,
+                          padding: "8px 10px",
+                          minWidth: 0,
                         }}
                       >
-                        <span style={{ color: "var(--fg-3)", fontWeight: 700, fontSize: 10, letterSpacing: ".10em", textTransform: "uppercase" }}>
+                        <div
+                          style={{
+                            fontFamily: "var(--font-ui)",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            letterSpacing: "0.12em",
+                            textTransform: "uppercase",
+                            color: "var(--sc-muted)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
                           {label}
-                        </span>
-                        <span
+                        </div>
+                        <div
                           style={{
                             fontFamily: "var(--font-mono)",
                             fontWeight: 700,
-                            color: color as string,
+                            fontSize: 16,
+                            color: color,
+                            marginTop: 2,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
                           }}
                         >
                           {val}
-                        </span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -498,12 +494,7 @@ export function PlayerProfileModal() {
 
           {/* Actions */}
           {!isMine && (
-            <div
-              style={{
-                borderTop: "1px solid var(--sc-rim)",
-                paddingTop: 14,
-              }}
-            >
+            <div style={{ borderTop: "1px solid var(--sc-rim)", paddingTop: 14 }}>
               {!showWagerInput && (
                 <div
                   style={{
