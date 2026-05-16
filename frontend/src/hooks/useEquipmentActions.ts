@@ -11,12 +11,13 @@ import {
   EMPTY_EQUIPMENT,
 } from "@/lib/loadout";
 import { evaluateTwoHandedConflict } from "@/lib/two-handed-weapons";
+import { assertTxSucceeded, type AbortCodeMap } from "@/lib/tx-result";
 import type { EquipmentSlots, Item } from "@/types/game";
 
 // Maps equipment.move abort codes to user-facing strings. These codes are
 // defined in contracts/sources/equipment.move — keep this table in sync with
 // the Move constants if they ever renumber.
-const EQUIPMENT_ABORT_CODES: Record<number, string> = {
+const EQUIPMENT_ABORT_CODES: AbortCodeMap = {
   0: "Wrong item type for this slot",
   1: "Slot already occupied",
   2: "Slot is empty — nothing to unequip",
@@ -25,71 +26,6 @@ const EQUIPMENT_ABORT_CODES: Record<number, string> = {
   5: "Character is locked in an active fight",
   6: "Deprecated function (v1)",
 };
-
-/**
- * Parses a raw error string (from any source — result.effects.status.error,
- * FailedTransaction.error, or a thrown Error.message) and produces a human
- * message. Returns null if the string doesn't look like a Sui/Move error;
- * callers should fall back to the raw string in that case.
- */
-function humanizeChainError(errStr: string): string | null {
-  if (!errStr) return null;
-
-  // Pre-execution: item is attached as a DOF to a parent object, can't be
-  // passed as a tx input. Happens when local state thinks an item is free
-  // but on-chain it is still equipped.
-  if (errStr.includes("owned by object") && errStr.includes("cannot be used as input")) {
-    return (
-      "An item in the loadout is already equipped on-chain under a different slot. " +
-      "Refresh inventory and stage again."
-    );
-  }
-
-  // Full MoveAbort with module + function + instruction
-  const moveAbortMatch = errStr.match(
-    /abort code[:\s]+(\d+)[^']*'[^']*::([^:']+)::([^']+)'(?:\s*\(instruction (\d+)\))?/
-  );
-  if (moveAbortMatch) {
-    const [, codeStr, module, fn, instr] = moveAbortMatch;
-    const code = Number(codeStr);
-    const humanMsg = EQUIPMENT_ABORT_CODES[code] || `Abort code ${code}`;
-    const location = instr ? `${module}::${fn}:${instr}` : `${module}::${fn}`;
-    return `${humanMsg} (at ${location})`;
-  }
-
-  const bareCodeMatch = errStr.match(/abort code[:\s]+(\d+)/i);
-  if (bareCodeMatch) {
-    const code = Number(bareCodeMatch[1]);
-    return EQUIPMENT_ABORT_CODES[code] || `Abort code ${code}`;
-  }
-
-  return null;
-}
-
-/**
- * Inspects a signAndExecuteTransaction result. Throws a human-readable Error
- * if the tx aborted in a path where the SDK resolves the promise instead of
- * throwing (some wallets return FailedTransaction objects). Silent on success.
- */
-function assertTxSucceeded(result: unknown): void {
-  const r = result as any;
-  const txData = r?.Transaction || r;
-  const status = txData?.effects?.status || r?.effects?.status;
-
-  if (status && (status.status === "success" || status === "success")) return;
-  if (r?.$kind === "Transaction" && !r?.FailedTransaction) return;
-
-  const errStr: string =
-    (status && typeof status.error === "string" && status.error) ||
-    (typeof r?.FailedTransaction?.error === "string" && r.FailedTransaction.error) ||
-    (typeof r?.error === "string" && r.error) ||
-    (typeof r?.message === "string" && r.message) ||
-    "";
-
-  console.error("[Tx] Aborted. Raw result:", r);
-  const humanized = humanizeChainError(errStr);
-  throw new Error(humanized || errStr || "Transaction aborted on-chain (see console for raw result)");
-}
 
 /**
  * Staging-first equipment hook. Per LOADOUT_DESIGN.md D1=PTB-of-primitives,
@@ -224,7 +160,7 @@ export function useEquipmentActions() {
     try {
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      assertTxSucceeded(result);
+      assertTxSucceeded(result, "save_loadout", EQUIPMENT_ABORT_CODES);
 
       // PTB committed atomically on chain → pending IS chain truth. Rebase
       // committed to pending so `isDirty` clears. A subsequent server-driven

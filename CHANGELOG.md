@@ -12,6 +12,168 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — Phase A Sui-latest integration, 2026-05-17
+
+zkLogin via Enoki lands in the wallet connect modal; the wager-accept
+silent-fail UX bug filed yesterday (Bug A) gets a pre-flight balance
+check; the SDK `FailedTransaction` wrapper (Bug B) is now surfaced via
+a new shared `assertTxSucceeded` helper across every wallet-popup
+site. No contract change. No server change (Track 4 gRPC migration
+deferred — see "Reality Check" below). Same on-chain package ID (v5).
+Branch `feature/phase-2-design`.
+
+### Added
+
+- **`frontend/src/config/enoki.ts` — NEW.** Provider config snapshot,
+  env reading (`NEXT_PUBLIC_ENOKI_API_KEY` + `NEXT_PUBLIC_GOOGLE_CLIENT_ID`
+  + `NEXT_PUBLIC_TWITCH_CLIENT_ID`), `ENOKI_CONFIG` module-load
+  snapshot, `ENOKI_READY` guard. Provider matrix documented in the
+  file header. Apple deferred — Enoki 1.0.8's `AuthProvider` union
+  excludes `'apple'`; commented candidate row preserves the slot for
+  when the SDK ships it.
+- **`frontend/src/lib/tx-result.ts` — NEW.** Shared
+  `assertTxSucceeded(result, ctxLabel, abortCodes?)` +
+  `extractTxDigest(result)` + `humanizeChainError(errStr, abortCodes?)`
+  + `AbortCodeMap` type. Extracted from the pre-existing
+  `useEquipmentActions.ts::assertTxSucceeded` helper that the loadout
+  PTB has used since Phase 0.5, so this is a refactor (not new
+  wheel-inventing) — the same pattern is now wired into the
+  `create_wager` and `accept_wager` paths in `matchmaking-queue.tsx`.
+- **`scripts/qa-zklogin-wallet-registration.ts` — NEW (44 assertions).**
+  Pins the Enoki initializer wiring (`enokiWalletsInitializer` through
+  `walletInitializers`), the `ENOKI_READY` guard, the env-example
+  documentation, the Apple-deferred breadcrumb trail across 3 sites,
+  the dependency declarations, the signed-challenge auth-surface
+  regression guard (zkLogin-derived wallets implement Wallet Standard
+  `signPersonalMessage`, so the existing server
+  `verifyPersonalMessageSignature` flow works unchanged), and the
+  doc-presence in `STATE_OF_PROJECT_2026-05-17.md`.
+- **`canAcceptWagerWithBalance({ lobbyGate, stakeMist, balanceMist,
+  gasReserveMist? })` pure predicate in
+  `frontend/src/lib/wager-accept-gate.ts`** plus
+  `DEFAULT_GAS_RESERVE_MIST` constant (20_000_000 MIST = 0.02 SUI).
+  Refuses the click *before* the wallet popup when the caller's
+  balance can't cover stake + estimated gas. Short-circuits to the
+  lobby/own-wager refusal message when that gate already refuses, so
+  the user-facing reason stays actionable.
+- **`@mysten/enoki@^1.0.8`** + **`@mysten/slush-wallet@^1.0.5`** as
+  direct frontend dependencies. Slush was already in node_modules as
+  a transitive dep through `@mysten/dapp-kit-react`; making it
+  explicit documents the intent.
+
+### Changed
+
+- **`frontend/src/config/dapp-kit.ts`** — added
+  `enokiWalletsInitializer` import + the module-load
+  `ENOKI_INITIALIZER` constant gated on `ENOKI_READY &&
+  ENOKI_CONFIG.apiKey`, plugged into `createDAppKit({...
+  walletInitializers: [ENOKI_INITIALIZER]})`. When env vars aren't
+  configured, registration is silently skipped and the existing
+  browser-injected / default-Slush sign-in flow is the only path.
+  Comment block explicitly cites why we do *not* call
+  `registerSlushWallet(...)` (would double-register — dapp-kit-core's
+  default `slushWalletConfig` already invokes
+  `slushWebWalletInitializer` for us).
+- **`frontend/src/components/fight/matchmaking-queue.tsx`** — wired
+  the new balance gate into `handleAcceptWager` before
+  `signer.signAndExecuteTransaction`. Both `create_wager` and
+  `accept_wager` paths now route through the shared
+  `assertTxSucceeded(result, ctxLabel)` helper instead of the pre-fix
+  `txData = Transaction || FailedTransaction || result` OR-coalesce
+  that masked chain failures. `accept_wager` uses
+  `extractTxDigest(result)` for the WS payload.
+- **`frontend/src/hooks/useEquipmentActions.ts`** — now imports
+  `assertTxSucceeded` + `AbortCodeMap` from the shared
+  `frontend/src/lib/tx-result.ts` instead of defining its own copy.
+  No fork. `EQUIPMENT_ABORT_CODES` (the per-module Move abort lookup
+  table for `equipment.move`) stays local and is passed as the third
+  argument to the shared helper.
+- **`frontend/.env.local.example`** — appended Enoki + Google +
+  Twitch sections with per-provider OAuth-console setup links + the
+  PENDING Apple section. Each var documents the dev-console URL and
+  the redirect-URI registration step.
+- **`scripts/qa-wager-accept-gate.ts`** — extended from 39 to 67
+  assertions: 10 for the balance-gate decision boundaries (insufficient,
+  exactly-equal, one-MIST-short, well-funded, loading, zero,
+  custom-reserve, lobby short-circuit, own-wager short-circuit,
+  default-reserve pin), 4 for the matchmaking-queue wire shape, 4 for
+  the shared `tx-result` module exports, 2 for the fork-guard
+  (`useEquipmentActions.ts` imports from the shared module + uses the
+  abort-code map). The `testFailedTransactionBranchingShape` test
+  reads the source files via `fs.readFileSync` and pins the actual
+  text — a regression that drops the helper import is caught at gauntlet
+  time, before a live-test regression hits two-wallet QA.
+- **`scripts/qa-wordmark.ts`** — header-polish pin caught up: navbar
+  variant now expected at `suiSize: 38`, `combatsSize: 38`,
+  `strokeWidth: 1.8` (was `32 / 32 / 1.5` pre-2026-05-16). 30 → 32
+  assertions.
+
+### Reality Check — Track 4 server gRPC migration deferred
+
+The 2026-05-16 plan claimed `SuiGrpcClient` was a "near-drop-in
+replacement" for the server-side JSON-RPC reads at
+`server/src/utils/sui-settle.ts::getWagerStatus`,
+`server/src/utils/sui-settle.ts::findCharacterObjectId`, and
+`server/src/utils/sui-read.ts::fetchEquippedFromDOFs`. **That claim
+was wrong** — verified tonight by reading the `@mysten/sui@2.15.0`
+gRPC client types:
+
+- **`getWagerStatus`** uses `client.getObject({...
+  options: { showContent: true } })` which returns
+  `{ data: { content: { fields: {...} } } }` on JSON-RPC. The gRPC
+  equivalent returns `{ object: { content: Uint8Array<BCS> } }` —
+  requires writing a BCS decoder for the WagerMatch struct. Not a
+  drop-in.
+- **`findCharacterObjectId`** uses `client.queryEvents({...})`. The
+  gRPC client has **no `queryEvents` method**. Events are not in the
+  gRPC core API as of 2.15.0; the marketplace's `subscribeCheckpoints`
+  path is a different (streaming) API that doesn't replace the
+  ad-hoc lookup pattern.
+- **`fetchEquippedFromDOFs`** uses `client.getDynamicFields(...)` +
+  `client.getDynamicFieldObject(...)`. The gRPC core client has
+  `listDynamicFields` (pagination only — no per-DF object resolver)
+  so the DOF iteration would need a real refactor around the new
+  `value` include + the `nameValue` projection.
+
+The migration is a real surgical refactor. Deferred to a focused
+gRPC-migration session with rigorous before/after latency measurement
+on the public testnet fullnode. The Phase A scope is unaffected by
+the deferral — zkLogin + Bug A + Bug B all ship cleanly on the
+existing JSON-RPC server.
+
+### Apple OAuth provider — deferred
+
+Enoki 1.0.8's `AuthProvider` union is
+`'google' | 'facebook' | 'twitch' | 'onefc' | 'playtron'` — Apple is
+**not yet supported by the SDK**. The user's 2026-05-16 plan answer
+asked for Google + Twitch + Apple; we ship Google + Twitch live and
+preserve the Apple slot via a commented-out candidate row in
+`config/enoki.ts`, an inline note in `config/dapp-kit.ts`, and a full
+`PENDING ENOKI SDK SUPPORT` section in `.env.local.example`. When
+the SDK adds Apple, the diff to enable is ~3 lines.
+
+### Test totals
+
+- `qa-zklogin-wallet-registration` — **44** (NEW)
+- `qa-wager-accept-gate` — 39 → **67** (+28)
+- `qa-wordmark` — 30 → **32** (+2)
+- All other 34 gauntlets unchanged
+- Frontend `tsc --noEmit` — clean
+- 35 / 35 Move unit tests — unchanged (contracts not touched)
+- **Total: 2,307 / 2,307 PASS across 37 suites** (+72 from the
+  2,235 baseline at 2026-05-16)
+
+### References
+
+- `STATE_OF_PROJECT_2026-05-17.md` — canonical state for this session.
+- `SESSION_HANDOFF.md` — single-page handoff (now 2026-05-17), with
+  three live-verification checklists for next session (zkLogin
+  sign-in, Bug A pre-flight repro, Bug C battle-log symmetry).
+- `sui_latest.md` — user-curated Sui ecosystem survey that drove the
+  Phase A scope.
+
+---
+
 ## [Unreleased] — Phase 3 fight-room redesign + Phase 2 wrap, 2026-05-16
 
 Phase 2 visual-QA + polish track. Fight-room redesigned through three

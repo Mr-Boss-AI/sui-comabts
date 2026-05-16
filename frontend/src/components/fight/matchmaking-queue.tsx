@@ -11,7 +11,8 @@ import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
-import { canAcceptWager } from "@/lib/wager-accept-gate";
+import { canAcceptWager, canAcceptWagerWithBalance } from "@/lib/wager-accept-gate";
+import { assertTxSucceeded, extractTxDigest } from "@/lib/tx-result";
 import { computeBusyState, decideMatchmakingRender } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 import { ScreenLayout, TopBanner, SectionHeader } from "@/components/v2/layout";
@@ -239,9 +240,18 @@ export function MatchmakingQueue() {
         const signer = new CurrentAccountSigner(dAppKit as any);
         const result = await signer.signAndExecuteTransaction({ transaction: tx });
 
-        // Unwrap discriminated union: { $kind: 'Transaction', Transaction: { effects } }
+        // Phase A (2026-05-17) — Bug B branching via the shared
+        // `assertTxSucceeded` helper. Pre-fix, this site coalesced
+        // `Transaction || FailedTransaction || result` into a single
+        // `txData`, hiding chain failures behind the same code path as
+        // success. The helper now throws with a contextual message
+        // (`create_wager failed: ...`) on any of the three known failure
+        // shapes, so the catch block below surfaces a real reason
+        // instead of letting the orphan-wager fall-through fire with
+        // no wagerMatchId.
+        assertTxSucceeded(result, "create_wager");
         const resultAny = result as any;
-        const txData = resultAny.Transaction || resultAny.FailedTransaction || resultAny;
+        const txData = resultAny.Transaction || resultAny;
 
         // v2 SDK uses changedObjects with idOperation/outputOwner
         const changedObjects: any[] = txData.effects?.changedObjects || [];
@@ -375,11 +385,30 @@ export function MatchmakingQueue() {
     // chain state is already mutated — `cancel_wager` aborts with
     // `EMatchNotWaiting (1)`. See lib/wager-accept-gate.ts header for
     // the full chain-evidenced trace.
-    const gate = canAcceptWager({
+    const lobbyGate = canAcceptWager({
       callerWallet: walletAddress,
       targetWagerId: entry.wagerMatchId,
       lobby: wagerLobby,
     });
+
+    // Phase A (2026-05-17) — Bug A pre-flight balance check.
+    // Refuses the click BEFORE the wallet popup when the caller can't
+    // cover stake + estimated gas. Closes the silent-fail UX bug filed
+    // 2026-05-16 (acceptor with 0.501 SUI on a 0.5 SUI wager → chain
+    // tx failed, misleading "Wager not active on-chain" toast).
+    const stakeAmountMist = BigInt(Math.round(entry.wagerAmount * 1_000_000_000));
+    // Treat both "still loading" and "fetch errored" as "can't determine
+    // the balance" so the gate refuses with a try-again message rather
+    // than silently allowing a wager click during the initial render
+    // window where balance.mist defaults to 0n.
+    const balanceMist =
+      balance.loading || balance.error ? null : balance.mist;
+    const gate = canAcceptWagerWithBalance({
+      lobbyGate,
+      stakeMist: stakeAmountMist,
+      balanceMist,
+    });
+
     if (!gate.allow) {
       console.warn(
         "[Wager] Accept gate refused:",
@@ -391,19 +420,27 @@ export function MatchmakingQueue() {
     }
     setSigning(true);
     try {
-      const stakeAmountMist = BigInt(Math.round(entry.wagerAmount * 1_000_000_000));
       const tx = buildAcceptWagerTx(entry.wagerMatchId, stakeAmountMist);
 
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      const resultAny = result as any;
-      const txData = resultAny.Transaction || resultAny.FailedTransaction || resultAny;
-      const digest = txData.digest || txData.effects?.transactionDigest;
+
+      // Phase A (2026-05-17) — Bug B branching via the shared
+      // `assertTxSucceeded` helper. Pre-fix, this site grabbed a digest
+      // from either the Transaction or FailedTransaction wrapper and
+      // proceeded to send `wager_accepted` over the WS, so the server's
+      // chain probe was the first place the failure surfaced — emitting
+      // the unhelpful "Wager not active on-chain (status: 0)" toast.
+      // The helper now throws with a contextual `accept_wager failed:
+      // <reason>` message that the catch block below surfaces to the
+      // user verbatim.
+      assertTxSucceeded(result, "accept_wager");
+      const digest = extractTxDigest(result);
 
       state.socket.send({
         type: "wager_accepted",
         wagerMatchId: entry.wagerMatchId,
-        txDigest: digest,
+        txDigest: digest ?? undefined,
       });
     } catch (err: any) {
       console.error("[Wager] accept_wager failed:", err);
@@ -411,7 +448,7 @@ export function MatchmakingQueue() {
     } finally {
       setSigning(false);
     }
-  }, [dAppKit, state.socket, dispatch, walletAddress, wagerLobby]);
+  }, [dAppKit, state.socket, dispatch, walletAddress, wagerLobby, balance.error, balance.mist, balance.loading]);
 
   const handleCancelWager = useCallback(async (entry: WagerLobbyEntry) => {
     setSigning(true);

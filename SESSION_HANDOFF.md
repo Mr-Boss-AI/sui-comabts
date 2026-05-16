@@ -1,7 +1,7 @@
-# Session Handoff — 2026-05-16 (Phase 3 fight-room shipped)
+# Session Handoff — 2026-05-17 (Phase A — Sui-latest integration pass)
 
 > Single-page summary of tonight's session. Full detail lives in
-> [`STATE_OF_PROJECT_2026-05-16.md`](./STATE_OF_PROJECT_2026-05-16.md).
+> [`STATE_OF_PROJECT_2026-05-17.md`](./STATE_OF_PROJECT_2026-05-17.md).
 > Branch `feature/phase-2-design`. Upstream `main` stays at the v4-era
 > `08ff991`; **do not merge until v5.1 republish lands**.
 
@@ -9,104 +9,88 @@
 
 ## What shipped tonight
 
-### One wrap commit, three categories
+### One wrap commit, four categories
 
 | Category | Files |
 |---|---|
-| **Phase 3 fight-room redesign** (v1 → v2 → v3 same session) | `fight-arena.tsx` rewrite · `zone-selector.tsx` variant=list + v3 row-paired grid · `mini-equipment-frame.tsx` adds `hideHpBar` · `qa-fight-arena-layout.ts` NEW (71 assertions) |
-| **Header sizing + auto-flow polish** | `navbar.tsx` (+20% sized · `clamp()` scaling · `flex-wrap`) · `wordmark.tsx` (navbar variant 32 → 38 px) |
-| **Parked WIPs being landed alongside** (multi-session backlog) | DM pipeline (`lib/dm-*`, `lib/messaging.ts`, `lib/player-bucket.ts`) · Tavern handlers + data modules + migrations · server `fight-room.ts` + `handler.ts` + `index.ts` + `setup-db.mjs` · frontend `game-provider.tsx` + `dapp-kit.ts` + `useGameStore.ts` + `ws-messages.ts` + `tsconfig.json` + `package*.json` · 9 new tavern/DM QA scripts · TAVERN_DESIGN.md + Gemini.md · misc design screenshots |
+| **zkLogin via Enoki (Google + Twitch)** | `frontend/src/config/enoki.ts` NEW · `frontend/src/config/dapp-kit.ts` (`enokiWalletsInitializer` wired through `walletInitializers`) · `frontend/.env.local.example` (Enoki + Google + Twitch sections appended; Apple commented as PENDING) · `frontend/package.json` (+`@mysten/enoki@^1.0.8`, +`@mysten/slush-wallet@^1.0.5`) |
+| **Bug A — pre-flight balance check** | `frontend/src/lib/wager-accept-gate.ts` (new `canAcceptWagerWithBalance` pure predicate + `DEFAULT_GAS_RESERVE_MIST` constant) · `frontend/src/components/fight/matchmaking-queue.tsx` (wired into `handleAcceptWager` before `signer.signAndExecuteTransaction`) |
+| **Bug B — `FailedTransaction` branching across every wallet-popup site** | `frontend/src/lib/tx-result.ts` NEW (shared `assertTxSucceeded`, `extractTxDigest`, `humanizeChainError`, `AbortCodeMap`) · `frontend/src/hooks/useEquipmentActions.ts` (now imports the shared helper instead of forking) · `frontend/src/components/fight/matchmaking-queue.tsx` (both `create_wager` and `accept_wager` routed through the helper) |
+| **Tests + docs** | `scripts/qa-zklogin-wallet-registration.ts` NEW (44 assertions) · `scripts/qa-wager-accept-gate.ts` (+28 assertions) · `scripts/qa-wordmark.ts` (header-polish pin caught up: 30 → 32) · `STATE_OF_PROJECT_2026-05-17.md` · this file · `STATUS.md` · `CHANGELOG.md` |
 
-### Phase 3 fight-room redesign — the three passes
+### What's already live without explicit code
 
-- **v1 layout** — Three-row CSS grid (HP cards · doll · move column ·
-  doll · battle log full-width). Move column was 100 px. New
-  list-style ZoneSelector variant. v1 placeholder `FighterPanel` /
-  `SlotCell` / `DollSilhouette` components for the dolls. New QA
-  gauntlet `qa-fight-arena-layout` (60 assertions).
-- **v2 polish** — Move column 100 → 200 px. Placeholder doll
-  components deleted, replaced with the existing read-only
-  `MiniEquipmentFrame` (the same component the Player Profile modal
-  uses). Added `hideHpBar?: boolean` to it — single non-invasive
-  flag, no fork. Buttons restyled with game-theme chrome
-  (`var(--r-sharp)`, `var(--sh-plate-sm)`, `var(--ls-button)`),
-  full ZONE_LABELS, no abbreviations. Lock-in button matches the
-  Arena fight-type CTAs. Gauntlet → 57 assertions.
-- **v3 row-paired + glow** — Move column 200 → 240 px. Replaced
-  "ATK column above BLK column" with a single grid (`1fr auto 1fr` ×
-  `auto repeat(5, auto)`) where each body zone is one row of
-  `ATK button · bronze label · BLK button`. Compact icon-only
-  buttons (inline Tabler-style sword / shield / check SVGs).
-  Selected state: oriented glow (`rgba(226,75,74,0.6)` red,
-  `rgba(55,138,221,0.6)` blue) + 1.4 s ease-in-out pulse keyframe
-  + corner ✓ badge. Gauntlet → 71 assertions.
+- **Slush web wallet** — `dapp-kit-core`'s `createDAppKit` invokes
+  `slushWebWalletInitializer(slushWalletConfig)` by default when
+  `slushWalletConfig` is not explicitly `null`. The Slush wallet has
+  been showing up in our connect modal since dapp-kit v2 landed — we
+  just hadn't been explicit about it. The gauntlet now pins the
+  *absence* of both `slushWalletConfig: null` (would disable) and
+  `registerSlushWallet(...)` (would double-register).
 
-Block-pair / shield-line / dual-wield / shield-mode click logic
-untouched across all three passes. WS message surface, HP fill
-thresholds, opponent-disconnect banner, fight-result modal, and
-fight-outcome-ack write are all pass-through.
+### Two scope decisions during execution
 
-### Local hygiene (no code commit)
-
-Host had a cron `*/5 * * * * /home/shakalis/bots/watchdog.sh` plus a
-`sxai-telegram-bot.service` systemd unit reviving three unrelated
-node processes (`sui-bot`, `meme-sol-bot`, `ton-bot`). `meme-sol-bot`
-was holding port 3001 and blocking the sui-combats backend at boot.
-Cron line commented (backup at `/tmp/crontab.backup`), systemd unit
-stopped + disabled, all 11 bot processes killed. To re-enable later:
-uncomment the cron line and `systemctl --user enable --now
-sxai-telegram-bot.service`.
+1. **Apple deferred.** Enoki 1.0.8's `AuthProvider` union is
+   `'google' | 'facebook' | 'twitch' | 'onefc' | 'playtron'` — no Apple
+   branch. The user's stated provider list (Google + Twitch + Apple) is
+   honoured with Google + Twitch live, Apple wired as a commented-out
+   env var + breadcrumb annotations in three sites (`config/enoki.ts`,
+   `config/dapp-kit.ts`, `.env.local.example`). When Enoki adds Apple,
+   the diff to enable is ~3 lines.
+2. **Track 4 server gRPC migration deferred.** Verified the
+   `SuiGrpcClient` API surface against the three target sites:
+   `findCharacterObjectId` uses `queryEvents` (no gRPC equivalent),
+   `fetchEquippedFromDOFs` uses `getDynamicFieldObject` (no gRPC
+   equivalent), and `getWagerStatus`'s `getObject` returns BCS-encoded
+   content in gRPC where JSON-RPC returns parsed JSON. Not a drop-in
+   swap — it's a real refactor that deserves its own focused session
+   with before/after latency benchmarks.
 
 ---
 
 ## Tests
 
-**2,235 / 2,235 PASS across 36 suites.** New today:
+**2,307 / 2,307 PASS across 37 suites** (+72 from 2,235 baseline).
+New today:
 
-- `qa-fight-arena-layout.ts` — **71** (Phase 3 fight-room layout pins:
-  grid templates, ZoneSelector variant, MiniEquipmentFrame reuse,
-  button kinds, icon components, glow rgbas, pulse keyframes,
-  removed-v1-artefact guards)
+- `qa-zklogin-wallet-registration.ts` — **44** (Enoki config snapshot,
+  initializer wiring, env-example documentation, Apple-deferred
+  breadcrumb trail across 3 sites, dependency declarations,
+  auth-surface regression guard, doc-presence)
+- `qa-wager-accept-gate.ts` — **+28** (39 → 67; balance-gate
+  fixtures + shared `tx-result` module + matchmaking-queue wire shape
+  + `useEquipmentActions` fork guard)
+- `qa-wordmark.ts` — **+2** (30 → 32; header-polish navbar
+  variant pins caught up to 38 / 38 / 1.8)
 
-Existing gauntlets unchanged. Frontend `tsc --noEmit` clean.
-35 / 35 Move unit tests still passing.
+Existing 34 gauntlets unchanged.
+
+Frontend `tsc --noEmit` clean. 35 / 35 Move unit tests still passing
+(contracts unchanged this session).
 
 ---
 
-## Open bug log (filed, not fixed)
+## Open bug log (carried, not new tonight)
 
-1. **Bug A — Insufficient-SUI silent fail on `accept_wager`.**
-   Acceptor with 0.501 SUI clicks ACCEPT on a 0.5 SUI wager. Wallet
-   signs, chain tx fails (not enough gas headroom after escrow lock),
-   `WagerMatch.status` stays at 0. Server's `decideAcceptOutcome`
-   correctly rejects, but the toast wording ("Wager not active on-chain
-   (status: 0). Did the accept_wager transaction succeed?") doesn't
-   tell the user what really went wrong. Pre-flight balance check on
-   the frontend is the right fix.
+- **Bug C — Battle log asymmetry** — pre-redesign symptom, **not yet
+  re-tested** against the Phase 3 fight-room redesign. DamageLog
+  itself is a pass-through — `fight.log` flows in unchanged — so any
+  asymmetry lives in `server/src/ws/fight-room.ts`'s broadcast of
+  `fight_state` updates, not the renderer. Next-session two-wallet
+  live test should confirm or close.
 
-2. **Bug B — Frontend ignores `FailedTransaction`.**
-   `matchmaking-queue.tsx:398-407` grabs a digest from either the
-   success (`Transaction`) or failure (`FailedTransaction`) wrapper
-   the Sui SDK signer returns, and proceeds to send `wager_accepted`
-   to the WS either way. Two-branch fix: throw on
-   `FailedTransaction`, surface the SDK error.
-
-3. **Bug C — Battle log asymmetry (needs re-verify).**
-   Pre-redesign symptom: battle log lines occasionally appeared on
-   one tab and not the other during two-wallet live fights. **Not
-   re-tested** against the Phase 3 fight-room redesign tonight. The
-   DamageLog component is a pass-through — `fight.log` flows in
-   unchanged, just rendered inside the new full-width bottom row. If
-   the asymmetry exists, it's in the WS broadcast of `fight_state`
-   updates from `server/src/ws/fight-room.ts`, not the renderer.
+Bug A (insufficient-SUI silent fail) and Bug B (frontend ignores
+`FailedTransaction`) — **fixed tonight**. The pre-flight gate refuses
+the click *before* the wallet popup; the SDK's error string surfaces
+to the user verbatim if a tx fails on chain after sign.
 
 ---
 
 ## Server status
 
-Both servers should be re-launched fresh next session. The cron
-watchdog and the unrelated bot stack are no longer reviving any
-processes. To boot:
+Both servers are running on the post-Phase-A build (frontend
+hot-reloaded compile-clean across the entire session; backend HTTP +
+WS healthy throughout). To rerun:
 
 ```bash
 kill $(lsof -t -i:3001) 2>/dev/null
@@ -117,23 +101,75 @@ sleep 6
 curl -s localhost:3001/health | python3 -m json.tool
 ```
 
-Supabase still OPTIONAL (running in-memory). To enable, see
-`STATE_OF_PROJECT_2026-05-14.md` → "Optional — Supabase".
+The cron watchdog + the unrelated bot stack are still disabled from
+the 2026-05-16 cleanup (cron backup at `/tmp/crontab.backup` if you
+ever want them back).
+
+Supabase still OPTIONAL (running in-memory).
+
+---
+
+## Live verification next session
+
+Three live-test checklists for the user to walk through:
+
+### 1. zkLogin sign-in
+
+```
+[ ] Create an Enoki application at https://portal.enoki.mystenlabs.com/
+[ ] Copy NEXT_PUBLIC_ENOKI_API_KEY into frontend/.env.local
+[ ] https://console.cloud.google.com/  ->  OAuth Web client; redirect URI = http://localhost:3000/
+[ ] Copy NEXT_PUBLIC_GOOGLE_CLIENT_ID into frontend/.env.local
+[ ] (Optional, but recommended for gaming audience) Twitch app at https://dev.twitch.tv/console
+[ ] Copy NEXT_PUBLIC_TWITCH_CLIENT_ID into frontend/.env.local
+[ ] Restart frontend (Next.js inlines NEXT_PUBLIC_* at build time)
+[ ] Open http://localhost:3000/ -> Connect Wallet
+[ ] Verify "Sign in with Google" + "Sign in with Twitch" appear in the connect modal
+[ ] Sign in with Google -> Google OAuth popup -> back to dapp -> auth_challenge -> auth_ok
+[ ] Confirm character creation / restore flow works the same as with a browser-injected wallet
+```
+
+### 2. Bug A pre-flight repro (the 2026-05-16 reproduction)
+
+```
+[ ] Two wallets in two browser tabs (or one zkLogin + one browser-injected)
+[ ] Wallet A (well-funded) creates a 0.5 SUI wager
+[ ] Wallet B has ~0.501 SUI (top up the testnet faucet to exactly that)
+[ ] Wallet B clicks ACCEPT on Wallet A's wager
+[ ] EXPECTED: toast reads "Need ~0.52 SUI (0.5 stake + gas) — you have 0.501 SUI."
+[ ] EXPECTED: wallet popup does NOT fire (gate refuses before signer.signAndExecuteTransaction)
+[ ] Top up Wallet B to 1 SUI; retry ACCEPT
+[ ] EXPECTED: wallet popup fires, fight starts normally
+```
+
+### 3. Bug C — battle log symmetry against the Phase 3 redesign
+
+```
+[ ] Two wallets in two browser tabs
+[ ] Start a friendly fight
+[ ] Submit 3+ actions per side
+[ ] At the end of turn 3, compare DamageLog content between tabs
+[ ] If symmetric -> Bug C closed
+[ ] If asymmetric -> capture both tabs' console + server log around the divergent turn
+```
 
 ---
 
 ## Next-session pickup
 
-1. **Fix Bug A + Bug B** — pre-flight balance check on the frontend
-   wager-accept path; branch on `FailedTransaction` in
-   `handleAcceptWager`.
-2. **Re-verify Bug C** — two-wallet live fight, check battle log
-   symmetry after Phase 3 redesign. Steps in
-   `STATE_OF_PROJECT_2026-05-16.md` → Bug C.
-3. **Visual QA walk** of every screen at 1440 px / 1280 px / mobile.
-4. **Open Track B (Phase 3 v5.1 republish)** on its own branch
-   (`feature/v5.1-contracts`) when the user is ready. Spec at
-   `STATE_OF_PROJECT_2026-05-04.md` §v5.1.
+1. **Live verify the three checklists above.** This is the
+   testnet-as-production gate before any v5.1 work begins.
+2. **Open Track B (Phase 3 v5.1 republish)** on its own branch
+   (`feature/v5.1-contracts`) when ready. Spec at
+   `STATE_OF_PROJECT_2026-05-04.md` §v5.1 + `STATE_OF_PROJECT_2026-05-17.md`
+   §Phase B. The v5.1 redesign is where `sui::random`, Display V2,
+   `portrait_nft_id`, `mint_item_admin`, `settle_wager_attested`,
+   `draws: u32`, and MVR named packages all land.
+3. **Server gRPC migration** as its own focused session. Three
+   real refactors required: BCS decoder for WagerMatch, replace
+   `queryEvents` with checkpoint subscription cold-sync, rebuild DOF
+   iteration around `listDynamicFields`. Worth doing for the latency
+   win; not appropriate to bundle.
 
 ---
 
@@ -151,13 +187,18 @@ Supabase still OPTIONAL (running in-memory). To enable, see
 ## Useful one-liners
 
 ```bash
-# Inspect any chain object
-curl -s -X POST https://fullnode.testnet.sui.io:443 \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"sui_getObject",
-       "params":["0x...",{"showContent":true}]}' | python3 -m json.tool
+# Run only the new Phase A gauntlets
+cd ~/sui-comabts/server && npx tsx ../scripts/qa-zklogin-wallet-registration.ts
+cd ~/sui-comabts/server && npx tsx ../scripts/qa-wager-accept-gate.ts
 
-# Find a wallet's Character NFTs (descending — newest first)
+# Full gauntlet sweep
+cd ~/sui-comabts/server && for g in ../scripts/qa-*.ts; do echo "=== $g ==="; npx tsx "$g" 2>&1 | tail -3; done
+
+# Run only the chain-touching gauntlet (requires real wallet keys in env;
+# pre-existing dotenv-infra ERR if env missing — accepted state)
+cd ~/sui-comabts/server && npx tsx ../scripts/qa-chain-gauntlet.ts
+
+# Find any wallet's character NFTs (testnet)
 curl -s -X POST https://fullnode.testnet.sui.io:443 \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"suix_queryEvents",
@@ -173,14 +214,6 @@ curl -s -X POST http://localhost:3001/api/admin/cancel-wager \
 curl -s -X POST http://localhost:3001/api/admin/force-unlock \
   -H 'Content-Type: application/json' \
   -d '{"wallet":"0x..."}'
-
-# Repin a wallet to a specific Character NFT
-curl -s -X POST http://localhost:3001/api/admin/repin-character \
-  -H 'Content-Type: application/json' \
-  -d '{"wallet":"0x...","characterId":"0x..."}'
-
-# Run the new Phase 3 fight-room layout gauntlet
-cd ~/sui-comabts/server && npx tsx ../scripts/qa-fight-arena-layout.ts
 ```
 
 All admin endpoints are testnet-only (`CONFIG.SUI_NETWORK !== 'mainnet'`

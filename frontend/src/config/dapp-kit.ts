@@ -1,5 +1,7 @@
 import { createDAppKit } from "@mysten/dapp-kit-react";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { enokiWalletsInitializer } from "@mysten/enoki";
+import { ENOKI_CONFIG, ENOKI_READY } from "./enoki";
 
 const GRPC_URLS: Record<string, string> = {
   testnet: "https://fullnode.testnet.sui.io:443",
@@ -41,10 +43,53 @@ const MVR_OVERRIDES_BY_NETWORK: Record<string, Record<string, string>> = {
   mainnet: {},
 };
 
+// =============================================================================
+// Phase A — Enoki zkLogin wallet initializer  (2026-05-17)
+// =============================================================================
+//
+// We register Enoki through the dApp Kit's `walletInitializers` slot
+// rather than calling `registerEnokiWallets` directly. The initializer
+// pattern lets dApp Kit hand Enoki the correct per-network clients
+// automatically (the ones returned by `createClient(network)` below)
+// instead of us constructing separate gRPC clients just for Enoki.
+//
+// Currently shipping Google + Twitch. Apple is *not* wired because
+// Enoki 1.0.8's `AuthProvider` union does not yet include `'apple'`;
+// see `frontend/src/config/enoki.ts` header for the provider matrix
+// and the pending-Apple-support note.
+//
+// When `ENOKI_READY` is false (no env vars configured), `walletInitializers`
+// receives an empty array — the dApp Kit still boots cleanly with
+// browser-injected wallets + the default Slush web wallet. The QA
+// gauntlet (`scripts/qa-zklogin-wallet-registration.ts`) pins this
+// wiring so a future refactor that drops the initializer is caught
+// at static-analysis time.
+//
+// Slush web wallet is registered automatically by dapp-kit-core's
+// default `slushWalletConfig` (see `dapp-kit-core/dist/index.mjs` —
+// when `slushWalletConfig !== null`, the kit calls
+// `slushWebWalletInitializer(slushWalletConfig)` itself). We
+// intentionally do *not* pass an explicit `registerSlushWallet` call
+// here to avoid a double-registration.
+
+const ENOKI_INITIALIZER =
+  ENOKI_READY && ENOKI_CONFIG.apiKey
+    ? enokiWalletsInitializer({
+        apiKey: ENOKI_CONFIG.apiKey,
+        providers: Object.fromEntries(
+          ENOKI_CONFIG.providers.map((p) => [
+            p.provider,
+            { clientId: p.clientId },
+          ]),
+        ),
+      })
+    : null;
+
 export const dAppKit = createDAppKit({
   networks: ["testnet", "mainnet"] as const,
   defaultNetwork: "testnet",
   enableBurnerWallet: process.env.NODE_ENV === "development",
+  walletInitializers: ENOKI_INITIALIZER ? [ENOKI_INITIALIZER] : [],
   createClient(network) {
     return new SuiGrpcClient({
       network,

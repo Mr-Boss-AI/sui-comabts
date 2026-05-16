@@ -77,3 +77,83 @@ export function canAcceptWager(args: {
   }
   return { allow: true };
 }
+
+/**
+ * Phase A (2026-05-17) — Bug A pre-flight balance check.
+ *
+ * Background: 2026-05-16 live two-wallet test surfaced a silent-fail
+ * UX bug. Acceptor Mr_Boss_v5.1 had 0.501 SUI on-chain and clicked
+ * ACCEPT on a 0.5 SUI wager. The wallet popped, the user signed, the
+ * chain transaction failed (insufficient gas headroom after locking
+ * 0.5 SUI in escrow), `WagerMatch.status` stayed at 0 (WAITING), and
+ * the server emitted the misleading toast "Wager not active on-chain
+ * (status: 0). Did the accept_wager transaction succeed?"
+ *
+ * This pure predicate refuses the click BEFORE the wallet popup when
+ * the caller's balance can't cover stake + estimated gas. The
+ * recommended gas reserve is 0.02 SUI — typical mainnet RGP at 750-1000
+ * MIST × a generous gas budget of ~20-25M MIST gives ~0.02 SUI of
+ * headroom over any reasonable wager + treasury escrow path.
+ *
+ * Pure: no React, no chain calls, no allocation of new objects beyond
+ * the result. Pinned in `qa-wager-accept-gate.ts` with explicit
+ * insufficient / exactly-equal / just-enough / well-funded fixtures.
+ *
+ * Returns the same `AcceptGateResult` shape as `canAcceptWager`, with
+ * the user-facing reason string formatted for direct display in the
+ * accept-button tooltip / refusal toast. When the balance fails the
+ * check, `ownWagerId` is intentionally not set — this is a balance
+ * problem, not an open-wager-collision problem.
+ */
+export const DEFAULT_GAS_RESERVE_MIST = BigInt(20_000_000); // 0.02 SUI
+
+export function canAcceptWagerWithBalance(args: {
+  /** Lobby + own-wager check result. Pass `canAcceptWager(...)`'s output. */
+  lobbyGate: AcceptGateResult;
+  /** Stake the caller would lock on chain, in MIST. */
+  stakeMist: bigint;
+  /** Caller's current SUI balance in MIST. `null` when the balance hook
+   *  is still loading or errored — treated as "can't determine, refuse". */
+  balanceMist: bigint | null;
+  /** Gas headroom to reserve above the stake, in MIST. Defaults to
+   *  `DEFAULT_GAS_RESERVE_MIST` (0.02 SUI). */
+  gasReserveMist?: bigint;
+}): AcceptGateResult {
+  // Short-circuit the lobby/own-wager refusals first — those messages
+  // are more actionable than "insufficient SUI", and we don't want to
+  // emit a balance error for a wager the caller can't even attempt.
+  if (!args.lobbyGate.allow) return args.lobbyGate;
+
+  const reserve = args.gasReserveMist ?? DEFAULT_GAS_RESERVE_MIST;
+  const required = args.stakeMist + reserve;
+
+  if (args.balanceMist === null) {
+    return {
+      allow: false,
+      reason: "Loading wallet balance — try again in a moment.",
+    };
+  }
+
+  if (args.balanceMist < required) {
+    const needSui = mistToSuiFixed(required);
+    const haveSui = mistToSuiFixed(args.balanceMist);
+    return {
+      allow: false,
+      reason: `Need ~${needSui} SUI (${mistToSuiFixed(args.stakeMist)} stake + gas) — you have ${haveSui} SUI.`,
+    };
+  }
+
+  return { allow: true };
+}
+
+/**
+ * Format MIST as a SUI decimal string, trimmed of trailing zeros.
+ * Pure helper used only by the gate's user-facing reason text.
+ */
+function mistToSuiFixed(mist: bigint): string {
+  const whole = mist / BigInt(1_000_000_000);
+  const frac = mist % BigInt(1_000_000_000);
+  if (frac === BigInt(0)) return whole.toString();
+  const fracStr = frac.toString().padStart(9, "0").replace(/0+$/, "");
+  return `${whole.toString()}.${fracStr}`;
+}

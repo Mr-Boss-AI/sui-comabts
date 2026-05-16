@@ -83,7 +83,12 @@ function main(): void {
   contains(wm, 'layout: "inline"', 'navbar/footer layout = inline');
   // Stroke thickness scales with size
   contains(wm, 'strokeWidth: 5', 'hero stroke = 5px');
-  contains(wm, 'strokeWidth: 1.5', 'navbar stroke = 1.5px');
+  // Phase 3 header polish (2026-05-16) bumped the navbar variant +20%:
+  // suiSize 32 -> 38, combatsSize 32 -> 38, strokeWidth 1.5 -> 1.8.
+  // The hero variant is unchanged.
+  contains(wm, 'strokeWidth: 1.8', 'navbar stroke = 1.8px (post-header-polish)');
+  contains(wm, 'suiSize: 38', 'navbar SUI = 38px (post-header-polish)');
+  contains(wm, 'combatsSize: 38', 'navbar COMBATS = 38px (post-header-polish)');
 
   // ===========================================================================
   // [5] "SUI" half — red fill + ink stroke

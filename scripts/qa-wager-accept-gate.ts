@@ -26,7 +26,11 @@
  *
  * Exits 0 on full pass, 1 on any failure.
  */
-import { canAcceptWager } from '../frontend/src/lib/wager-accept-gate';
+import {
+  canAcceptWager,
+  canAcceptWagerWithBalance,
+  DEFAULT_GAS_RESERVE_MIST,
+} from '../frontend/src/lib/wager-accept-gate';
 import { decideAcceptOutcome } from '../server/src/ws/wager-accept-gate';
 
 // ===== Pass / fail helpers (mirrors qa-wager-register.ts style) =====
@@ -341,6 +345,267 @@ function testDecideAcceptOutcomeChainSettled(): void {
   eq(r.kind, 'reject', 'chain SETTLED → reject');
 }
 
+// ===========================================================================
+// Phase A (2026-05-17) — Bug A pre-flight balance check.
+//
+// The 2026-05-16 live test reproduced the silent-fail UX bug end-to-end:
+// acceptor Mr_Boss_v5.1 had 0.501 SUI on chain and clicked ACCEPT on a
+// 0.5 SUI wager. The wallet signed, the chain tx failed (escrow lock
+// left no gas headroom), `WagerMatch.status` stayed at 0, and the toast
+// read "Wager not active on-chain (status: 0). Did the accept_wager
+// transaction succeed?" — technically true, but useless for the user.
+//
+// `canAcceptWagerWithBalance` refuses the click BEFORE the wallet popup
+// when the caller's balance can't cover stake + estimated gas. These
+// fixtures pin the exact decision boundary (stake = 0.5 SUI, default
+// reserve = 0.02 SUI, threshold = 0.52 SUI).
+// ===========================================================================
+
+const ONE_SUI = BigInt(1_000_000_000);
+const HALF_SUI = ONE_SUI / BigInt(2);
+const RESERVE = DEFAULT_GAS_RESERVE_MIST; // 20_000_000 MIST = 0.02 SUI
+const LOBBY_ALLOW = { allow: true as const };
+
+function testBalanceGateInsufficient(): void {
+  section('canAcceptWagerWithBalance — insufficient SUI (live 2026-05-16 repro)');
+
+  // Mr_Boss_v5.1 with 0.501 SUI on a 0.5 SUI wager — needs 0.52, has 0.501.
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: BigInt(501_000_000),
+  });
+  eq(r.allow, false, '0.501 SUI vs 0.5 stake + 0.02 gas → refuse');
+  truthy(
+    typeof r.reason === 'string' && r.reason.includes('0.5') && r.reason.includes('0.501'),
+    'reason mentions stake + actual balance',
+    `reason=${r.reason}`,
+  );
+}
+
+function testBalanceGateExactlyEqual(): void {
+  section('canAcceptWagerWithBalance — balance == stake + reserve (boundary, allow)');
+
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: HALF_SUI + RESERVE,
+  });
+  eq(r.allow, true, 'balance exactly equals stake + reserve → allow');
+}
+
+function testBalanceGateJustEnough(): void {
+  section('canAcceptWagerWithBalance — balance one MIST below threshold (boundary, refuse)');
+
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: HALF_SUI + RESERVE - BigInt(1),
+  });
+  eq(r.allow, false, 'balance one MIST short → refuse (strict <)');
+}
+
+function testBalanceGateWellFunded(): void {
+  section('canAcceptWagerWithBalance — caller well-funded → allow');
+
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: BigInt(10) * ONE_SUI,
+  });
+  eq(r.allow, true, '10 SUI vs 0.5 stake → allow');
+  eq(r.reason, undefined, 'no reason when allowing');
+}
+
+function testBalanceGateLoadingState(): void {
+  section('canAcceptWagerWithBalance — balance hook still loading → refuse');
+
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: null, // useWalletBalance is loading or errored
+  });
+  eq(r.allow, false, 'null balance → refuse');
+  truthy(
+    typeof r.reason === 'string' && r.reason.toLowerCase().includes('loading'),
+    'reason hints at loading state',
+    `reason=${r.reason}`,
+  );
+}
+
+function testBalanceGateZeroBalance(): void {
+  section('canAcceptWagerWithBalance — balance 0n → refuse');
+
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: BigInt(0),
+  });
+  eq(r.allow, false, '0 SUI balance → refuse');
+}
+
+function testBalanceGateCustomReserve(): void {
+  section('canAcceptWagerWithBalance — caller-supplied gas reserve overrides default');
+
+  // Use a 0.1 SUI reserve. Now 0.5 SUI stake + 0.1 reserve = 0.6 required.
+  const customReserve = BigInt(100_000_000); // 0.1 SUI
+  const r1 = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: HALF_SUI + RESERVE, // 0.52, below the custom 0.6 threshold
+    gasReserveMist: customReserve,
+  });
+  eq(r1.allow, false, '0.52 vs 0.5 + 0.1 custom reserve → refuse');
+
+  const r2 = canAcceptWagerWithBalance({
+    lobbyGate: LOBBY_ALLOW,
+    stakeMist: HALF_SUI,
+    balanceMist: HALF_SUI + customReserve, // exactly 0.6
+    gasReserveMist: customReserve,
+  });
+  eq(r2.allow, true, '0.6 vs 0.5 + 0.1 custom reserve → allow');
+}
+
+function testBalanceGateLobbyShortCircuit(): void {
+  section('canAcceptWagerWithBalance — lobby refusal short-circuits balance check');
+
+  // Even with infinite balance, a lobby refusal must pass through
+  // unchanged so the user-facing reason stays actionable ("Connect a
+  // wallet first." or "Cancel your own open wager first") rather than
+  // being overridden by an irrelevant balance message.
+  const lobbyRefusal = { allow: false as const, reason: 'Connect a wallet first.' };
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: lobbyRefusal,
+    stakeMist: HALF_SUI,
+    balanceMist: BigInt(1_000_000_000_000), // 1000 SUI, plenty
+  });
+  eq(r.allow, false, 'lobby refusal preserved');
+  eq(r.reason, 'Connect a wallet first.', 'reason passed through unchanged');
+}
+
+function testBalanceGateOwnWagerShortCircuit(): void {
+  section('canAcceptWagerWithBalance — own-wager refusal short-circuits + retains ownWagerId');
+
+  // The own-wager refusal carries `ownWagerId` for diagnostic logging.
+  // canAcceptWagerWithBalance must preserve it so the caller can log it.
+  const ownWagerRefusal = {
+    allow: false as const,
+    reason: 'Cancel your own open wager first before accepting another.',
+    ownWagerId: S_W,
+  };
+  const r = canAcceptWagerWithBalance({
+    lobbyGate: ownWagerRefusal,
+    stakeMist: HALF_SUI,
+    balanceMist: BigInt(10_000_000_000),
+  });
+  eq(r.allow, false, 'own-wager refusal preserved');
+  eq(r.ownWagerId, S_W, 'ownWagerId preserved through balance gate');
+}
+
+function testBalanceGateDefaultReserveValue(): void {
+  section('canAcceptWagerWithBalance — DEFAULT_GAS_RESERVE_MIST pinned to 0.02 SUI');
+
+  // Pin the exported constant so a quiet refactor of the reserve doesn't
+  // silently change the refusal threshold across the live build.
+  eq(DEFAULT_GAS_RESERVE_MIST, BigInt(20_000_000), 'reserve = 20_000_000 MIST (0.02 SUI)');
+}
+
+// ===========================================================================
+// Phase A (2026-05-17) — Bug B FailedTransaction branching.
+//
+// The Sui SDK signer returns either { Transaction: {...} } on success
+// or { FailedTransaction: { error, ... } } when the chain rejected the
+// tx. The pre-fix `matchmaking-queue.tsx:398-407` grabbed a digest from
+// either wrapper and proceeded to send `wager_accepted` over the WS,
+// surfacing the failure only through the server's misleading
+// "not active on-chain" toast.
+//
+// This pin verifies the FailedTransaction branch is wired in the
+// matchmaking-queue source. We grep the source rather than execute it
+// because the actual signer is a wallet-popup-bound async function and
+// can't be unit-tested without a live wallet — the branch shape is the
+// regression-relevant fact.
+// ===========================================================================
+
+function testFailedTransactionBranchingShape(): void {
+  section('matchmaking-queue.tsx — assertTxSucceeded wired into create + accept');
+
+  // Static pin: both create_wager and accept_wager paths must route
+  // through the shared `assertTxSucceeded` helper from
+  // `frontend/src/lib/tx-result.ts`. The pre-Phase-A code coalesced
+  // `Transaction || FailedTransaction || result` into a single
+  // `txData`, masking chain failures. Both call sites now share the
+  // same FailedTransaction branching that `useEquipmentActions` has
+  // had since the loadout PTB landed.
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'frontend', 'src', 'components', 'fight', 'matchmaking-queue.tsx'),
+    'utf8',
+  );
+  truthy(
+    src.includes('from "@/lib/tx-result"'),
+    'imports the shared tx-result helper module',
+  );
+  truthy(
+    src.includes('assertTxSucceeded(result, "create_wager")'),
+    'create_wager path calls assertTxSucceeded with the context label',
+  );
+  truthy(
+    src.includes('assertTxSucceeded(result, "accept_wager")'),
+    'accept_wager path calls assertTxSucceeded with the context label',
+  );
+  truthy(
+    src.includes('extractTxDigest(result)'),
+    'accept_wager path uses extractTxDigest for the digest',
+  );
+  truthy(
+    !src.includes('resultAny.Transaction || resultAny.FailedTransaction || resultAny'),
+    'old OR-coalesce expression removed',
+  );
+  truthy(
+    src.includes('canAcceptWagerWithBalance'),
+    'balance gate is invoked in the accept-handler',
+  );
+
+  // Static pin on the shared helper itself — the module exists, exports
+  // the public surface, and the equipment helper still uses it (so we
+  // didn't accidentally leave a fork).
+  const txResultSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'frontend', 'src', 'lib', 'tx-result.ts'),
+    'utf8',
+  );
+  truthy(
+    txResultSrc.includes('export function assertTxSucceeded'),
+    'tx-result exports assertTxSucceeded',
+  );
+  truthy(
+    txResultSrc.includes('export function humanizeChainError'),
+    'tx-result exports humanizeChainError',
+  );
+  truthy(
+    txResultSrc.includes('export function extractTxDigest'),
+    'tx-result exports extractTxDigest',
+  );
+  truthy(
+    txResultSrc.includes('export type AbortCodeMap'),
+    'tx-result exports the AbortCodeMap type',
+  );
+
+  const equipSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'frontend', 'src', 'hooks', 'useEquipmentActions.ts'),
+    'utf8',
+  );
+  truthy(
+    equipSrc.includes('from "@/lib/tx-result"'),
+    'useEquipmentActions imports from shared tx-result (no fork)',
+  );
+  truthy(
+    equipSrc.includes('assertTxSucceeded(result, "save_loadout", EQUIPMENT_ABORT_CODES)'),
+    'useEquipmentActions calls the shared helper with its abort-code map',
+  );
+}
+
 // ===== Runner =====
 
 function run(): void {
@@ -368,6 +633,21 @@ function run(): void {
   testDecideAcceptOutcomeQueuedAutoRollback();
   testDecideAcceptOutcomeQueuedClientGated();
   testDecideAcceptOutcomeBothBusy();
+
+  // Phase A (2026-05-17) — Bug A pre-flight balance check + Bug B
+  // FailedTransaction branching, both filed in
+  // STATE_OF_PROJECT_2026-05-16.md and shipped in this session.
+  testBalanceGateInsufficient();
+  testBalanceGateExactlyEqual();
+  testBalanceGateJustEnough();
+  testBalanceGateWellFunded();
+  testBalanceGateLoadingState();
+  testBalanceGateZeroBalance();
+  testBalanceGateCustomReserve();
+  testBalanceGateLobbyShortCircuit();
+  testBalanceGateOwnWagerShortCircuit();
+  testBalanceGateDefaultReserveValue();
+  testFailedTransactionBranchingShape();
 
   const total = passes + failures;
   console.log('\n──────────────────────────────────────────────────');
