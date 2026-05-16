@@ -71,6 +71,22 @@ const MVR_OVERRIDES_BY_NETWORK: Record<string, Record<string, string>> = {
 // `slushWebWalletInitializer(slushWalletConfig)` itself). We
 // intentionally do *not* pass an explicit `registerSlushWallet` call
 // here to avoid a double-registration.
+//
+// `redirectUrl` is pinned to `<origin>/auth/callback` rather than left
+// to Enoki's default (`window.location.href.split("#")[0]`). The default
+// sends whatever URL the user happens to be on — root, profile, fight
+// room — and any of those would need a separate registration in every
+// OAuth provider console (Google, Twitch). Pinning a single canonical
+// path means one entry per provider matches dev + prod, and the
+// matching landing page at `src/app/auth/callback/page.tsx` keeps the
+// popup from rendering a 404 if Enoki's polling loop closes it late.
+// This module is client-only (loaded via the `ssr: false` dynamic
+// import in `src/app/page.tsx`), so `window` is always defined here.
+
+const ENOKI_REDIRECT_URL =
+  typeof window !== "undefined"
+    ? new URL("/auth/callback", window.location.origin).toString()
+    : undefined;
 
 const ENOKI_INITIALIZER =
   ENOKI_READY && ENOKI_CONFIG.apiKey
@@ -79,7 +95,7 @@ const ENOKI_INITIALIZER =
         providers: Object.fromEntries(
           ENOKI_CONFIG.providers.map((p) => [
             p.provider,
-            { clientId: p.clientId },
+            { clientId: p.clientId, redirectUrl: ENOKI_REDIRECT_URL },
           ]),
         ),
       })

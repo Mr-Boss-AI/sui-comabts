@@ -97,6 +97,26 @@ function main(): void {
   contains(dappKit, 'apiKey: ENOKI_CONFIG.apiKey', 'passes the Enoki API key');
   contains(dappKit, 'providers: Object.fromEntries(', 'builds providers map from the config snapshot');
   contains(dappKit, 'walletInitializers: ENOKI_INITIALIZER ? [ENOKI_INITIALIZER] : []', 'plugs the initializer into createDAppKit');
+  // Pin the redirectUrl wiring so a future refactor doesn't silently
+  // revert to Enoki's window.location.href default — which sends a
+  // different redirect_uri from each page the user lands on, breaking
+  // OAuth provider strict-match validation. Bug originally tripped by
+  // Twitch returning `redirect_mismatch` against a registered
+  // `/auth/callback` while Enoki sent bare `/`.
+  contains(dappKit, 'ENOKI_REDIRECT_URL', 'declares an explicit redirect URL constant');
+  contains(dappKit, "new URL(\"/auth/callback\", window.location.origin)", 'pins redirect URL to <origin>/auth/callback');
+  contains(dappKit, 'redirectUrl: ENOKI_REDIRECT_URL', 'passes the pinned redirect URL to every provider entry');
+  // Pair the redirect URL with a landing route so the popup doesn't
+  // render a 404 if the polling loop closes it late.
+  const callbackPath = 'frontend/src/app/auth/callback/page.tsx';
+  if (!existsSync(join(ROOT, callbackPath))) {
+    fail('auth/callback route exists', `expected ${callbackPath} to be present`);
+  } else {
+    ok('auth/callback route exists');
+    const callback = readSrc(callbackPath);
+    contains(callback, '"use client"', 'callback page is a client component');
+    contains(callback, 'useSearchParams', 'callback page reads OAuth error query params');
+  }
   // The dapp-kit core auto-registers Slush by default when slushWalletConfig
   // is not explicitly null — pin that we did NOT pass `slushWalletConfig:
   // null` (which would disable Slush) AND that we did not double-register
@@ -157,7 +177,21 @@ function main(): void {
   contains(provider, 'auth_challenge', 'auth_challenge -> signed-message flow unchanged');
 
   const serverHandler = readSrc('server/src/ws/handler.ts');
-  contains(serverHandler, 'verifyPersonalMessageSignature', 'server still verifies via verifyPersonalMessageSignature (zkLogin signatures pass through unchanged)');
+  // The auth handshake must call the SuiClient-injecting wrapper, not
+  // `verifyPersonalMessageSignature` directly. zkLogin signatures need
+  // `client.core.verifyZkLoginSignature(...)` to validate the on-chain
+  // JWK + ZK proof; without the client the verifier throws "A Sui Client
+  // (GRPC, GraphQL, or JSON RPC) is required to verify zkLogin
+  // signatures". The earlier static check `contains('verifyPersonalMessageSignature')`
+  // passed but the live sign-in broke for every Enoki-derived account.
+  contains(serverHandler, "import { verifyAuthSignature } from '../utils/sui-verify'", 'handler imports the SuiClient-injecting wrapper, not the raw verifier');
+  contains(serverHandler, 'verifyAuthSignature(messageBytes, signature, challenge.walletAddress)', 'handler calls the wrapper in the auth_signature flow');
+  notContains(serverHandler, "from '@mysten/sui/verify'", 'handler no longer imports the raw verifier directly (forces SuiClient injection through the wrapper)');
+
+  const suiVerify = readSrc('server/src/utils/sui-verify.ts');
+  contains(suiVerify, 'export async function verifyAuthSignature', 'sui-verify.ts exports the wrapper');
+  contains(suiVerify, 'verifyPersonalMessageSignature(message, signature, {', 'wrapper delegates to the @mysten/sui verifier');
+  contains(suiVerify, 'client,', 'wrapper passes the shared SuiClient (required for zkLogin)');
 
   // ============================================================
   // [7] Plan + handoff alignment — the user's stated provider choice

@@ -48,6 +48,44 @@
 
 ---
 
+## Live verification — Google path ✅ (Twitch path pending)
+
+End-to-end signin → fund → mint sequence confirmed on testnet under a
+zkLogin-derived wallet:
+
+| Step | Result |
+|---|---|
+| Sign in with Google (Enoki popup → JWT → ZK proof) | ✅ |
+| Derived Sui address | `0x03c33df0c97d4dfb3792d340bbf83891e2a20d653155874fd37a350ad443985f` |
+| Testnet faucet drip (1.00 SUI) | ✅ |
+| Mint character "ShakaLiX" on-chain | ✅ (~0.003 SUI gas, balance 1.00 → 0.997) |
+| Loadout / inventory / nav state hydrated under zkLogin wallet | ✅ |
+
+**Twitch sign-in:** wiring passes the QA gauntlet but has not been
+walked through live. Next session: same checklist as Google, expect
+no surprises since the Enoki provider entries share a code path.
+
+### Three live-fix patches landed during verification
+
+The Phase A wrap commit (`174ff44`) booted, but two bugs surfaced
+during the first real signin attempt:
+
+| Bug | Root cause | Fix |
+|---|---|---|
+| Twitch returns `redirect_mismatch` and the popup lingers on a 404 | Enoki defaulted `redirect_uri` to `window.location.href.split("#")[0]`, sending a different URI from every page — the OAuth providers only had `/auth/callback` registered | **`frontend/src/config/dapp-kit.ts`** pins `redirectUrl` to `<origin>/auth/callback` per provider; **`frontend/src/app/auth/callback/page.tsx`** NEW — minimal client route that surfaces OAuth `error` + `error_description` if the popup lingers, so future misconfig fails loud not silent |
+| `Signature verification failed: A Sui Client (GRPC, GraphQL, or JSON RPC) is required to verify zkLogin signatures` toast after Google popup closes | `server/src/ws/handler.ts` called `verifyPersonalMessageSignature(...)` without a client — Ed25519 sigs verify locally, zkLogin sigs need `client.core.verifyZkLoginSignature(...)` to validate the on-chain JWK + ZK proof | **`server/src/utils/sui-verify.ts`** exports a new `verifyAuthSignature(message, signature, address)` wrapper that always injects the shared `SuiJsonRpcClient`; **`server/src/ws/handler.ts`** swapped over (single call site) |
+| Doc drift | `.env.local.example` told future setups to register `http://localhost:3000/` — which would reproduce the redirect_mismatch | **`frontend/.env.local.example`** Google + Twitch sections rewritten to require the EXACT `<origin>/auth/callback` path |
+
+QA gauntlet `qa-zklogin-wallet-registration.ts` grew **44 → 55**:
++9 pinning the redirect URL + callback route, +6 pinning the
+SuiClient injection (the prior assertion that "the server still
+verifies via `verifyPersonalMessageSignature`" was the canary that
+didn't sing — it confirmed the symbol still appeared but never
+checked that a SuiClient was wired through). The new assertions
+would have caught the regression statically.
+
+---
+
 ## Tests
 
 **2,307 / 2,307 PASS across 37 suites** (+72 from 2,235 baseline).
@@ -84,6 +122,19 @@ Bug A (insufficient-SUI silent fail) and Bug B (frontend ignores
 the click *before* the wallet popup; the SDK's error string surfaces
 to the user verbatim if a tx fails on chain after sign.
 
+## Backlog (new this session)
+
+- **Wager level-mismatch warning** — surface a confirm modal on
+  ACCEPT when the level gap between challenger and acceptor exceeds
+  2, before the wallet popup fires. Same gate-shape as the Bug A
+  balance pre-flight: a pure predicate in
+  `frontend/src/lib/wager-accept-gate.ts` (sibling to
+  `canAcceptWagerWithBalance`), wired into the same
+  `handleAcceptWager` path in `frontend/src/components/fight/matchmaking-queue.tsx`
+  ahead of `signer.signAndExecuteTransaction`. No contract change,
+  no server change. Open question for spec: hard-block above some
+  threshold (e.g. ±5) vs. confirm-only at all gaps > 2.
+
 ---
 
 ## Server status
@@ -116,17 +167,20 @@ Three live-test checklists for the user to walk through:
 ### 1. zkLogin sign-in
 
 ```
-[ ] Create an Enoki application at https://portal.enoki.mystenlabs.com/
-[ ] Copy NEXT_PUBLIC_ENOKI_API_KEY into frontend/.env.local
-[ ] https://console.cloud.google.com/  ->  OAuth Web client; redirect URI = http://localhost:3000/
-[ ] Copy NEXT_PUBLIC_GOOGLE_CLIENT_ID into frontend/.env.local
-[ ] (Optional, but recommended for gaming audience) Twitch app at https://dev.twitch.tv/console
-[ ] Copy NEXT_PUBLIC_TWITCH_CLIENT_ID into frontend/.env.local
-[ ] Restart frontend (Next.js inlines NEXT_PUBLIC_* at build time)
-[ ] Open http://localhost:3000/ -> Connect Wallet
-[ ] Verify "Sign in with Google" + "Sign in with Twitch" appear in the connect modal
-[ ] Sign in with Google -> Google OAuth popup -> back to dapp -> auth_challenge -> auth_ok
-[ ] Confirm character creation / restore flow works the same as with a browser-injected wallet
+[x] Create an Enoki application at https://portal.enoki.mystenlabs.com/
+[x] Copy NEXT_PUBLIC_ENOKI_API_KEY into frontend/.env.local
+[x] https://console.cloud.google.com/  ->  OAuth Web client
+    NOTE: redirect URI must be EXACTLY http://localhost:3000/auth/callback
+    (was http://localhost:3000/ in the original plan — see live-fix patches above)
+[x] Copy NEXT_PUBLIC_GOOGLE_CLIENT_ID into frontend/.env.local
+[x] Twitch app at https://dev.twitch.tv/console (same /auth/callback URI)
+[x] Copy NEXT_PUBLIC_TWITCH_CLIENT_ID into frontend/.env.local
+[x] Restart frontend (Next.js inlines NEXT_PUBLIC_* at build time)
+[x] Open http://localhost:3000/ -> Connect Wallet
+[x] Verify "Sign in with Google" + "Sign in with Twitch" appear in the connect modal
+[x] Sign in with Google -> Google OAuth popup -> back to dapp -> auth_challenge -> auth_ok
+[x] Confirm character creation flow works (minted "ShakaLiX" on 0x03c3…985f)
+[ ] Sign in with Twitch — same flow, not yet live-tested
 ```
 
 ### 2. Bug A pre-flight repro (the 2026-05-16 reproduction)

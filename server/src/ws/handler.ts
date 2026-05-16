@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
 import jwt from 'jsonwebtoken';
-import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
+import { verifyAuthSignature } from '../utils/sui-verify';
 import type WebSocket from 'ws';
 import type {
   ClientMessage,
@@ -526,9 +526,7 @@ async function handleAuthSignature(client: ConnectedClient, msg: ClientMessage):
 
   try {
     const messageBytes = new TextEncoder().encode(challenge.message);
-    await verifyPersonalMessageSignature(messageBytes, signature, {
-      address: challenge.walletAddress,
-    });
+    await verifyAuthSignature(messageBytes, signature, challenge.walletAddress);
   } catch (err: any) {
     sendError(client, `Signature verification failed: ${err?.message || 'invalid'}`);
     return;
