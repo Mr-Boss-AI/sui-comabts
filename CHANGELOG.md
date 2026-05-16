@@ -12,6 +12,820 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — Phase 3 fight-room redesign + Phase 2 wrap, 2026-05-16
+
+Phase 2 visual-QA + polish track. Fight-room redesigned through three
+iterations in a single session against a user-supplied reference
+mockup. No contract change. No new server endpoint. Same on-chain
+package ID (v5). Branch `feature/phase-2-design`.
+
+### Added
+
+- **`scripts/qa-fight-arena-layout.ts` — NEW (71 assertions).** Pins
+  the Phase 3 fight-room structural shape across grid templates
+  (`1fr auto 1fr` top row, `1fr 240px 1fr` middle row, full-width
+  bottom row), `ZoneSelector variant="list"` mounting, `kind="atk"`
+  / `kind="blk"` cells, the three inline icon components, the
+  `rgba(226,75,74,0.6)` red glow + `rgba(55,138,221,0.6)` blue glow
+  rgbas, the `zs-pulse-red` / `zs-pulse-blue` keyframes, and a
+  removed-v1-artefact guard against silent reverts.
+- **`hideHpBar?: boolean` prop on `MiniEquipmentFrame`.** Single
+  conditional render guard inside the existing read-only doll. Lets
+  the fight-room reuse the same 10-slot frame the Player Profile
+  modal uses without duplicating the HP bar (HP renders once, in the
+  arena's top-row HP card).
+- **`ZoneSelector variant: "body" | "list"` prop.** Defaults to
+  `"body"` (back-compat with the previous SVG silhouette).
+  `"list"` mounts the new compact row-paired button column built for
+  the fight-room move panel.
+- **Inline Tabler-style outline SVGs** (`IconSword`, `IconShield`,
+  `IconCheck`) in `zone-selector.tsx`. No npm dependency added —
+  the spec implied a Tabler package was loaded; nothing of the kind
+  was actually in `frontend/package.json`.
+- **`PULSE_CSS` keyframes scoped inside `zone-selector.tsx`** —
+  `zs-pulse-red` and `zs-pulse-blue`, 1.4 s ease-in-out, driven by
+  the per-button `selected` flag.
+
+### Changed
+
+- **`frontend/src/components/fight/fight-arena.tsx` — full rewrite.**
+  Old Tailwind `max-w-5xl` flex column replaced with a `maxWidth:
+  1280` CSS-grid layout in three rows:
+  - Top row `grid 1fr auto 1fr` — left HP card · centre TurnCard
+    (TurnTimer · TURN N · wager SUI) · right HP card. New `HpCard` +
+    `TurnCard` sub-components.
+  - Middle row `grid 1fr 240px 1fr` — read-only `MiniEquipmentFrame`
+    on each flank, compact `ZoneSelector variant="list"` between
+    them, Lock-in CTA anchored at the bottom of the centre column.
+  - Bottom row — full-width Battle Log with `maxHeight: 200,
+    overflowY: auto`.
+  Block-pair / shield-line / dual-wield / shield-mode click logic
+  untouched. WS surface (`fight_action { attackZones, blockZones }`)
+  untouched. HP fill thresholds, opponent-disconnect banner,
+  fight-result modal, fight-outcome-ack write — all pass-through.
+- **`frontend/src/components/fight/zone-selector.tsx` — list variant
+  restructured to a row-paired grid.** Single grid
+  `grid-template-columns: 1fr auto 1fr` × `grid-template-rows: auto
+  repeat(5, auto)`. Header row carries `ATK n/max` (red, left) +
+  `BLK n/max` (blue, right). Each of the five zone rows is `ATK
+  button · bronze zone label · BLK button` so the two buttons for
+  the same body part stay horizontally aligned around the zone name.
+  Buttons render in the game-theme chrome (`var(--r-sharp)`,
+  `var(--sh-plate-sm)`, `var(--ls-button)`). Selected state: oriented
+  accent border + `0 0 12px 2px` glow + 1.4 s pulse + corner ✓ badge.
+- **`frontend/src/components/social/mini-equipment-frame.tsx`** —
+  HP bar conditionally rendered behind the new `hideHpBar` prop;
+  default behaviour preserved (Player Profile modal still renders
+  the HP gauge inside the doll).
+- **`frontend/src/components/layout/navbar.tsx`** — header sized
+  ~20 % larger across the board (avatar 36 → 44, name 14 → 17 px,
+  badges 10 → 12 px, balance pill 112 × 31 → 134 × 37). Outer row,
+  left cluster, and nav-tab container all switched to `flex-wrap:
+  wrap` with `clamp()`-based padding / gaps / fonts so the right
+  cluster drops to a new line on narrow viewports instead of
+  overlapping the wordmark.
+- **`frontend/src/components/v2/wordmark.tsx`** — navbar variant
+  bumped 32 → 38 px (sui + combats), stroke 1.5 → 1.8, drop-shadow
+  offset unchanged.
+- **`scripts/qa-fight-arena-layout.ts` pin count** — 60 (v1) → 57
+  (v2, removed v1 abbreviations alongside their source) → 71 (v3,
+  grid templates + button kinds + icon components + glow rgbas +
+  pulse keyframes).
+
+### Bug log (filed, not fixed this session)
+
+- **Bug A — Insufficient-SUI silent fail on `accept_wager`.**
+  Acceptor with 0.501 SUI on a 0.5 SUI wager: wallet signs, chain
+  tx fails (escrow lock leaves no gas headroom), `WagerMatch.status`
+  stays at 0, server's `decideAcceptOutcome` correctly rejects but
+  the toast wording doesn't tell the user what really happened.
+  Pre-flight balance check on the frontend is the right fix.
+- **Bug B — Frontend ignores `FailedTransaction`.**
+  `matchmaking-queue.tsx:398-407` grabs a digest from either the
+  `Transaction` or `FailedTransaction` SDK wrapper and proceeds to
+  send `wager_accepted` over the WS either way. Two-branch fix:
+  throw on `FailedTransaction`, surface the SDK error.
+- **Bug C — Battle log asymmetry (needs re-verify).**
+  Pre-redesign symptom: battle log lines occasionally appeared on
+  one tab and not the other during two-wallet live fights. **Not
+  re-tested** against the Phase 3 fight-room redesign this session.
+  DamageLog is pass-through — `fight.log` flows in unchanged — so
+  any asymmetry would live in `server/src/ws/fight-room.ts`'s
+  broadcast of `fight_state` updates, not the renderer.
+
+### Parked WIPs landed alongside in the same wrap commit
+
+The user asked for one wrap commit. Today's fight-room redesign and
+header polish land alongside the multi-session pre-existing parked
+files — DM pipeline (`lib/dm-*`, `lib/messaging.ts`,
+`lib/player-bucket.ts`), Tavern handlers + data modules
+(`server/src/ws/tavern-handlers.ts`,
+`server/src/data/{dm-channels,dm-messages,fight-requests,player-profile,presence}.ts`,
+migrations `003_tavern.sql` + `004_dm_messages.sql`), server
+`fight-room.ts` + `handler.ts` + `index.ts` + `setup-db.mjs`,
+frontend `game-provider.tsx` + `dapp-kit.ts` + `useGameStore.ts` +
+`ws-messages.ts` + `tsconfig.json` + `package*.json`, 9 new
+tavern/DM QA scripts (53 + 36 + 65 + 65 + 51 + 58 + 72 + 66 + 42
+= 508 assertions — already counted in the 2026-05-14 gauntlet
+total), `TAVERN_DESIGN.md`, `Gemini.md`, and the May-13
+screenshots. Per-bullet content for those files is *not* unpacked
+here — they predate this session and were already covered in their
+respective qa scripts. Listed for traceability; the wrap commit is
+the single landing point.
+
+### Test totals
+
+- `qa-fight-arena-layout` — **71** (NEW)
+- `qa-fight-pause` — 46 (unchanged, regression guard)
+- `qa-layout-primitives` — 155 (unchanged)
+- `qa-mini-equipment-frame` — 50 (unchanged after `hideHpBar`)
+- Frontend `tsc --noEmit` — clean
+- 35 / 35 Move unit tests — unchanged
+- **Total: 2,235 / 2,235 across 36 suites** (+71 from
+  `qa-fight-arena-layout`)
+
+### References
+
+- `STATE_OF_PROJECT_2026-05-16.md` — canonical state for this session.
+- `SESSION_HANDOFF.md` — single-page handoff (now 2026-05-16).
+- `~/Downloads/fight_room_layout_v5_tall_dolls.html` — the user's
+  reference mockup the v1 layout was ported from.
+
+---
+
+## [Unreleased] — Bucket 3 hotfix #7: presence-stub broadcast, 2026-05-08
+
+### The bug retest that prompted this
+
+Two-wallet live chat test (Mr_Boss + Sx). The Tavern shipped earlier
+this week works visually, the DM transport (hotfix #6) round-trips
+cleanly, but the player sidebar showed asymmetric stub data:
+
+- Mr_Boss view: Sx rendered as `0xd05ae8…` Lv 1 ELO 1000 in the
+  Novice 1-3 bucket. Wrong identity, wrong bucket.
+- Sx view: Mr_Boss rendered correctly as `Mr_Boss_v5.1` Lv 6 ELO 982.
+- "X online" counter asymmetric: Mr_Boss saw 2, Sx saw 1. Sx was
+  missing himself from his own onlinePlayers map.
+- Profile-modal click on either side returned the correct full
+  record — `get_player_profile` reads through `getPlayerProfile()`
+  with its own (in-memory → Supabase → on-chain DOF) resolve chain
+  that doesn't depend on the presence row.
+
+### Fixed
+
+- **`server/src/data/presence.ts::upsertPresence` priority order.**
+  Pre-fix the fallback chain for `characterName` / `level` /
+  `rating` was `input → existing → character → stub`. Once a stub
+  was written into the row (because an `enter_room` raced ahead of
+  `handleRestoreCharacter`), every subsequent heartbeat preserved
+  the stub because `existing` won the `??` chain. The character
+  store was never re-consulted. Fixed by swapping to
+  `input → character → existing → stub` so the canonical store
+  wins whenever it has real data — a presence row that started
+  life as a stub gets corrected on the very next upsert.
+- **`UpsertResult.dataChanged`.** New flag lets callers detect
+  identity-field updates (name/level/rating) so they can
+  re-broadcast a `player_joined` to peers holding stale stubs.
+- **`server/src/ws/tavern-handlers.ts::broadcastPresenceUpdate`.**
+  Centralised broadcast helper. Wire choice:
+  - `inserted || dataChanged` → `player_joined` (full row). The
+    frontend's `ADD_ONLINE_PLAYER` reducer filters by wallet then
+    appends, so a re-broadcast cleanly REPLACES any stub a peer
+    was holding.
+  - Else `statusChanged || roomChanged` → `player_status_changed`
+    (lighter — just the new status fields).
+  - Else silent.
+  Wired into `announcePlayerOnline`, `handleEnterRoom`,
+  `handlePresenceHeartbeat`, `broadcastFightStatusChange`. Pre-fix
+  `handleEnterRoom` only ever fired `player_status_changed` —
+  which the frontend's `UPDATE_PLAYER_STATUS` reducer no-ops for
+  entries that don't already exist. So a player whose
+  `announcePlayerOnline` was skipped never landed in any peer's
+  onlinePlayers via the broadcast path.
+- **`server/src/ws/handler.ts::handleRestoreCharacter` re-announce.**
+  Both the cached-existing path and the fresh-restore path now
+  call `announcePlayerOnline(tavernCtx, client, 'tavern')` after
+  the in-memory record is settled. The original auth's announce
+  was almost certainly skipped because `getCharacterByWallet` was
+  undefined at the time (in-memory empty after server restart, no
+  Supabase row to fall back on). Re-announcing post-restore
+  surfaces the player to peers immediately instead of waiting for
+  the next ~20s heartbeat to pick up the data graduation.
+
+### Test totals
+
+- All seven tavern-side gauntlets re-verified clean post-fix —
+  the changes are strictly additive to the wire/result shape and
+  no existing assertion broke:
+  - `qa-tavern-presence` — 66 PASS
+  - `qa-tavern-handlers` — 72 PASS
+  - `qa-tavern-fight-requests` — 58 PASS
+  - `qa-tavern-dm-channels` — 51 PASS
+  - `qa-tavern-sidebar` — 42 PASS
+  - `qa-dm-messages` — 53 PASS
+  - `qa-dm-plaintext-pipeline` — 36 PASS
+- A new `qa-tavern-presence` section pinning the priority swap +
+  `dataChanged` semantics + `broadcastPresenceUpdate` helper is
+  the natural follow-up; deferred this session pending the live
+  re-test that closes the bug at observation time.
+
+### Live verification (after the user refreshes both tabs)
+
+1. Refresh both browsers (Mr_Boss + Sx).
+2. Both auth via JWT → server fires either `auth_ok` (with
+   character if Supabase has one) OR `restore_character` follow-up.
+3. Either path now ends with `announcePlayerOnline` → both clients
+   receive `player_joined { player: { name: "<Char>", level: <L>,
+   rating: <R>, … } }`.
+4. **Expect:** Mr_Boss sidebar shows Sx in Early Game 4-6 bucket
+   with the correct name + level + rating. Sx sidebar shows
+   himself + Mr_Boss. Both show "2 online".
+5. Profile-modal click continues to work as it already did.
+
+---
+
+## [Unreleased] — Bucket 3 hotfix #6: DM transport swap (plaintext WS + Supabase), 2026-05-06 (later × 6)
+
+### Strategic decision
+
+Hotfix #5's pipeline extraction + breadcrumbs confirmed the failure
+shape: the Sui Stack Messaging SDK hangs in
+`executeCreateChannelTransaction`'s prep phase, BEFORE the wallet
+popup. The SDK is alpha and not production-grade. We're not waiting
+for beta to ship a working DM surface. The Tavern stays — sidebar,
+profile modal, wager challenges, friendly fights, fight-request
+toasts, presence service, all unchanged. The DM transport swaps for
+plain WebSocket + Supabase persistence (the same shape global Tavern
+chat uses). When the SDK reaches beta we flip a single env var to
+re-enable the encrypted path.
+
+### Added
+
+- **`server/src/data/migrations/004_dm_messages.sql`** — new table
+  for DM bodies. Foreign key to `dm_channels(channel_id)` so
+  cascade-delete works. Index on `(channel_id, created_at DESC, id
+  DESC)` for the panel's "recent N" history fetch.
+- **`server/src/data/dm-messages.ts`** — new service. In-memory
+  store keyed by channelId (tail capped at 200), Supabase persistence
+  fire-and-forget. `insertMessage`, `getHistory({ limit, beforeId })`,
+  `rehydrateRecentFromDb()`. Validates body length (1..2000) and
+  rejects self-sends at the data layer.
+- **`syntheticChannelIdForPair(a, b)` (in `dm-channels.ts`)** —
+  deterministic sha256-hashed channel id for plaintext-mode pairs.
+  Looks like a real on-chain id (`0x` + 64 hex) so `registerChannel`
+  accepts it without special-casing. Idempotent: A,B and B,A always
+  produce the same id.
+- **`getOrCreateSyntheticChannel(a, b, createdBy)`** — lazy registry
+  helper for the plaintext WS handler's first-send path. No separate
+  `register_dm_channel` round-trip from the client.
+- **Server WS handlers `handleDmSend` + `handleDmHistory`** in
+  `tavern-handlers.ts`. dm_send: validate → lazily register channel
+  (push `dm_channel_registered` to both sides on first send) →
+  persist row → echo `dm_message_sent` to sender + push
+  `dm_message_received` to recipient + push `dm_unread_changed`
+  carrying `senderWallet`. dm_history: validate → return chronological
+  page + clear unread.
+- **`frontend/src/lib/dm-plaintext-pipeline.ts`** — pure async
+  pipeline mirror of `dm-send-pipeline.ts` (the encrypted path).
+  `runPlaintextDmSend(deps, params)` and `runPlaintextDmHistory(deps,
+  params)` use the deps pattern (`wsSend` + `subscribe` + `onStep`)
+  so tests can mock the WS surface end to end. Each pipeline owns
+  its own timeout + cleanup so a hung server can't leak subscribers.
+- **`scripts/qa-dm-plaintext-pipeline.ts` (NEW gauntlet, 36 PASS)**
+  — happy send + clientId echo match, server `error` rejects,
+  server hang → timeout + no late cross-talk, concurrent sends with
+  different clientIds resolve to their own echoes, history happy
+  + null-channel + unmatched-peer-ignored, wsSend throws → pipeline
+  rejects + cleans up subscriber.
+- **`scripts/qa-dm-messages.ts` (NEW gauntlet, 53 PASS)** —
+  `syntheticChannelIdForPair` determinism + canonical-pair sanity,
+  `insertMessage` validation (empty / over-cap / self-send / bad
+  channel), happy insert with body trim + lowercased participants,
+  `getHistory` chronological order + limit + unknown channel,
+  `getOrCreateSyntheticChannel` idempotency.
+- **`qa-tavern-handlers.ts` extended (40 → 72 PASS, +32)** — full
+  WS-layer coverage of dm_send happy path, dm_send validation
+  (empty / over-cap / self / missing-clientId), dm_history happy
+  + empty + non-participant + auth-required.
+
+### Changed
+
+- **`frontend/src/components/social/dm-panel.tsx`** — branches on
+  `process.env.NEXT_PUBLIC_DM_TRANSPORT`:
+  - `plaintext` (default): no signer, no SDK; `dm_history` on open,
+    `dm_send` + optimistic bubble + clientId-echo swap to confirmed,
+    live `dm_message_received` append for the open channel,
+    auto-clear unread on each incoming. Send button shows
+    "Send" → "Sending…" → "Send" (no "Signing…", no Cancel button).
+    Disclosure banner: "Private messages — visible only to you and
+    the other player. Stored on the SUI Combats server (encrypted in
+    transit; plaintext at rest). End-to-end encryption returns when
+    the Sui Stack Messaging SDK reaches beta."
+  - `encrypted`: the existing Hotfix #5 path is preserved verbatim.
+    Tree-shakes out of the plaintext build (NEXT_PUBLIC_* env vars
+    are inlined at build time so the unused branch's body drops).
+- **`frontend/src/types/ws-messages.ts`** — new wire shapes:
+  client→server `dm_send` + `dm_history`, server→client
+  `dm_message_sent` (echo with clientId) + `dm_message_received` +
+  `dm_history`. New `DmMessageWire` interface.
+- **`frontend/src/lib/messaging.ts`** — KEPT INTACT, still imports
+  the messaging/seal/walrus deps. The encrypted send path is unused
+  by default but compiles cleanly so flipping the flag is a
+  one-env-var change.
+
+### Migration path back to encrypted DMs
+
+When the Sui Stack Messaging SDK reaches beta:
+
+1. Set `NEXT_PUBLIC_DM_TRANSPORT=encrypted` and rebuild.
+2. Run `qa-messaging-client.ts` (still in CI) — pins the SDK shape.
+3. Run a two-wallet live walkthrough; the encrypted pipeline lights
+   up exactly as it did before.
+
+The plaintext-side data (`dm_messages` rows + synthetic-id channel
+rows) remains in Supabase. They don't conflict with on-chain channel
+ids because the synthetic ids are sha256 hashes — collision space
+disjoint from Sui object id space.
+
+### Test totals
+
+- **1582 → 1703 PASS** across **27 → 29 static gauntlets** (+121
+  this hotfix). All previous gauntlets still pass.
+
+### Live verification (after CLI ships)
+
+1. Two wallets, click each other's profile, Send Message.
+2. Type "hi" → Send → instant delivery, no popup, ~50 ms RTT.
+3. Recipient sees toast + unread pip, opens panel, sees message.
+4. Reply "yo" → instant delivery back; both panels update live.
+5. Refresh both tabs → history loads from Supabase via `dm_history`.
+
+---
+
+## [Unreleased] — Bucket 3 hotfix #5: pipeline extraction + master timeout + cancel, 2026-05-06 (later × 5)
+
+### The bug retest that prompted this
+
+Live retest after hotfix #4 still hung. Mr_Boss approved the
+Slush popup, the create_channel tx landed (3 created objects,
+~0.015 SUI gas debited), but the DM panel stuck on "Signing…"
+indefinitely. After 60 s+ the wrapper's per-call timeout never
+fired in the user-observable surface. Two possible causes, both
+addressed here:
+
+1. The bug shape we couldn't catch with wrapper-only unit tests:
+   the wrapper rejects a hanging promise correctly when called
+   directly (qa-messaging-client §11 confirms), but the FULL
+   handleSend flow had never been exercised end to end with a
+   mocked SDK. The integration could fail at the layer above the
+   wrapper (a forgotten await, a swallowed rejection, the dynamic
+   `await import("@/lib/messaging")` for resolveMemberCap inside
+   the closure) without any unit test catching it.
+2. Browser HMR cache. Next.js Turbopack doesn't always hot-reload
+   new files (`dm-toasts.tsx`) cleanly. The user's tab may have
+   been serving the pre-hotfix-#4 bundle.
+
+### Fixed
+
+- **handleSend extracted to a pure pipeline.** All SDK + WS
+  orchestration moved to `frontend/src/lib/dm-send-pipeline.ts`
+  (`runDmSend`). The React component now wraps a single async
+  call; it's directly testable with mocked deps (the layer the
+  wrapper-only test couldn't reach).
+- **Master timeout race wraps the entire pipeline.** Every per-call
+  budget still applies, but `runDmSend` ALSO races itself against
+  `PIPELINE_BUDGETS.master` (default 90 s). Belt-and-braces against
+  a future SDK call site added without an inner wrapper.
+- **Static import for `resolveMemberCap`.** Replaces the
+  `await import("@/lib/messaging")` dynamic import inside the
+  React closure — kills one of the few unwrapped awaits and
+  removes a Next.js bundler edge case from the hot path.
+- **Manual Cancel escape hatch.** After 25 s of `sending=true`,
+  the panel surfaces a Cancel button so the user can recover even
+  if the JS event loop somehow stalls (browser bug, devtools
+  paused, OS suspend). The optimistic bubble flips to "failed",
+  the Sending lock releases, and the user can retry. Underlying
+  SDK promise may still complete in the background — fine, the
+  UI is reset.
+- **Console breadcrumbs for live debugging.** Every step of the
+  pipeline emits `console.log("[dm-send] <step> @ <iso>")` —
+  `createChannel:start`, `createChannel:done`, `registerWs:start`,
+  `registerWs:done`, `resolveMemberCap:start`, `resolveMemberCap:done`,
+  `sendMessage:start`, `sendMessage:done`, `notifyWs:start`,
+  `notifyWs:done`, `pipeline:done`. A contributor watching the
+  browser console during a stuck send sees exactly which step is
+  in flight without a re-run.
+- **Module-load version log.** `[dm-panel] pipeline v2 loaded` lands
+  in the browser console once per session. If a contributor reports
+  "the timeout fix isn't firing" the first thing to check is whether
+  this log appears — missing log = stale build (HMR miss).
+- **Live-state PUSH_DM_TOAST guard moved into the reducer.** The
+  `openDmPeer` check that decides whether to surface a toast was
+  reading from a stale closure of `state` inside the WS message
+  handler (memoized over `[walletAddress, socket, client]`).
+  Opening a panel just before a message landed could still surface
+  a redundant toast. The check now lives in the reducer where it
+  always sees live state. The peerName lookup (against
+  `state.onlinePlayers`) moved with it.
+
+### Added
+
+- **`frontend/src/lib/dm-send-pipeline.ts`** — `runDmSend(deps, params)`,
+  pure async, every side effect injected. `PIPELINE_BUDGETS` re-exports
+  the per-call budgets plus the master.
+- **`scripts/qa-dm-send-pipeline.ts` (NEW gauntlet)** — 65 PASS.
+  Mocks the messaging SDK to exercise every realistic failure
+  mode end to end:
+  - happy path emits register_dm_channel + notify_dm_sent in the
+    correct order with all required fields
+  - existing channel skips ensureChannel + register_dm_channel
+  - ensureChannel hangs forever → master timeout fires within
+    budget; NO WS sends emitted (recipient doesn't see a bogus
+    toast for a message that didn't actually send)
+  - unresolvable member cap → actionable error; register_dm_channel
+    fired but sendMessage NOT reached
+  - sendMessage hangs → master timeout fires; notify_dm_sent NOT
+    emitted (correct: nothing to notify about)
+  - sendMessage rejects → original error preserved (not replaced
+    by the timeout error)
+  - step trace is monotonic + complete on the happy path
+  - resolveMemberCap retry path covered
+- **`qa-tavern-handlers.ts §7c`** — case-mismatched recipient
+  lookup. Sender uses uppercase recipient address; server's
+  `sendToWallet` lookup canonicalises to lowercase; the recipient
+  (whose stored wallet is mixed case) still receives
+  `dm_unread_changed` and the `senderWallet` field is always
+  emitted lowercase regardless of input casing. (38 → 40 PASS, +2.)
+
+### Changed
+
+- `useGameStore.ts::PUSH_DM_TOAST` action shape changed from
+  `{ toast: ToastShape }` (caller-provided full shape) to
+  `{ senderWallet, channelId, unreadCount }` (reducer-derived
+  shape). The reducer now does the openDmPeer guard, the
+  onlinePlayers lookup for `peerName`, and the FIFO/coalesce/cap.
+
+### Test totals
+
+- **1515 → 1582 PASS** across **26 → 27 static gauntlets** (+67
+  this hotfix). All previous gauntlets still PASS.
+
+---
+
+## [Unreleased] — Bucket 3 hotfix #4: DM stall + recipient surface, 2026-05-06 (later × 4)
+
+### Fixed
+
+- **DM panel stuck on "Signing…" forever after the wallet popup
+  closed (Bug 1, two-wallet live test).** Mr_Boss → Sx send
+  reproduced: Slush popup approved, 3 created objects on chain
+  (channel + 2 member caps), but `setSending(false)` never fired
+  because one of the `await`-ed Sui Stack Messaging SDK promises
+  hung silently — wallet code returned, the underlying tx landed,
+  but the JS promise never resolved AND never rejected. The catch
+  + finally in `handleSend` was unreachable. Fix: wrap every SDK
+  call (`executeCreateChannelTransaction`,
+  `executeSendMessageTransaction`, `getChannelMessages`,
+  `getUserMemberCap`, `refreshSessionKey`) in a new
+  `withTimeout(promise, ms, label)` helper exported from
+  `lib/messaging.ts`. Per-call budgets live in `SDK_TIMEOUT_MS`
+  (createChannel: 60 s, sendMessage: 60 s, getMessages: 30 s,
+  resolveCap: 15 s, refreshSession: 30 s). On timeout the helper
+  rejects with `<label> timed out after Ns` so the panel's catch
+  block fires and the user sees an actionable error toast instead
+  of a stuck button.
+- **Recipient saw nothing when a DM landed (Bug 2, same live
+  test).** Sx received zero feedback — no toast, no unread
+  indicator, no panel auto-open — even after the sender's pipeline
+  was unblocked. Two layered gaps:
+  1. `dm_unread_changed` lacked the sender wallet, so even with
+     full state the recipient's UI couldn't attribute the
+     notification to a specific peer without a second
+     cross-reference round-trip.
+  2. The frontend played a chat sound + bumped a counter slice but
+     never surfaced any visible cue. The Tavern's player sidebar
+     also rendered no per-row unread badge — the data was there,
+     the UI wasn't.
+  Fix:
+  - Server `tavern-handlers.ts::handleNotifyDmSent` now adds
+    `senderWallet` (lowercased) to the `dm_unread_changed` payload.
+    The clear-path ack still omits it (no attribution applies).
+  - New `<DmToasts />` global mount renders a stacked toast
+    (top-right, beneath fight-request toasts) when
+    `dm_unread_changed` lands for a peer whose DM panel isn't
+    open. Click to open the panel, × to dismiss, auto-fades in
+    8 s. Coalesces by channelId, FIFO-capped at 4 simultaneous.
+  - `PlayerSidebar` rows now render a cyan unread-count pip when
+    the player has DMs the user hasn't read. Highlighting and
+    accessible labels included.
+  - `DmPanel` re-fetches messages from chain (a) immediately
+    after a successful send so the optimistic bubble snaps to
+    the SDK's real id+timestamp, and (b) every time
+    `dm_unread_changed` fires for the open channel — a peer
+    message arriving while the panel is open now shows live
+    instead of waiting for a remount.
+
+### Added
+
+- **`lib/messaging.ts::withTimeout(p, ms, label)`** — generic
+  promise/timeout race with cleanup. Exported so the QA gauntlet
+  can assert it directly.
+- **`lib/messaging.ts::SDK_TIMEOUT_MS`** — per-call budget table.
+  Exported for testing + auditability.
+- **`components/social/dm-toasts.tsx`** — new global mount,
+  stacked top-right beneath fight-request toasts.
+- **`useGameStore.ts` slice — `dmIncomingToasts`** — array of
+  `{ id, peerWallet, peerName, channelId, unreadCount, createdAt }`.
+  Reducer actions: `PUSH_DM_TOAST`, `DISMISS_DM_TOAST`,
+  `DISMISS_DM_TOASTS_FOR_CHANNEL`. `OPEN_DM` also dismisses
+  toasts targeting that peer.
+- **`qa-tavern-handlers.ts §7b`** — recipient notification
+  ordering: `dm_channel_registered` lands before `dm_unread_changed`,
+  the unread payload carries `senderWallet`, the sender does NOT
+  receive their own bump back. (30 → 38 PASS, +8.)
+- **`qa-tavern-dm-channels.ts §7b`** — recipient notification
+  preconditions: fresh-channel bump returns count=1, asymmetric
+  counters (sender keeps 0), `lastMessageAt` advances past
+  `createdAt`, idempotent no-op clears, totalUnread sums across
+  multiple peers. (42 → 51 PASS, +9.)
+- **`qa-messaging-client.ts §11`** — withTimeout regression
+  guard: helper rejects within the budget, error message names
+  the labelled call, fast-resolve passes through, fast-reject's
+  original error survives, every wrapped SDK method has a
+  budget entry, source-level audit asserts each SDK method is
+  wrapped in `withTimeout(`. (46 → 65 PASS, +19.)
+
+### Test totals
+
+- **1479 → 1515 PASS** across **26 static gauntlets** (+36 new).
+- Scope verified: only DM-related files modified
+  (`lib/messaging.ts`, `dm-panel.tsx`, `dm-toasts.tsx` (new),
+  `player-sidebar.tsx`, `game-screen.tsx`, `game-provider.tsx`,
+  `useGameStore.ts`, `ws-messages.ts`, `tavern-handlers.ts`,
+  three QA scripts).
+
+---
+
+## [Unreleased] — Bucket 3 hotfix #3: dapp-kit signer MVR, 2026-05-06 (later × 3)
+
+### Fixed
+
+- **`Failed to resolve package: @local-pkg/sui-stack-messaging`**
+  reappeared at first DM send — this time inside top-level
+  `@mysten/sui@2.15.0`'s `mvr.ts` (not the aliased sui 1.x). Root
+  cause: the messaging SDK passes `client: <sui 1.x>` to the
+  signer, but dapp-kit's `CurrentAccountSigner` ignores that and
+  serializes the tx through its OWN `SuiGrpcClient` (sui 2.x) — so
+  the MVR override has to live on BOTH clients (build-time +
+  sign-time). Added the same override to
+  `frontend/src/config/dapp-kit.ts::createClient`.
+
+### Added
+
+- **`qa-messaging-client.ts`** extended (40 → 46 PASS) with
+  section [10] that reads `config/dapp-kit.ts` and asserts the
+  messaging named package, the testnet package id, the `mvr`
+  option, and `mvr.overrides` are all present + match the
+  override in `lib/messaging.ts`. Diverging package ids between
+  the two files is what would re-introduce the bug.
+
+### Test totals
+
+- **1473 → 1479 PASS** across **26 static gauntlets**.
+
+---
+
+## [Unreleased] — Bucket 3 hotfix #2: MVR resolution, 2026-05-06 (later still)
+
+### Fixed
+
+- **`Failed to resolve package: @local-pkg/sui-stack-messaging`**
+  on first DM send (after the SDK alignment hotfix). Root cause:
+  the messaging SDK's contract bindings reference the package via
+  a named placeholder; at tx-build time the SDK relies on the
+  SuiClient's MVR layer to substitute. Our SuiClient was missing
+  both `network: 'testnet'` and an MVR override mapping. Fix:
+  pass `network: 'testnet'` + `mvr.overrides.packages = {
+  '@local-pkg/sui-stack-messaging': '0x984960...' }` to the
+  SuiClient constructor. Also pass an explicit
+  `packageConfig: { packageId: ... }` to the messaging extension
+  so the wiring is auditable in one place. The package id is
+  sourced from the SDK's own `FALLBACK_PACKAGE_ID` constant; the
+  gauntlet cross-references it so a future SDK package bump fails
+  loudly at build time.
+
+### Added
+
+- **`qa-messaging-client.ts`** extended (34 → 40 PASS) with a
+  section [9] that pins MVR wiring: `client.network === 'testnet'`,
+  the SDK's `TESTNET_MESSAGING_PACKAGE_CONFIG.packageId` is a
+  0x-prefixed object id, `client.core.mvr` is present, and
+  `client.core.mvr.resolvePackage('@local-pkg/sui-stack-messaging')`
+  returns the expected testnet package id without a network
+  round-trip.
+
+### Test totals
+
+- **1467 → 1473 PASS** across **26 static gauntlets**.
+
+---
+
+## [Unreleased] — Bucket 3 hotfix: SDK alignment, 2026-05-06 (later)
+
+### Fixed
+
+- **DM panel `SealClient.asClientExtension is not a function`** —
+  The Tavern shipped earlier today crashed at first DM send.
+  Top-level `@mysten/seal@1.1.1` deprecated and removed the static
+  `asClientExtension`; messaging 0.3.0 was authored against seal
+  0.9.6 which has it. Permanent solve: install
+  `mysten-seal-v0@npm:@mysten/seal@^0.9.6` (aligns the seal
+  extension API with what messaging expects), import `SealClient`
+  from the alias in `frontend/src/lib/messaging.ts`. Same alias
+  pattern as `mysten-sui-v1`. Top-level seal 1.1.1 stays for any
+  future first-party use; messaging.ts is the only consumer of
+  the alias.
+
+### Added
+
+- **`scripts/qa-messaging-client.ts` — 34 PASS** — Pins the SDK
+  shape (version matrix, every method the wrapper calls) so the
+  next SDK breakage surfaces at build time, not at first user
+  click. Failure mode is structured: list of missing slots /
+  methods + pointer at the upgrade procedure in TAVERN_DESIGN.md.
+- `buildExtendedClient` exported (was private) so the gauntlet
+  can probe the chain without instantiating wallet code.
+- `checkMessagingClientShape(client)` — returns the list of
+  missing slots/methods for a given client. Called by
+  `ensureClient` after construction so the DM panel surfaces a
+  structured error when the SDK drifts under us.
+
+### Changed
+
+- `frontend/src/lib/messaging.ts` — header rewritten with the
+  full version matrix + upgrade procedure; imports realigned.
+- `TAVERN_DESIGN.md` § "Sui Stack Messaging SDK" — version
+  matrix table, why-we-pin-seal explanation, upgrade procedure.
+
+### Test totals
+
+- **1433 → 1467 PASS** across **25 → 26 static gauntlets**, plus
+  35/35 Move unit tests.
+
+---
+
+## [Unreleased] — Bucket 3 — Tavern social hub, 2026-05-06
+
+> Branch `feature/v5-redeploy`, **not pushed**. Server + frontend
+> additions only — no chain re-publish. Closes Bucket 3 item #1
+> (Tavern) end-to-end. The remaining Bucket 3 work items
+> (Hall of Fame, multi-day stability, fresh user onboarding,
+> admin endpoint audit) move forward on their own track.
+
+### Added — Tavern social hub (Bucket 3 #1)
+
+- **PlayerSidebar** (`frontend/src/components/social/player-sidebar.tsx`)
+  — replaces the legacy flat player list. Players grouped by level
+  bracket (Novice 1-3 / Early 4-6 / Mid 7-9 / High 10-14 / Endgame
+  15-19 / Hall of Fame 20). Search + status-filter chips at the top.
+  Status priority sort within bucket (online > marketplace > fight
+  > idle), then rating desc, then name asc. Click a row → opens
+  `PlayerProfileModal`.
+- **PlayerProfileModal** (`components/social/player-profile-modal.tsx`)
+  — modal with 10-slot equipment doll (item art + tooltips), stats
+  panel with bonus deltas, derived combat stats, W/L record + win
+  rate + ELO, truncated wallet with copy-to-clipboard, and three
+  primary actions: Send Message · Wager Challenge · Friendly Fight.
+- **FightRequestToasts** (`components/social/fight-request-toasts.tsx`)
+  — top-right stack of incoming challenges with 90 s countdown,
+  Accept / Decline buttons, two-step Accept for wager variant
+  (sees stake before confirming).
+- **DmPanel** (`components/social/dm-panel.tsx`) — encrypted DM
+  panel built on the Sui Stack Messaging SDK (alpha, testnet only).
+  Wallet-signed on-chain transactions per send; ciphertext on
+  Walrus; Seal threshold encryption. Slides up bottom-right;
+  optimistic local rendering with pending/failed states; testnet
+  alpha disclosure banner.
+- **TavernRoom** (`components/social/tavern-room.tsx`) — new layout:
+  global chat 2/3 left, sidebar 1/3 right, both 600px tall.
+
+### Added — server-side Tavern services
+
+- **Presence service** (`server/src/data/presence.ts`) — heartbeat-
+  driven (~20 s cadence) in-memory + Supabase-backed presence with
+  derived status (online / in_fight / in_marketplace / idle), room
+  tracking, and 60 s stale TTL. Boot-time + tick-time sweepers
+  drop ghost rows. `derivePlayerStatus` and `groupPlayersByLevelBucket`
+  exposed as pure helpers for testing.
+- **Fight-request service** (`server/src/data/fight-requests.ts`) —
+  player-to-player challenges with state machine (pending →
+  accepted | declined | canceled | expired), 90 s TTL,
+  per-sender limit (max 5 outstanding), Supabase-backed,
+  boot-time rehydrate. `evaluateCreate` and `evaluateTransition`
+  pure for testing.
+- **DM channel registry** (`server/src/data/dm-channels.ts`) — maps
+  Sui Stack Messaging channel ids to canonical wallet pairs. CHECK
+  constraint enforces `participant_a < participant_b`. Per-recipient
+  unread counter table; sender-driven bump, recipient-driven clear.
+- **Player profile resolver** (`server/src/data/player-profile.ts`)
+  — full character + DOF-equipment fetch, in-memory hot path with
+  Supabase fallback for offline players, on-chain DOF refresh keeps
+  equipment fresh.
+- **Tavern WS dispatch** (`server/src/ws/tavern-handlers.ts`) —
+  single entry point for the new message types. Wired into
+  `ws/handler.ts` after the legacy switch as a fallthrough.
+- Server-side `setPresenceFightBroadcaster` callback in
+  `ws/fight-room.ts` so fight start/end events flip presence
+  status in real time without coupling the fight-room module to
+  the presence service.
+
+### Added — Supabase schema (migration `003_tavern.sql`)
+
+- `presence` — heartbeat-driven row per online wallet
+- `fight_requests` — full state machine + TTL
+- `dm_channels` — channel id ↔ canonical wallet pair
+- `dm_channel_unread` — per-recipient unread counter
+- `friends` — mutual friend graph (schema only, no UI yet)
+- Triggers for auto-bumping `last_seen_at` (presence) and
+  `updated_at` (friends). Idempotent migration.
+
+### Added — Sui Stack Messaging SDK integration
+
+- Installed `@mysten/messaging@0.3.0`, `@mysten/seal@^1.1.1`,
+  `@mysten/walrus@^0.8.6`. Resolved sui version conflict by
+  installing sui 1.x under the npm alias `mysten-sui-v1` —
+  `@mysten/messaging` gets the `SuiClient({ url })` shape it
+  expects while our top-level code keeps using sui 2.x.
+- `lib/messaging.ts` exposes `ensureClient`, `ensureChannel`,
+  `sendMessage`, `getMessages`, `resolveMemberCap`, `ensureSession`
+  — alpha disclosures handled at the wrapper boundary so consumers
+  stay clean.
+
+### Added — wire schema (`frontend/src/types/ws-messages.ts`)
+
+- 13 new client→server types: `enter_room`, `presence_heartbeat`,
+  `get_player_profile`, `send_fight_request`, `accept_fight_request`,
+  `decline_fight_request`, `cancel_fight_request`,
+  `get_pending_fight_requests`, `register_dm_channel`,
+  `notify_dm_sent`, `clear_dm_unread`, `get_dm_channels`,
+  `lookup_dm_channel`.
+- 11 new server→client types: `room_entered`, `player_profile`,
+  `player_profile_not_found`, `fight_request_sent`,
+  `fight_request_received`, `fight_request_resolved`,
+  `fight_request_pending_list`, `wager_challenge_ready`,
+  `wager_challenge_waiting`, `dm_channel_registered`,
+  `dm_channel_lookup`, `dm_unread_changed`, `dm_channels_list`.
+
+### Added — game-state slices (`hooks/useGameStore.ts`)
+
+- `incomingFightRequests` / `outgoingFightRequests`
+- `dmChannels`, `dmTotalUnread`, `dmUnreadByChannel`
+- `openProfileWallet`, `playerProfile`
+- `openDmPeer`
+- `prefilledWagerTarget` — bridges the wager-challenge accept flow
+  into the matchmaking-queue UI
+
+### Added — test gauntlets
+
+- `qa-tavern-presence.ts` — 66 PASS · status derivation, bucketing,
+  upsert/heartbeat/sweep, multi-bucket scenario
+- `qa-tavern-fight-requests.ts` — 58 PASS · state machine
+  transitions, per-sender limit, stake/message bounds, TTL eviction
+- `qa-tavern-dm-channels.ts` — 42 PASS · canonical pair ordering,
+  bi-directional lookup, unread counter math, sort by lastMessageAt
+- `qa-tavern-handlers.ts` — 30 PASS · WS dispatch, announce online/
+  offline, enter_room, heartbeat no-op, send_fight_request flow,
+  accept/decline, DM channel lifecycle, auth gate
+- `qa-tavern-sidebar.ts` — 42 PASS · bucket boundaries, search,
+  status filter, exclude, sort priority, hideEmpty, defensive
+
+**Test totals: 1195 → 1433 PASS across 20 → 25 static gauntlets,
+plus 35/35 Move unit tests.**
+
+### Changed
+
+- `setup-db.mjs` now probes for the new tables (presence,
+  fight_requests, dm_channels, friends) on smoke-test.
+- `frontend/tsconfig.json` target bumped ES2017 → ES2020 for
+  BigInt-literal support (used in MIST stake parsing).
+- `ws/handler.ts` `handleGetOnlinePlayers` removed in favour of
+  `tavern-handlers::handleGetOnlinePlayers` which reads from the
+  presence service. Same `online_players` wire shape — no client
+  change required.
+- Player joining + leaving now broadcasts via the presence service
+  (`announcePlayerOnline` / `announcePlayerOffline`), which means
+  `currentRoom` is included in `player_joined` payloads (the player
+  list can now show "🛒 Shopping" / "⚔ Arena" badges).
+
+### Documentation
+
+- `TAVERN_DESIGN.md` (NEW) — architecture diagram, schema
+  reference, message flows, SDK integration notes, scope
+- `STATUS.md` — Bucket 3 #1 closed, test totals refreshed
+- `CHANGELOG.md` — this entry
+
+---
+
 ## [Unreleased] — Bucket 2 wrap, end of 2026-05-04
 
 > Branch `feature/v5-redeploy` end-of-day push. **Not a chain

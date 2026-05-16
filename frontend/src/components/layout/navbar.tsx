@@ -51,17 +51,17 @@ function NavBadge({ children }: { children: React.ReactNode }) {
       style={{
         fontFamily: "var(--font-ui)",
         fontWeight: 700,
-        fontSize: 10,
+        fontSize: 12,
         letterSpacing: "1.4px",
         textTransform: "uppercase",
         color: "var(--sc-page)",
         background: "var(--sc-bronze)",
-        padding: "3px 9px",
+        padding: "4px 11px",
         lineHeight: 1.4,
         whiteSpace: "nowrap",
         display: "inline-flex",
         alignItems: "center",
-        height: 22,
+        height: 26,
         borderRadius: 0,
       }}
     >
@@ -87,16 +87,17 @@ function NavLink({
       style={{
         fontFamily: "var(--font-ui)",
         fontWeight: 800,
-        fontSize: 14,
+        fontSize: "clamp(13px, 1.2vw, 17px)",
         letterSpacing: "0.28px",
         color: active ? "var(--sc-bronze)" : "var(--sc-parchment)",
         background: "transparent",
         border: 0,
         cursor: "pointer",
-        padding: "8px 12px",
+        padding: "clamp(8px, 0.9vw, 10px) clamp(8px, 1.1vw, 14px)",
         position: "relative",
         textTransform: "none",
         lineHeight: 1.1,
+        whiteSpace: "nowrap",
       }}
     >
       {children}
@@ -145,34 +146,46 @@ export function Navbar() {
         style={{
           maxWidth: "var(--container-max)",
           margin: "0 auto",
-          padding: "0 18px",
-          height: 70,
+          padding: "clamp(8px, 1vw, 12px) clamp(12px, 2vw, 22px)",
+          minHeight: 84,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: 14,
+          gap: "clamp(8px, 1.4vw, 16px)",
+          flexWrap: "wrap",
+          rowGap: 10,
         }}
       >
         {/* Left cluster: wordmark · avatar · name + badges · nav tabs */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "clamp(10px, 1.4vw, 18px)",
+            minWidth: 0,
+            flex: "1 1 auto",
+            flexWrap: "wrap",
+            rowGap: 8,
+          }}
+        >
           <Wordmark size="navbar" />
 
           {character && (
             <>
-              {/* Spec §[3] — 36×36 avatar badge, 1px bronze rim. */}
+              {/* Spec §[3] — avatar badge, 1px bronze rim (+20% sized). */}
               <div
                 style={{
-                  width: 36,
-                  height: 36,
+                  width: 44,
+                  height: 44,
                   background: "var(--sc-panel-2)",
                   border: "1px solid var(--sc-bronze)",
                   borderRadius: 4,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: 20,
+                  fontSize: 24,
                   lineHeight: 1,
-                  marginLeft: 8,
+                  marginLeft: 4,
                   flexShrink: 0,
                 }}
                 aria-label="Player avatar"
@@ -188,18 +201,18 @@ export function Navbar() {
                   minWidth: 0,
                 }}
               >
-                {/* Spec §[4] — Poppins 14/800 parchment, line 1.1. */}
+                {/* Spec §[4] — parchment label, line 1.1 (+20%). */}
                 <span
                   style={{
                     fontFamily: "var(--font-ui)",
-                    fontSize: 14,
+                    fontSize: 17,
                     fontWeight: 800,
                     color: "var(--sc-parchment)",
                     lineHeight: 1.1,
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
-                    maxWidth: 180,
+                    maxWidth: 216,
                   }}
                 >
                   {character.name}
@@ -217,7 +230,9 @@ export function Navbar() {
                     display: "flex",
                     alignItems: "center",
                     gap: 0,
-                    marginLeft: 24,
+                    marginLeft: "clamp(8px, 1.6vw, 24px)",
+                    flexWrap: "wrap",
+                    rowGap: 4,
                   }}
                 >
                   {AREAS.map((area) => (
@@ -236,7 +251,7 @@ export function Navbar() {
         </div>
 
         {/* Right cluster: balance · sound · status · connect */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
           {account && (
             <span
               title={
@@ -250,10 +265,10 @@ export function Navbar() {
                 gap: 6,
                 fontFamily: "var(--font-mono)",
                 fontWeight: 700,
-                fontSize: 13,
-                width: 112,
-                height: 31,
-                padding: "5px 12px",
+                fontSize: 15,
+                width: 134,
+                height: 37,
+                padding: "6px 14px",
                 background: "var(--sc-bronze)",
                 color: "var(--sc-page)",
                 border: "1px solid var(--sc-bronze-deep)",

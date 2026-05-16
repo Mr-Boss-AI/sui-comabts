@@ -1,115 +1,112 @@
-# Session Handoff — 2026-05-03 (evening)
+# Session Handoff — 2026-05-16 (Phase 3 fight-room shipped)
 
-> ⚠️ **SUPERSEDED — see [`STATE_OF_PROJECT_2026-05-04.md`](STATE_OF_PROJECT_2026-05-04.md)
-> for current state.** This file is a point-in-time snapshot from the
-> 2026-05-03 evening QA pass. Bucket 2 (the 3 polish bugs noted below
-> as "DONE for next session") plus the silent-accept / two-handed /
-> multi-queue / WS readyState / level-up modal work all closed during
-> the 2026-05-04 sessions. Latest commit on `feature/v5-redeploy`:
-> see `git log --oneline -1` (was `dcf7e3f` at the end of the
-> 2026-05-04 wrap; see `CHANGELOG.md` for the day-by-day delta).
-
-> Single-page summary of today's three sessions (afternoon code,
-> evening browser QA, evening doc sync). Branch `feature/v5-redeploy`,
-> latest commit `9d7dd19` on origin. Upstream `main` stays at the
-> v4-era `08ff991`; **do not merge until v5.1 republish lands**.
+> Single-page summary of tonight's session. Full detail lives in
+> [`STATE_OF_PROJECT_2026-05-16.md`](./STATE_OF_PROJECT_2026-05-16.md).
+> Branch `feature/phase-2-design`. Upstream `main` stays at the v4-era
+> `08ff991`; **do not merge until v5.1 republish lands**.
 
 ---
 
-## What shipped today
+## What shipped tonight
 
-### Five code commits + this docs commit
+### One wrap commit, three categories
 
-| Commit | Bug | One-liner |
-|---|---|---|
-| `fd56b4a` | Slot picker hides locked items | `equipment-picker.ts` (NEW) keeps locked items in the picker, dimmed with a red `Lv N` badge. 53-test gauntlet. |
-| `fe9c883` | Character page HP/ATK + stat bars | Frontend `LEVEL_HP` / `LEVEL_WEAPON_DAMAGE` synced element-by-element with server's rebalanced tables. STR/DEX/INT bars compile (Tailwind v4 JIT). GDD §3.3 rewritten. 79-test parity gauntlet. |
-| `a26535e` | Wager stake input clearable (Bug 2) | New `wager-input.ts` parses string-state input; clearable, validates on submit. 47-test gauntlet. |
-| `20f3750` | Outcome modal on rejoin (Bug 3) | Server caches per-wallet outcome; replays via `recent_fight_settled` on reconnect. localStorage dedupes. 31-test gauntlet. |
-| `9d7dd19` | Grace timer cumulative budget (Bug 1) | 60 s window is now per-fight cumulative, not per-cycle. Abuser ping-pong now forfeits. 46-test gauntlet. |
+| Category | Files |
+|---|---|
+| **Phase 3 fight-room redesign** (v1 → v2 → v3 same session) | `fight-arena.tsx` rewrite · `zone-selector.tsx` variant=list + v3 row-paired grid · `mini-equipment-frame.tsx` adds `hideHpBar` · `qa-fight-arena-layout.ts` NEW (71 assertions) |
+| **Header sizing + auto-flow polish** | `navbar.tsx` (+20% sized · `clamp()` scaling · `flex-wrap`) · `wordmark.tsx` (navbar variant 32 → 38 px) |
+| **Parked WIPs being landed alongside** (multi-session backlog) | DM pipeline (`lib/dm-*`, `lib/messaging.ts`, `lib/player-bucket.ts`) · Tavern handlers + data modules + migrations · server `fight-room.ts` + `handler.ts` + `index.ts` + `setup-db.mjs` · frontend `game-provider.tsx` + `dapp-kit.ts` + `useGameStore.ts` + `ws-messages.ts` + `tsconfig.json` + `package*.json` · 9 new tavern/DM QA scripts · TAVERN_DESIGN.md + Gemini.md · misc design screenshots |
 
-### Browser QA pass (evening)
+### Phase 3 fight-room redesign — the three passes
 
-All three polish bugs verified live with two-wallet testing on Sui
-testnet:
+- **v1 layout** — Three-row CSS grid (HP cards · doll · move column ·
+  doll · battle log full-width). Move column was 100 px. New
+  list-style ZoneSelector variant. v1 placeholder `FighterPanel` /
+  `SlotCell` / `DollSilhouette` components for the dolls. New QA
+  gauntlet `qa-fight-arena-layout` (60 assertions).
+- **v2 polish** — Move column 100 → 200 px. Placeholder doll
+  components deleted, replaced with the existing read-only
+  `MiniEquipmentFrame` (the same component the Player Profile modal
+  uses). Added `hideHpBar?: boolean` to it — single non-invasive
+  flag, no fork. Buttons restyled with game-theme chrome
+  (`var(--r-sharp)`, `var(--sh-plate-sm)`, `var(--ls-button)`),
+  full ZONE_LABELS, no abbreviations. Lock-in button matches the
+  Arena fight-type CTAs. Gauntlet → 57 assertions.
+- **v3 row-paired + glow** — Move column 200 → 240 px. Replaced
+  "ATK column above BLK column" with a single grid (`1fr auto 1fr` ×
+  `auto repeat(5, auto)`) where each body zone is one row of
+  `ATK button · bronze label · BLK button`. Compact icon-only
+  buttons (inline Tabler-style sword / shield / check SVGs).
+  Selected state: oriented glow (`rgba(226,75,74,0.6)` red,
+  `rgba(55,138,221,0.6)` blue) + 1.4 s ease-in-out pulse keyframe
+  + corner ✓ badge. Gauntlet → 71 assertions.
 
-- **Bug 1 cumulative grace** — 3 disconnect/reconnect cycles in a
-  single fight. Banner countdowns: 60 s → 14 s → 9 s, then forfeit.
-  Initial confusion was a stale ts-node build serving old code; hard
-  server restart + browser refresh fixed it. Working as designed.
-- **Bug 2 stake input** — fully clearable, validation on submit,
-  "Minimum stake is 0.1 SUI" inline.
-- **Bug 3 rejoin modal** — Mr_Boss closed tab → forfeited offline →
-  reopened tab → full Defeat modal (XP / rating / wager). Sx (still
-  online) saw mirrored Victory in real time.
+Block-pair / shield-line / dual-wield / shield-mode click logic
+untouched across all three passes. WS message surface, HP fill
+thresholds, opponent-disconnect banner, fight-result modal, and
+fight-outcome-ack write are all pass-through.
 
-### Lv5 progression verified
+### Local hygiene (no code commit)
 
-- **Tap-to-equip auto-swap** — auto-unequips old + equips new in a
-  single click. HP 113→116, ATK 26→29.5, Crit 2.5→7.5, Evasion
-  6.5→13.5 on Mr_Boss's Cursed Greatsword (Epic Lv5) swap.
-- **`allocate_points` regression stays fixed** — verified on
-  Mr_Boss Lv4→Lv5 (day) and Sx Lv5 (evening). Slush approved both,
-  no MoveAbort code 2. Three approvals total across two characters
-  + two level-ups since the b39202d clamp.
-- **Lv5 vs Lv5 wager (0.4 SUI)** — Sx evasion build (Twin Stilettos
-  + Wooden Buckler + Magic Ring) beat Mr_Boss crit build (Cursed
-  Greatsword Epic + Ornate Mithril Breastplate Rare + Copper Band)
-  in 2 turns. 95/5 settle clean, XP +43/+100, ELO ±17. Dual-wield
-  + shield combo did not crash the contract.
+Host had a cron `*/5 * * * * /home/shakalis/bots/watchdog.sh` plus a
+`sxai-telegram-bot.service` systemd unit reviving three unrelated
+node processes (`sui-bot`, `meme-sol-bot`, `ton-bot`). `meme-sol-bot`
+was holding port 3001 and blocking the sui-combats backend at boot.
+Cron line commented (backup at `/tmp/crontab.backup`), systemd unit
+stopped + disabled, all 11 bot processes killed. To re-enable later:
+uncomment the cron line and `systemctl --user enable --now
+sxai-telegram-bot.service`.
 
 ---
 
 ## Tests
 
-14 gauntlets, **731 / 731 PASS**. New today:
+**2,235 / 2,235 PASS across 36 suites.** New today:
 
-- `qa-equip-picker.ts` — 53 (slot picker rules + sort order)
-- `qa-combat-stats.ts` — 79 (HP/ATK table parity + sample stats)
-- `qa-wager-form.ts` — 47 (parseWagerInput edge cases)
-- `qa-reconnect-modal.ts` — 31 (recent-outcomes cache + dedupe)
-- `qa-grace-budget.ts` — 46 (cumulative grace semantics)
+- `qa-fight-arena-layout.ts` — **71** (Phase 3 fight-room layout pins:
+  grid templates, ZoneSelector variant, MiniEquipmentFrame reuse,
+  button kinds, icon components, glow rgbas, pulse keyframes,
+  removed-v1-artefact guards)
 
-Existing gauntlets unchanged. Frontend + server `tsc --noEmit`
-clean. 35/35 Move unit tests still passing.
-
----
-
-## New polish backlog (this session)
-
-Tracked in `STATUS.md` → "Known polish backlog". Non-blocking:
-
-1. **Level-up popup** — no celebratory toast on level-up. Stats
-   update silently; player has to notice the new badge.
-2. **Inventory auto-refresh after rapid swaps** — minor sync lag
-   between doll panel and inventory list. Hard refresh fixes.
-
-Carry-over polish from prior sessions still open: HP decimal
-display, equipped items invisible at fight start, stat-allocate
-modal preset.
+Existing gauntlets unchanged. Frontend `tsc --noEmit` clean.
+35 / 35 Move unit tests still passing.
 
 ---
 
-## Game balance (content tuning, not code)
+## Open bug log (filed, not fixed)
 
-Lv5 vs Lv5 fights end in 2 turns at high rarity. Combat math
-correctness is verified by `qa-xp.ts`, `qa-combat-stats.ts`, and
-the live counter-triangle observation; this is content/data
-tuning. Likely needs an armor/HP scaling pass for higher levels +
-rarities. No action in contracts/frontend until we have a tuning
-plan.
+1. **Bug A — Insufficient-SUI silent fail on `accept_wager`.**
+   Acceptor with 0.501 SUI clicks ACCEPT on a 0.5 SUI wager. Wallet
+   signs, chain tx fails (not enough gas headroom after escrow lock),
+   `WagerMatch.status` stays at 0. Server's `decideAcceptOutcome`
+   correctly rejects, but the toast wording ("Wager not active on-chain
+   (status: 0). Did the accept_wager transaction succeed?") doesn't
+   tell the user what really went wrong. Pre-flight balance check on
+   the frontend is the right fix.
+
+2. **Bug B — Frontend ignores `FailedTransaction`.**
+   `matchmaking-queue.tsx:398-407` grabs a digest from either the
+   success (`Transaction`) or failure (`FailedTransaction`) wrapper
+   the Sui SDK signer returns, and proceeds to send `wager_accepted`
+   to the WS either way. Two-branch fix: throw on
+   `FailedTransaction`, surface the SDK error.
+
+3. **Bug C — Battle log asymmetry (needs re-verify).**
+   Pre-redesign symptom: battle log lines occasionally appeared on
+   one tab and not the other during two-wallet live fights. **Not
+   re-tested** against the Phase 3 fight-room redesign tonight. The
+   DamageLog component is a pass-through — `fight.log` flows in
+   unchanged, just rendered inside the new full-width bottom row. If
+   the asymmetry exists, it's in the WS broadcast of `fight_state`
+   updates from `server/src/ws/fight-room.ts`, not the renderer.
 
 ---
 
 ## Server status
 
-Both servers running on commit `9d7dd19` post-restart:
-
-- **3001:** clean boot — `[OrphanWager] No stale in-flight rows`,
-  marketplace stream active, 2 wallets connected.
-- **3000:** Next.js 16.2.3 ready, `HTTP 200`.
-
-To rerun:
+Both servers should be re-launched fresh next session. The cron
+watchdog and the unrelated bot stack are no longer reviving any
+processes. To boot:
 
 ```bash
 kill $(lsof -t -i:3001) 2>/dev/null
@@ -121,37 +118,33 @@ curl -s localhost:3001/health | python3 -m json.tool
 ```
 
 Supabase still OPTIONAL (running in-memory). To enable, see
-`STATUS.md` → "Optional — Supabase".
+`STATE_OF_PROJECT_2026-05-14.md` → "Optional — Supabase".
 
 ---
 
-## Next-session pickup — Bucket 1 remaining
+## Next-session pickup
 
-In priority order:
-
-1. **Market room** — Kiosk list / buy / cancel / royalty math /
-   cross-wallet browse (live UX walk; `qa-marketplace.ts`'s 63
-   assertions cover the math).
-2. **Tavern** — chat, presence, whispers, profile clicks. Currently
-   uncovered live; gauntlet has nothing on chat.
-3. **Hall of Fame** — sort, filter, profile click-throughs.
-4. **Multi-day stability** — overnight uptime test.
-5. **Fresh user onboarding** — wipe localStorage, full
-   create-character flow from a never-seen wallet.
-
-After Bucket 1 is green, the v5.1 republish design (player-signed
-settlement, `CharacterRegistry`, `burn_character`, on-chain loot
-mint) can begin.
+1. **Fix Bug A + Bug B** — pre-flight balance check on the frontend
+   wager-accept path; branch on `FailedTransaction` in
+   `handleAcceptWager`.
+2. **Re-verify Bug C** — two-wallet live fight, check battle log
+   symmetry after Phase 3 redesign. Steps in
+   `STATE_OF_PROJECT_2026-05-16.md` → Bug C.
+3. **Visual QA walk** of every screen at 1440 px / 1280 px / mobile.
+4. **Open Track B (Phase 3 v5.1 republish)** on its own branch
+   (`feature/v5.1-contracts`) when the user is ready. Spec at
+   `STATE_OF_PROJECT_2026-05-04.md` §v5.1.
 
 ---
 
 ## Branch state
 
-- Local `feature/v5-redeploy` and `origin/feature/v5-redeploy` in
-  sync at `9d7dd19` (post-doc commit will advance both).
+- Local `feature/phase-2-design` and `origin/feature/phase-2-design`
+  in sync at the wrap commit pushed at end-of-session.
 - `main` untouched (still at v4-era `08ff991`).
+- `feature/v5-redeploy` untouched (remote tip `6308240`).
 - **Standing rule:** no merge to main until v5.1 republish is
-  confirmed working on testnet.
+  confirmed working on testnet + audit clears.
 
 ---
 
@@ -185,6 +178,9 @@ curl -s -X POST http://localhost:3001/api/admin/force-unlock \
 curl -s -X POST http://localhost:3001/api/admin/repin-character \
   -H 'Content-Type: application/json' \
   -d '{"wallet":"0x...","characterId":"0x..."}'
+
+# Run the new Phase 3 fight-room layout gauntlet
+cd ~/sui-comabts/server && npx tsx ../scripts/qa-fight-arena-layout.ts
 ```
 
 All admin endpoints are testnet-only (`CONFIG.SUI_NETWORK !== 'mainnet'`

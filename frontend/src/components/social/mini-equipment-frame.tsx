@@ -66,6 +66,13 @@ export interface MiniEquipmentFrameProps {
   portraitImageUrl?: string;
   /** Optional portrait name for tooltip / aria when imageUrl is set. */
   portraitName?: string;
+  /**
+   * Skip rendering the in-frame HP bar — used by the Phase 3 fight-room
+   * layout, which renders HP separately in the top row of the arena
+   * grid. The center column still keeps PortraitFrame + ornament, just
+   * without the duplicate health gauge above them.
+   */
+  hideHpBar?: boolean;
 }
 
 export function MiniEquipmentFrame({
@@ -74,6 +81,7 @@ export function MiniEquipmentFrame({
   maxHp,
   portraitImageUrl,
   portraitName,
+  hideHpBar,
 }: MiniEquipmentFrameProps) {
   const {
     bigSlotW,
@@ -147,7 +155,7 @@ export function MiniEquipmentFrame({
           minHeight: 0,
         }}
       >
-        <HpBar current={currentHp} max={maxHp} />
+        {!hideHpBar && <HpBar current={currentHp} max={maxHp} />}
         <PortraitFrame
           portrait={portrait}
           emptyTitle="No portrait set"

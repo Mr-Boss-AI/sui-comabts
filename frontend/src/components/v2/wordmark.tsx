@@ -58,11 +58,11 @@ const VARIANTS: Record<
 > = {
   navbar: {
     layout: "inline",
-    suiSize: 32,
-    combatsSize: 32,
-    strokeWidth: 1.5,
+    suiSize: 38,
+    combatsSize: 38,
+    strokeWidth: 1.8,
     shadowOffset: 2,
-    gap: 4,
+    gap: 5,
   },
   footer: {
     layout: "inline",

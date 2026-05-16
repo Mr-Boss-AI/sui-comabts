@@ -35,6 +35,7 @@ import {
   getActiveFights,
   getFight,
   setClientsRef,
+  setPresenceFightBroadcaster,
   handlePlayerDisconnect,
   handlePlayerReconnect,
 } from './fight-room';
@@ -55,6 +56,15 @@ import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
   createFight,
 } from './fight-room';
+import {
+  dispatchTavernMessage,
+  announcePlayerOnline,
+  announcePlayerOffline,
+  handleGetOnlinePlayers as tavernGetOnlinePlayers,
+  broadcastFightStatusChange,
+  type TavernCtx,
+} from './tavern-handlers';
+import type { FightRequest } from '../data/fight-requests';
 
 // === Connected Clients Registry ===
 
@@ -63,9 +73,105 @@ const connectedClients = new Map<string, ConnectedClient>();
 // Share with fight-room module
 setClientsRef(connectedClients);
 
+// Wire Bucket 3 presence: fight-room broadcasts in_fight ↔ online via
+// this callback whenever a fight starts or ends. Kept lazy because
+// `tavernCtx` is declared later in the file; the closure captures it
+// by reference so the call lands on the live ctx at fire time.
+setPresenceFightBroadcaster((wallet, fightId) => {
+  broadcastFightStatusChange(tavernCtx, wallet, fightId);
+});
+
 function send(client: ConnectedClient, msg: ServerMessage): void {
   if (client.socket.readyState === client.socket.OPEN) {
     client.socket.send(JSON.stringify(msg));
+  }
+}
+
+// === Tavern context ===
+//
+// Single shared context for `tavern-handlers.ts`. Keeping it as a module
+// constant lets every handler dispatch reuse the same closures without
+// allocating per-message.
+const tavernCtx: TavernCtx = {
+  sendToWallet(wallet: string, msg: Record<string, unknown>): boolean {
+    const lower = wallet.toLowerCase();
+    for (const [, c] of connectedClients) {
+      if (c.walletAddress?.toLowerCase() === lower && c.socket.readyState === c.socket.OPEN) {
+        c.socket.send(JSON.stringify(msg));
+        return true;
+      }
+    }
+    return false;
+  },
+  broadcastAll(msg: Record<string, unknown>): void {
+    for (const [, c] of connectedClients) {
+      if (c.authenticated && c.socket.readyState === c.socket.OPEN) {
+        c.socket.send(JSON.stringify(msg));
+      }
+    }
+  },
+  getClient(wallet: string): ConnectedClient | undefined {
+    const lower = wallet.toLowerCase();
+    for (const [, c] of connectedClients) {
+      if (c.walletAddress?.toLowerCase() === lower) return c;
+    }
+    return undefined;
+  },
+};
+
+/**
+ * Hook called by `tavern-handlers` when a fight request transitions to
+ * `accepted`. Drives the post-accept side effects: friendly fights start
+ * immediately; wager challenges open the wager-create flow on the
+ * challenger's side via a `wager_challenge_ready` push.
+ */
+async function onAcceptFightRequest(req: FightRequest, accepter: ConnectedClient): Promise<void> {
+  if (!accepter.walletAddress) return;
+  const challengerClient = tavernCtx.getClient(req.fromWallet);
+  if (req.requestType === 'friendly') {
+    const charA = getCharacterByWallet(req.fromWallet);
+    const charB = getCharacterByWallet(accepter.walletAddress);
+    if (!charA || !charB) {
+      sendError(accepter, 'Cannot start fight — character missing.');
+      return;
+    }
+    if (challengerClient?.currentFightId || accepter.currentFightId) {
+      sendError(accepter, 'Either player is already in a fight.');
+      return;
+    }
+    try {
+      await createFight(charA, charB, 'friendly');
+    } catch (err: any) {
+      sendError(accepter, `Could not start fight: ${err?.message ?? err}`);
+    }
+    return;
+  }
+  if (req.requestType === 'wager') {
+    // Wager fights require the CHALLENGER to sign create_wager and lock
+    // the SUI escrow. We push the directive back to the challenger; the
+    // accepter waits for the challenger's wager to land in the lobby and
+    // then signs accept_wager. This mirrors the existing wager flow but
+    // with the lobby filtered to the explicit pair.
+    if (challengerClient) {
+      tavernCtx.sendToWallet(req.fromWallet, {
+        type: 'wager_challenge_ready',
+        request: {
+          id: req.id,
+          toWallet: req.toWallet,
+          toName: req.toName,
+          stakeMist: req.stakeMist ?? null,
+        },
+      });
+    }
+    tavernCtx.sendToWallet(req.toWallet, {
+      type: 'wager_challenge_waiting',
+      request: {
+        id: req.id,
+        fromWallet: req.fromWallet,
+        fromName: req.fromName,
+        stakeMist: req.stakeMist ?? null,
+      },
+    });
   }
 }
 
@@ -138,6 +244,9 @@ function handleDisconnect(client: ConnectedClient): void {
 
     // Remove from chat
     unregisterChatClient(client.walletAddress);
+
+    // Bucket 3 presence — drop the row + broadcast `player_left`.
+    announcePlayerOffline(tavernCtx, client.walletAddress);
 
     // Notify others
     broadcastSystemMessage(`${client.walletAddress.slice(0, 8)}... has left.`);
@@ -305,7 +414,7 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
       handleChat(client, msg);
       break;
     case 'get_online_players':
-      handleGetOnlinePlayers(client);
+      tavernGetOnlinePlayers(client);
       break;
     case 'equip_item':
       handleEquipItem(client, msg);
@@ -352,8 +461,19 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
     case 'accept_challenge':
     case 'decline_challenge':
       break;
-    default:
-      sendError(client, `Unknown message type: ${msg.type}`);
+    default: {
+      // Tavern surface (Bucket 3). Returns true if the message was a
+      // tavern message and was handled; otherwise we fall through to the
+      // unknown-type error below.
+      const handled = dispatchTavernMessage(tavernCtx, client, msg as never, {
+        onAcceptFightRequest: (req, c) => {
+          void onAcceptFightRequest(req, c);
+        },
+      });
+      if (!handled) {
+        sendError(client, `Unknown message type: ${msg.type}`);
+      }
+    }
   }
 }
 
@@ -508,6 +628,13 @@ async function acceptAuthenticatedSession(
   // Register for chat
   registerChatClient(client);
 
+  // Bucket 3 presence — announce the player online + push initial room
+  // (Tavern is the default landing). Subsequent `enter_room` messages
+  // update the room without re-broadcasting `player_joined`.
+  if (character) {
+    announcePlayerOnline(tavernCtx, client, 'tavern');
+  }
+
   send(client, {
     type: 'auth_ok',
     walletAddress,
@@ -641,6 +768,11 @@ async function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessag
     client.characterId = existing.id;
     await hydrateDOFsForCharacter(client.walletAddress, existing, 'RestoreCached');
     send(client, { type: 'character_created', character: sanitizeCharacter(existing) });
+    // 2026-05-08 — re-announce in case the original auth happened before
+    // the character was loaded (skipped the `if (character)` gate at the
+    // auth call site). The presence helper is idempotent; if the row is
+    // already correct from an earlier announce, no broadcast goes out.
+    announcePlayerOnline(tavernCtx, client, 'tavern');
     return;
   }
 
@@ -685,6 +817,15 @@ async function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessag
   await hydrateDOFsForCharacter(client.walletAddress, result.character, 'Restore');
 
   send(client, { type: 'character_created', character: sanitizeCharacter(result.character) });
+
+  // 2026-05-08 — fresh-restore path. The auth that came before this almost
+  // certainly skipped `announcePlayerOnline` because `getCharacterByWallet`
+  // was undefined at the time (in-memory empty after server restart, no
+  // Supabase row to fall back on). Now that the character is loaded into
+  // the canonical store, fire the announce so peers get a correct
+  // `player_joined` instead of waiting for the next ~20s heartbeat to
+  // graduate the presence row from its stub fallback.
+  announcePlayerOnline(tavernCtx, client, 'tavern');
 }
 
 // === Delete Character ===
@@ -908,35 +1049,12 @@ function handleChat(client: ConnectedClient, msg: ClientMessage): void {
 }
 
 // === Online Players ===
-
-function handleGetOnlinePlayers(client: ConnectedClient): void {
-  const players: Array<{ walletAddress: string; name: string; level: number; rating: number; status: string; fightId?: string }> = [];
-
-  for (const [, c] of connectedClients) {
-    if (c.authenticated && c.walletAddress) {
-      const character = getCharacterByWallet(c.walletAddress);
-      let status = 'online';
-      let fightId: string | undefined;
-      if (c.currentFightId) {
-        status = 'fighting';
-        fightId = c.currentFightId;
-      }
-      players.push({
-        walletAddress: c.walletAddress,
-        name: character?.name || 'Unknown',
-        level: character?.level || 1,
-        rating: character?.rating || 1000,
-        status,
-        fightId,
-      });
-    }
-  }
-
-  send(client, {
-    type: 'online_players',
-    players,
-  });
-}
+//
+// Presence is now a first-class service (`data/presence.ts`) wired
+// through `tavern-handlers.ts`. The legacy iterate-connectedClients
+// implementation lived here pre-Bucket-3; the new path uses a
+// heartbeat-driven `presence` map with Supabase durability and proper
+// room/status tracking. `tavernGetOnlinePlayers` is the wire reply.
 
 // === Equip Item ===
 

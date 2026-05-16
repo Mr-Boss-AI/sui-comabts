@@ -370,6 +370,118 @@ export default function GameProvider({
         case "challenge_declined":
           dispatch({ type: "SET_PENDING_CHALLENGE", challenge: null });
           break;
+        case "fight_request_received":
+          dispatch({
+            type: "ADD_INCOMING_FIGHT_REQUEST",
+            request: msg.request,
+          });
+          playSoundIf("challenge");
+          break;
+        case "fight_request_sent":
+          dispatch({
+            type: "ADD_OUTGOING_FIGHT_REQUEST",
+            request: msg.request,
+          });
+          break;
+        case "fight_request_resolved":
+          dispatch({ type: "REMOVE_FIGHT_REQUEST", requestId: msg.request.id });
+          if (msg.action === "accept" && msg.request.requestType === "wager") {
+            // Wager challenge accepted by target — open the wager-create
+            // flow for the challenger with the stake pre-filled. The
+            // prefilledWagerTarget slice survives the area switch.
+            const isChallenger =
+              walletAddress?.toLowerCase() === msg.request.fromWallet.toLowerCase();
+            if (isChallenger) {
+              dispatch({
+                type: "SET_PREFILLED_WAGER_TARGET",
+                target: {
+                  wallet: msg.request.toWallet,
+                  name: msg.request.toName,
+                  stakeMist: msg.request.stakeMist ?? undefined,
+                },
+              });
+              dispatch({ type: "SET_AREA", area: "arena" });
+            }
+          }
+          break;
+        case "fight_request_pending_list":
+          dispatch({
+            type: "SET_FIGHT_REQUEST_LISTS",
+            incoming: msg.incoming,
+            outgoing: msg.outgoing,
+          });
+          break;
+        case "wager_challenge_ready":
+          // Target accepted my wager challenge — same as the resolve
+          // path above, surfaced as its own event for clarity. Already
+          // handled by the resolve branch when this client is the
+          // challenger; the explicit message is a nice-to-have for
+          // future UI hooks.
+          break;
+        case "wager_challenge_waiting":
+          // Challenger needs to sign create_wager. Surface a transient
+          // info banner so the target understands what they're waiting
+          // for. The wager will appear in the lobby filtered to the
+          // pair when the challenger signs.
+          dispatch({
+            type: "SET_ERROR",
+            message: `Waiting for ${msg.request.fromName} to sign the wager…`,
+            sticky: false,
+          });
+          break;
+        case "player_profile":
+          dispatch({ type: "SET_PLAYER_PROFILE", profile: msg.profile });
+          break;
+        case "player_profile_not_found":
+          dispatch({
+            type: "SET_ERROR",
+            message: "Could not load player profile",
+            sticky: false,
+          });
+          dispatch({ type: "OPEN_PROFILE", walletAddress: null });
+          break;
+        case "dm_channels_list":
+          dispatch({
+            type: "SET_DM_CHANNELS",
+            channels: msg.channels,
+            totalUnread: msg.totalUnread,
+          });
+          break;
+        case "dm_channel_registered":
+          dispatch({ type: "UPSERT_DM_CHANNEL", channel: msg.channel });
+          break;
+        case "dm_unread_changed": {
+          dispatch({
+            type: "SET_DM_UNREAD",
+            channelId: msg.channelId,
+            unreadCount: msg.unreadCount,
+            totalUnread: msg.totalUnread,
+            lastMessageAt: msg.lastMessageAt,
+          });
+          // Toast surface (Bug 2 fix). The reducer owns:
+          //   • the openDmPeer check (skip toast if panel for sender
+          //     is already open) — uses LIVE state, not stale closure
+          //   • the onlinePlayers lookup for peerName
+          //   • the FIFO/coalesce/cap logic
+          // We just dispatch the wire facts. The bump path (server's
+          // notify_dm_sent → recipient) carries `senderWallet`; the
+          // self-clear ack does NOT, which is how we tell the two
+          // apart without a separate event type.
+          if (msg.unreadCount > 0 && msg.senderWallet) {
+            dispatch({
+              type: "PUSH_DM_TOAST",
+              senderWallet: msg.senderWallet,
+              channelId: msg.channelId,
+              unreadCount: msg.unreadCount,
+            });
+            playSoundIf("chat");
+          }
+          break;
+        }
+        case "room_entered":
+          // Server ack — no-op besides closing the round-trip; useful
+          // for future telemetry hooks.
+          break;
         case "error": {
           // BUG B fix (2026-05-02 retest): "Not authenticated. Send
           // auth_request first." fires when a client message arrives
@@ -422,6 +534,10 @@ export default function GameProvider({
       socket.send({ type: "get_online_players" });
       socket.send({ type: "get_inventory" });
       socket.send({ type: "get_wager_lobby" });
+      // Bucket 3 — bootstrap social slices.
+      socket.send({ type: "get_pending_fight_requests" });
+      socket.send({ type: "get_dm_channels" });
+      socket.send({ type: "enter_room", room: state.currentArea as never });
     } else {
       // Wallet disconnected / token expired / fresh page load — roll the gate
       // back to "auth_pending" so the LoadingScreen renders during the
@@ -586,6 +702,26 @@ export default function GameProvider({
       });
     }
   }, [state.fight, state.committedEquipment, state.pendingEquipment]);
+
+  // Bucket 3 — broadcast room changes so the player sidebar can show
+  // who's where. Server tracks `currentRoom` per wallet via the
+  // presence service.
+  useEffect(() => {
+    if (!socket.authenticated) return;
+    socket.send({ type: "enter_room", room: state.currentArea as never });
+  }, [socket, socket.authenticated, state.currentArea]);
+
+  // Heartbeat tick — every 20s. Without it, presence rows go stale
+  // after PRESENCE_STALE_MS (60s) and the player drops off the
+  // sidebar. The send() helper queues during reconnect windows so a
+  // brief WS drop doesn't kill the heartbeat.
+  useEffect(() => {
+    if (!socket.authenticated) return;
+    const id = setInterval(() => {
+      socket.send({ type: "presence_heartbeat" });
+    }, 20_000);
+    return () => clearInterval(id);
+  }, [socket, socket.authenticated]);
 
   // Fetch on-chain Item NFTs owned by this wallet.
   // Re-runs on onChainRefreshTrigger bump — critical because equipped items

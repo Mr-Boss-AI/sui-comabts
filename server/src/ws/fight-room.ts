@@ -55,6 +55,28 @@ export function setClientsRef(clients: Map<string, ConnectedClient>): void {
   clientsRef = clients;
 }
 
+/**
+ * Optional callback invoked whenever a fight is started or ended for a
+ * given wallet. Wired by `handler.ts` to drive the Bucket 3 presence
+ * service (`status: 'in_fight'` ↔ `'online'`). Kept as an injection
+ * point so this module stays decoupled from the presence layer.
+ */
+let presenceFightBroadcaster: ((wallet: string, fightId: string | null) => void) | null = null;
+
+export function setPresenceFightBroadcaster(
+  fn: ((wallet: string, fightId: string | null) => void) | null,
+): void {
+  presenceFightBroadcaster = fn;
+}
+
+function notifyFightChanged(wallet: string, fightId: string | null): void {
+  try {
+    presenceFightBroadcaster?.(wallet, fightId);
+  } catch (err: any) {
+    console.error('[Presence] fight broadcaster threw:', err?.message ?? err);
+  }
+}
+
 function getClientByWallet(walletAddress: string): ConnectedClient | undefined {
   for (const [, client] of clientsRef) {
     if (client.walletAddress === walletAddress) return client;
@@ -196,6 +218,11 @@ export async function createFight(
 
   if (clientA) clientA.currentFightId = fight.id;
   if (clientB) clientB.currentFightId = fight.id;
+
+  // Bucket 3 presence — broadcast `in_fight` status so the player
+  // sidebar dims them and the "Watch" button replaces "Fight".
+  notifyFightChanged(characterA.walletAddress, fight.id);
+  notifyFightChanged(characterB.walletAddress, fight.id);
 
   const fightPayload = buildFightStatePayload(fight);
 
@@ -824,6 +851,11 @@ function finishFight(
   const clientB = getClientByWallet(fight.playerB.walletAddress);
   if (clientA) clientA.currentFightId = undefined;
   if (clientB) clientB.currentFightId = undefined;
+
+  // Bucket 3 presence — broadcast `online` status so the player
+  // sidebar lights them back up.
+  notifyFightChanged(fight.playerA.walletAddress, null);
+  notifyFightChanged(fight.playerB.walletAddress, null);
 
   // Move to finished fights
   activeFights.delete(fight.id);

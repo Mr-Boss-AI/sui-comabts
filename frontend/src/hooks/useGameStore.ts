@@ -15,7 +15,12 @@ import type {
   WagerLobbyEntry,
 } from "@/types/game";
 import type { OnChainCharacter } from "@/lib/sui-contracts";
-import type { FightHistoryEntry } from "@/types/ws-messages";
+import type {
+  FightHistoryEntry,
+  FightRequestWire,
+  DmChannelWire,
+  PlayerProfileWire,
+} from "@/types/ws-messages";
 import { EMPTY_EQUIPMENT, cloneEquipment } from "@/lib/loadout";
 import type { AuthPhase } from "@/lib/auth-phase";
 import { applyLocalAllocate } from "@/lib/stat-points";
@@ -128,6 +133,51 @@ export interface GameState {
   // is cleared. Avoids hoisting the modal-controller boolean into the
   // store while still letting the level-up flow open it directly.
   pendingStatAllocate: boolean;
+
+  // ===== Tavern (Bucket 3) =====
+  /** Pending fight requests addressed to me — server pushes one per
+   *  `fight_request_received`. Sorted oldest-first; the toast
+   *  controller renders newest at the top. */
+  incomingFightRequests: FightRequestWire[];
+  /** Outgoing requests I sent that are still pending — used to gate
+   *  the "Challenge" button in the player sidebar (one outgoing per
+   *  target at a time). */
+  outgoingFightRequests: FightRequestWire[];
+  /** All DM channels I'm a participant in, plus my unread counter
+   *  per channel. Server populates via `dm_channels_list`. */
+  dmChannels: DmChannelWire[];
+  dmTotalUnread: number;
+  dmUnreadByChannel: Record<string, number>;
+  /** Wallet of the peer whose profile is currently open in the modal
+   *  (or null if no modal open). The modal listens on
+   *  `playerProfile` to render the body. */
+  openProfileWallet: string | null;
+  playerProfile: PlayerProfileWire | null;
+  /** Wallet of the peer I'm currently DMing (or null). Drives the
+   *  DmPanel mount + the `clear_dm_unread` send on open. */
+  openDmPeer: string | null;
+  /** Pre-filled wager target — when set, navigating to the Arena
+   *  scrolls the wager-create form into focus with this opponent's
+   *  wallet shown. Cleared on first wager-create attempt or on the
+   *  next area change. */
+  prefilledWagerTarget: { wallet: string; name: string; stakeMist?: string } | null;
+
+  /** Live DM-incoming toast queue. The reducer pushes a fresh toast
+   *  when `dm_unread_changed` arrives for a channel whose peer is
+   *  NOT the currently-open DM peer (the panel itself eats the
+   *  notification when open). Component renders top-right; user can
+   *  click a toast to open the DM panel for that peer or dismiss it
+   *  individually. Auto-fade is timer-driven inside the component
+   *  so the reducer stays pure. Capped at 4 simultaneous; older
+   *  toasts evicted FIFO when new ones arrive. */
+  dmIncomingToasts: Array<{
+    id: string;
+    peerWallet: string;
+    peerName: string;
+    channelId: string;
+    unreadCount: number;
+    createdAt: number;
+  }>;
 }
 
 export const initialGameState: GameState = {
@@ -159,6 +209,16 @@ export const initialGameState: GameState = {
   opponentDisconnect: null,
   levelUpEvent: null,
   pendingStatAllocate: false,
+  incomingFightRequests: [],
+  outgoingFightRequests: [],
+  dmChannels: [],
+  dmTotalUnread: 0,
+  dmUnreadByChannel: {},
+  openProfileWallet: null,
+  playerProfile: null,
+  openDmPeer: null,
+  prefilledWagerTarget: null,
+  dmIncomingToasts: [],
 };
 
 export type GameAction =
@@ -201,7 +261,47 @@ export type GameAction =
   | { type: "LOCAL_ALLOCATE"; strength: number; dexterity: number; intuition: number; endurance: number }
   | { type: "BUMP_ONCHAIN_REFRESH" }
   | { type: "UPDATE_TURN"; turn: number; turnDeadline: number }
-  | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult };
+  | { type: "APPEND_TURN_RESULT"; fight: FightState; result: import("@/types/game").TurnResult }
+  // ===== Tavern (Bucket 3) =====
+  | { type: "ADD_INCOMING_FIGHT_REQUEST"; request: FightRequestWire }
+  | { type: "REMOVE_FIGHT_REQUEST"; requestId: string }
+  | {
+      type: "SET_FIGHT_REQUEST_LISTS";
+      incoming: FightRequestWire[];
+      outgoing: FightRequestWire[];
+    }
+  | { type: "ADD_OUTGOING_FIGHT_REQUEST"; request: FightRequestWire }
+  | { type: "SET_DM_CHANNELS"; channels: DmChannelWire[]; totalUnread: number }
+  | { type: "UPSERT_DM_CHANNEL"; channel: DmChannelWire }
+  | {
+      type: "SET_DM_UNREAD";
+      channelId: string;
+      unreadCount: number;
+      totalUnread: number;
+      lastMessageAt: number | null;
+    }
+  | { type: "OPEN_PROFILE"; walletAddress: string | null }
+  | { type: "SET_PLAYER_PROFILE"; profile: PlayerProfileWire | null }
+  | { type: "OPEN_DM"; peerWallet: string | null }
+  | {
+      type: "SET_PREFILLED_WAGER_TARGET";
+      target: GameState["prefilledWagerTarget"];
+    }
+  | {
+      // The reducer derives `peerName` from `state.onlinePlayers` at
+      // dispatch time so the call site (handleMessage) doesn't have
+      // to pass a stale-closure snapshot. The reducer ALSO checks
+      // `state.openDmPeer` and skips the toast when the matching DM
+      // panel is already open — that decision MUST run against live
+      // state, not a snapshot, otherwise opening a panel just before
+      // a message lands would still surface a redundant toast.
+      type: "PUSH_DM_TOAST";
+      senderWallet: string;
+      channelId: string;
+      unreadCount: number;
+    }
+  | { type: "DISMISS_DM_TOAST"; id: string }
+  | { type: "DISMISS_DM_TOASTS_FOR_CHANNEL"; channelId: string };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
@@ -451,6 +551,176 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case "SET_PENDING_STAT_ALLOCATE":
       if (state.pendingStatAllocate === action.pending) return state;
       return { ...state, pendingStatAllocate: action.pending };
+    // ===== Tavern (Bucket 3) =====
+    case "ADD_INCOMING_FIGHT_REQUEST": {
+      // Replace any prior pending request with the same id; otherwise
+      // append. Server is authoritative — duplicate ids should not
+      // happen but be defensive.
+      const without = state.incomingFightRequests.filter(
+        (r) => r.id !== action.request.id,
+      );
+      return {
+        ...state,
+        incomingFightRequests: [...without, action.request].sort(
+          (a, b) => a.createdAt - b.createdAt,
+        ),
+      };
+    }
+    case "REMOVE_FIGHT_REQUEST":
+      return {
+        ...state,
+        incomingFightRequests: state.incomingFightRequests.filter(
+          (r) => r.id !== action.requestId,
+        ),
+        outgoingFightRequests: state.outgoingFightRequests.filter(
+          (r) => r.id !== action.requestId,
+        ),
+      };
+    case "SET_FIGHT_REQUEST_LISTS":
+      return {
+        ...state,
+        incomingFightRequests: action.incoming,
+        outgoingFightRequests: action.outgoing,
+      };
+    case "ADD_OUTGOING_FIGHT_REQUEST": {
+      const without = state.outgoingFightRequests.filter(
+        (r) => r.id !== action.request.id,
+      );
+      return {
+        ...state,
+        outgoingFightRequests: [...without, action.request].sort(
+          (a, b) => a.createdAt - b.createdAt,
+        ),
+      };
+    }
+    case "SET_DM_CHANNELS": {
+      const map: Record<string, number> = {};
+      // Preserve any per-channel counter the server didn't include —
+      // the list call carries the totalUnread but per-channel granularity
+      // arrives via dm_unread_changed. Default to existing values.
+      for (const ch of action.channels) {
+        map[ch.channelId] = state.dmUnreadByChannel[ch.channelId] ?? 0;
+      }
+      return {
+        ...state,
+        dmChannels: action.channels,
+        dmTotalUnread: action.totalUnread,
+        dmUnreadByChannel: map,
+      };
+    }
+    case "UPSERT_DM_CHANNEL": {
+      const without = state.dmChannels.filter(
+        (c) => c.channelId !== action.channel.channelId,
+      );
+      return {
+        ...state,
+        dmChannels: [action.channel, ...without].sort((a, b) => {
+          const ax = a.lastMessageAt ?? a.createdAt;
+          const bx = b.lastMessageAt ?? b.createdAt;
+          return bx - ax;
+        }),
+      };
+    }
+    case "SET_DM_UNREAD": {
+      const nextChannels = state.dmChannels.map((ch) =>
+        ch.channelId === action.channelId
+          ? { ...ch, lastMessageAt: action.lastMessageAt }
+          : ch,
+      );
+      return {
+        ...state,
+        dmChannels: nextChannels,
+        dmTotalUnread: action.totalUnread,
+        dmUnreadByChannel: {
+          ...state.dmUnreadByChannel,
+          [action.channelId]: action.unreadCount,
+        },
+      };
+    }
+    case "OPEN_PROFILE":
+      return {
+        ...state,
+        openProfileWallet: action.walletAddress,
+        // Stale data is worse than no data — clear the panel until the
+        // server replies.
+        playerProfile:
+          action.walletAddress
+            && state.playerProfile?.walletAddress.toLowerCase()
+              === action.walletAddress.toLowerCase()
+            ? state.playerProfile
+            : null,
+      };
+    case "SET_PLAYER_PROFILE":
+      return { ...state, playerProfile: action.profile };
+    case "OPEN_DM": {
+      // Opening a DM panel implicitly dismisses any toasts for that
+      // peer — otherwise the toast lingers above an already-open
+      // conversation, which is just noise.
+      const next = { ...state, openDmPeer: action.peerWallet };
+      if (action.peerWallet) {
+        const peerLower = action.peerWallet.toLowerCase();
+        next.dmIncomingToasts = state.dmIncomingToasts.filter(
+          (t) => t.peerWallet.toLowerCase() !== peerLower,
+        );
+      }
+      return next;
+    }
+    case "SET_PREFILLED_WAGER_TARGET":
+      return { ...state, prefilledWagerTarget: action.target };
+    case "PUSH_DM_TOAST": {
+      // Live-state guard — if the DM panel for this peer is open, the
+      // panel itself surfaces the message (its `dm_unread_changed`
+      // watcher refreshes the message list). Toast would just be
+      // redundant noise. Pre-fix this check lived in handleMessage's
+      // closure and used a stale snapshot; moving it into the reducer
+      // means the comparison always runs against live state.
+      const senderLower = action.senderWallet.toLowerCase();
+      if (state.openDmPeer?.toLowerCase() === senderLower) {
+        return state;
+      }
+      // Resolve display name from live online-players. Falls back to
+      // a truncated wallet when the peer isn't currently in the
+      // sidebar (offline player who DM'd before going dark — rare).
+      const onlinePeer = state.onlinePlayers.find(
+        (op) => op.walletAddress.toLowerCase() === senderLower,
+      );
+      const peerName =
+        onlinePeer?.name ??
+        `${action.senderWallet.slice(0, 6)}…${action.senderWallet.slice(-4)}`;
+      const newToast = {
+        id: `${action.channelId}-${Date.now()}`,
+        peerWallet: action.senderWallet,
+        peerName,
+        channelId: action.channelId,
+        unreadCount: action.unreadCount,
+        createdAt: Date.now(),
+      };
+      // Coalesce by channelId — replace any pre-existing toast for
+      // the same channel with the fresh one (latest count, latest
+      // createdAt). FIFO cap at 4 keeps the stack manageable.
+      const without = state.dmIncomingToasts.filter(
+        (t) => t.channelId !== action.channelId,
+      );
+      const next = [...without, newToast];
+      return {
+        ...state,
+        dmIncomingToasts: next.length > 4 ? next.slice(next.length - 4) : next,
+      };
+    }
+    case "DISMISS_DM_TOAST":
+      return {
+        ...state,
+        dmIncomingToasts: state.dmIncomingToasts.filter(
+          (t) => t.id !== action.id,
+        ),
+      };
+    case "DISMISS_DM_TOASTS_FOR_CHANNEL":
+      return {
+        ...state,
+        dmIncomingToasts: state.dmIncomingToasts.filter(
+          (t) => t.channelId !== action.channelId,
+        ),
+      };
     default:
       return state;
   }

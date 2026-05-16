@@ -55,34 +55,44 @@ console.log('Found migrations:');
 for (const name of migrationFiles) console.log(`  • ${name}`);
 console.log('');
 
-// Smoke-test: ping a known table from 001 to confirm creds + URL.
-const probe = await fetch(
-  `${SUPABASE_URL}/rest/v1/characters?select=wallet_address&limit=0`,
-  {
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+// Smoke-test: ping each known table to confirm creds + URL.
+async function probe(table, selectCol) {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/${table}?select=${selectCol}&limit=0`,
+    {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+      },
     },
-  },
-);
+  );
+  return r.ok;
+}
 
-const charactersExist = probe.ok;
-const wagerProbe = await fetch(
-  `${SUPABASE_URL}/rest/v1/wager_in_flight?select=wager_match_id&limit=0`,
-  {
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-    },
-  },
-);
-const wagerInFlightExists = wagerProbe.ok;
+const charactersExist = await probe('characters', 'wallet_address');
+const wagerInFlightExists = await probe('wager_in_flight', 'wager_match_id');
+const presenceExists = await probe('presence', 'wallet_address');
+const fightRequestsExist = await probe('fight_requests', 'id');
+const dmChannelsExist = await probe('dm_channels', 'channel_id');
+const friendsExist = await probe('friends', 'owner');
 
-console.log(`characters table:      ${charactersExist ? '✓ EXISTS' : '✗ MISSING'}`);
-console.log(`wager_in_flight table: ${wagerInFlightExists ? '✓ EXISTS' : '✗ MISSING'}`);
+const allExist =
+  charactersExist &&
+  wagerInFlightExists &&
+  presenceExists &&
+  fightRequestsExist &&
+  dmChannelsExist &&
+  friendsExist;
+
+console.log(`characters table:        ${charactersExist ? '✓ EXISTS' : '✗ MISSING'}`);
+console.log(`wager_in_flight table:   ${wagerInFlightExists ? '✓ EXISTS' : '✗ MISSING'}`);
+console.log(`presence table:          ${presenceExists ? '✓ EXISTS' : '✗ MISSING'}`);
+console.log(`fight_requests table:    ${fightRequestsExist ? '✓ EXISTS' : '✗ MISSING'}`);
+console.log(`dm_channels table:       ${dmChannelsExist ? '✓ EXISTS' : '✗ MISSING'}`);
+console.log(`friends table:           ${friendsExist ? '✓ EXISTS' : '✗ MISSING'}`);
 console.log('');
 
-if (charactersExist && wagerInFlightExists) {
+if (allExist) {
   console.log('All required tables exist. No migration needed.');
   console.log('(If you added a new migration file, paste it manually below.)');
   console.log('');

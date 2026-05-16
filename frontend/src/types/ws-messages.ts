@@ -72,7 +72,56 @@ export type ClientMessage =
   | { type: "accept_challenge"; challengeId: string }
   | { type: "decline_challenge"; challengeId: string }
   | { type: "get_wager_lobby" }
-  | { type: "cancel_wager_lobby"; wagerMatchId: string };
+  | { type: "cancel_wager_lobby"; wagerMatchId: string }
+  // ===== Tavern (Bucket 3) =====
+  | { type: "enter_room"; room: TavernRoom }
+  | { type: "presence_heartbeat" }
+  | { type: "get_player_profile"; walletAddress: string }
+  | {
+      type: "send_fight_request";
+      toWallet: string;
+      requestType: "friendly" | "wager";
+      stakeMist?: string;
+      message?: string;
+    }
+  | { type: "accept_fight_request"; requestId: string }
+  | { type: "decline_fight_request"; requestId: string }
+  | { type: "cancel_fight_request"; requestId: string }
+  | { type: "get_pending_fight_requests" }
+  | {
+      type: "register_dm_channel";
+      channelId: string;
+      walletA: string;
+      walletB: string;
+      memberCapA?: string;
+      memberCapB?: string;
+      encryptedKeyB64?: string;
+    }
+  | { type: "notify_dm_sent"; channelId: string; recipient: string }
+  | { type: "clear_dm_unread"; channelId: string }
+  | { type: "get_dm_channels" }
+  | { type: "lookup_dm_channel"; peerWallet: string }
+  // Plaintext DM transport (Hotfix #6, 2026-05-06). The server lazily
+  // registers a synthetic channel on first send + persists bodies to
+  // dm_messages. Selected via NEXT_PUBLIC_DM_TRANSPORT=plaintext (default).
+  | {
+      type: "dm_send";
+      /** Caller-generated id used to match the server echo
+       *  (`dm_message_sent`) back to the optimistic bubble. Any unique
+       *  string — a UUID is fine; the panel uses `pending-${ts}-${rand}`. */
+      clientId: string;
+      peerWallet: string;
+      body: string;
+    }
+  | {
+      type: "dm_history";
+      peerWallet: string;
+      /** Default 50, max 200. Server clamps if exceeded. */
+      limit?: number;
+      /** Cursor for pagination (older page). When omitted, returns
+       *  the most recent page. */
+      beforeId?: string;
+    };
 
 // ===== SERVER → CLIENT =====
 export type ServerMessage =
@@ -203,7 +252,131 @@ export type ServerMessage =
       turn: number;
       deadline: number;
       remainingMs: number;
+    }
+  // ===== Tavern (Bucket 3) =====
+  | { type: "room_entered"; room: TavernRoom }
+  | { type: "player_profile"; profile: PlayerProfileWire }
+  | { type: "player_profile_not_found"; walletAddress: string }
+  | { type: "fight_request_sent"; request: FightRequestWire }
+  | { type: "fight_request_received"; request: FightRequestWire }
+  | {
+      type: "fight_request_resolved";
+      request: FightRequestWire;
+      action: "accept" | "decline" | "cancel" | "expire";
+    }
+  | {
+      type: "fight_request_pending_list";
+      incoming: FightRequestWire[];
+      outgoing: FightRequestWire[];
+    }
+  | { type: "wager_challenge_ready"; request: { id: string; toWallet: string; toName: string; stakeMist: string | null } }
+  | { type: "wager_challenge_waiting"; request: { id: string; fromWallet: string; fromName: string; stakeMist: string | null } }
+  | { type: "dm_channel_registered"; channel: DmChannelWire }
+  | { type: "dm_channel_lookup"; peerWallet: string; channel: DmChannelWire | null }
+  | {
+      type: "dm_unread_changed";
+      channelId: string;
+      unreadCount: number;
+      totalUnread: number;
+      lastMessageAt: number | null;
+      /** Wallet of the OTHER participant — present only on the bump path
+       *  (`notify_dm_sent` → recipient). Absent on the self-clear path
+       *  (`clear_dm_unread` → caller's own ack), since the sender is the
+       *  caller themselves and the toast/badge UX doesn't apply. */
+      senderWallet?: string;
+    }
+  | { type: "dm_channels_list"; channels: DmChannelWire[]; totalUnread: number }
+  // Plaintext DM transport (Hotfix #6, 2026-05-06).
+  | {
+      type: "dm_message_sent";
+      /** Echoes the caller's clientId so the panel matches this
+       *  server-confirmed message back to its optimistic bubble. */
+      clientId: string;
+      message: DmMessageWire;
+    }
+  | {
+      type: "dm_message_received";
+      message: DmMessageWire;
+    }
+  | {
+      type: "dm_history";
+      peerWallet: string;
+      /** Null iff no channel exists yet for this pair (no DMs ever
+       *  exchanged). Drives the panel's "no messages yet" empty state. */
+      channelId: string | null;
+      /** Chronological — oldest first within the page. */
+      messages: DmMessageWire[];
+      hasMore: boolean;
     };
+
+export type TavernRoom =
+  | "tavern"
+  | "character"
+  | "arena"
+  | "marketplace"
+  | "hall_of_fame"
+  | "fight";
+
+export interface PlayerProfileWire {
+  walletAddress: string;
+  name: string;
+  level: number;
+  xp: number;
+  rating: number;
+  wins: number;
+  losses: number;
+  totalFights: number;
+  winRate: number;
+  stats: {
+    strength: number;
+    dexterity: number;
+    intuition: number;
+    endurance: number;
+  };
+  unallocatedPoints: number;
+  equipment: import("./game").EquipmentSlots;
+  onChainObjectId?: string;
+  fresh: boolean;
+}
+
+export interface FightRequestWire {
+  id: string;
+  requestType: "friendly" | "wager";
+  fromWallet: string;
+  fromName: string;
+  toWallet: string;
+  toName: string;
+  stakeMist: string | null;
+  message: string | null;
+  status: "pending" | "accepted" | "declined" | "canceled" | "expired";
+  expiresAt: number;
+  resolvedAt: number | null;
+  createdAt: number;
+}
+
+export interface DmChannelWire {
+  channelId: string;
+  participantA: string;
+  participantB: string;
+  memberCapA: string | null;
+  memberCapB: string | null;
+  encryptedKeyB64: string | null;
+  createdBy: string;
+  createdAt: number;
+  lastMessageAt: number | null;
+}
+
+/** Plaintext DM message wire shape (Hotfix #6). Hint: maps cleanly to
+ *  the existing `LocalMessage`/`DecryptedMessageWire` shapes consumed
+ *  by `DmPanel`, so the rendering JSX is transport-agnostic. */
+export interface DmMessageWire {
+  id: string;
+  channelId: string;
+  senderWallet: string;
+  recipientWallet: string;
+  body: string;
+  createdAtMs: number;
+}
 
 export interface FightHistoryEntry {
   id: string;

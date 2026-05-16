@@ -16,6 +16,17 @@ import { setOnChainObjectId, restoreCharacterFromChain, deleteCharacter } from '
 import { getConnectedClients, adoptWagerIntoLobby, broadcastToAuthenticated } from './ws/handler';
 import { startMarketplaceIndex, shutdownMarketplaceIndex, subscribeMarketplace, listingToWire } from './data/marketplace';
 import { sweepOrphanActiveWagers } from './data/orphan-wager-recovery';
+import {
+  sweepStalePresence,
+  sweepStalePresenceInDb,
+  PRESENCE_STALE_MS,
+} from './data/presence';
+import {
+  sweepExpired as sweepExpiredFightRequests,
+  rehydratePendingFromDb as rehydrateFightRequests,
+} from './data/fight-requests';
+import { rehydrateFromDb as rehydrateDmChannels } from './data/dm-channels';
+import { rehydrateRecentFromDb as rehydrateDmMessages } from './data/dm-messages';
 import type { QueueEntry, WagerLobbyEntry } from './types';
 
 // === Express App ===
@@ -515,6 +526,89 @@ initMatchmaking(onMatchFound);
 // === Initialize Supabase ===
 
 getSupabase();
+
+// === Bucket 3 — Tavern boot wiring ===
+//
+// Pull pending DM channel rows + still-live fight requests back into the
+// in-memory stores so a player whose pending challenge spans a server
+// restart still sees it. Presence rows older than the stale window are
+// dropped on boot so a player who was online when the server crashed
+// doesn't haunt the player list forever.
+sweepStalePresenceInDb()
+  .then((dropped) => {
+    if (dropped > 0) console.log(`[Presence] Boot sweep dropped ${dropped} stale row(s).`);
+  })
+  .catch((err) => console.error('[Presence] Boot sweep failed:', err?.message ?? err));
+
+rehydrateDmChannels()
+  .catch((err) => console.error('[DmChannels] Boot rehydrate failed:', err?.message ?? err));
+
+rehydrateDmMessages()
+  .catch((err) => console.error('[DmMessages] Boot rehydrate failed:', err?.message ?? err));
+
+// ─── Hotfix #6 boot banner ───────────────────────────────────────────
+// Confirms the plaintext DM transport handlers are wired. If a
+// contributor reports "the server keeps saying Unknown message type:
+// dm_send" the first thing to check is whether THIS line appeared in
+// the server log on the most recent restart — missing line means the
+// old node process is still running.
+console.log(
+  '[Tavern] DM transport: plaintext WS + Supabase (Hotfix #6 ' +
+    '— dm_send / dm_history wired via dispatchTavernMessage). ' +
+    'Encrypted SDK path preserved behind NEXT_PUBLIC_DM_TRANSPORT=encrypted.',
+);
+
+rehydrateFightRequests()
+  .then((live) => {
+    if (live.length > 0) {
+      console.log(`[FightRequests] Boot rehydrate restored ${live.length} pending request(s).`);
+    }
+  })
+  .catch((err) => console.error('[FightRequests] Boot rehydrate failed:', err?.message ?? err));
+
+// Periodic sweepers — presence stale rows every 30s, fight-request TTL
+// every 10s. Both unrefed so they don't keep the process alive.
+
+setInterval(() => {
+  const dropped = sweepStalePresence();
+  if (dropped.length > 0) {
+    for (const wallet of dropped) {
+      broadcastToAuthenticated({ type: 'player_left', walletAddress: wallet });
+    }
+    console.log(`[Presence] sweep dropped ${dropped.length} stale wallet(s)`);
+  }
+}, Math.min(PRESENCE_STALE_MS / 2, 30_000)).unref();
+
+setInterval(() => {
+  sweepExpiredFightRequests((req) => {
+    const expiryMsg = {
+      type: 'fight_request_resolved',
+      action: 'expire',
+      request: {
+        id: req.id,
+        requestType: req.requestType,
+        fromWallet: req.fromWallet,
+        fromName: req.fromName,
+        toWallet: req.toWallet,
+        toName: req.toName,
+        stakeMist: req.stakeMist ?? null,
+        message: req.message ?? null,
+        status: req.status,
+        expiresAt: req.expiresAt,
+        resolvedAt: req.resolvedAt ?? null,
+        createdAt: req.createdAt,
+      },
+    };
+    for (const [, c] of getConnectedClients()) {
+      if (
+        (c.walletAddress === req.fromWallet || c.walletAddress === req.toWallet) &&
+        c.socket.readyState === c.socket.OPEN
+      ) {
+        c.socket.send(JSON.stringify(expiryMsg));
+      }
+    }
+  });
+}, 10_000).unref();
 
 // === Crash recovery — orphan ACTIVE wager sweeper ===
 //
