@@ -12,6 +12,129 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — Wager-accept double-click race + abort-code toast, 2026-05-18
+
+Fixes the EMatchNotWaiting (abort code 1) MoveAbort that blocked wager
+testing minutes after the disconnect/spectator commit shipped.
+
+**The incident.** MrBoss created an open 0.1 SUI wager
+`0xbc34...7056`. ShakaLiX clicked Accept, the chain tx
+`8nv6hd1u…` landed at 2026-05-18T19:49:04Z, the wager flipped
+WAITING→ACTIVE, `escrow` grew to 0.2 SUI, `player_b` was pinned to
+ShakaLiX. *Then* ShakaLiX clicked Accept again — the lobby UI hadn't
+removed the entry yet because removal was server-pushed only — and
+the second click hit `assert!(wager.status == STATUS_WAITING, EMatchNotWaiting)`
+at `arena.move:123` (bytecode instruction 14). The SDK surfaced
+`Transaction resolution failed: MoveAbort in 2nd command, abort code: 1`
+which read like the FIRST accept failed.
+
+**Root cause — three-piece race:**
+
+1. `handleAcceptWager`'s finally block flipped `signing=false` as soon
+   as the first sign-and-execute resolved, re-enabling the Accept
+   button instantly.
+2. `state.wagerLobby` removal was driven by the server's
+   `wager_lobby_removed` broadcast — typically 200-2000ms after the
+   chain tx lands. During that window the lobby entry stayed visible.
+3. The second click went straight to `signAndExecuteTransaction` with
+   no pre-flight, so the only failure surface was the SDK's cryptic
+   post-sign abort string — no domain context, no recovery hint.
+
+**Audit — clean. The race is symmetric across arena entry points.**
+- `accept_wager`: fixed (this commit).
+- `cancel_wager`: identical race shape — creator clicks Cancel while
+  acceptor's tx lands first; `cancel_wager` asserts WAITING (line 196)
+  and aborts with the same code 1. **Fixed in this commit** with the
+  same pre-flight + optimistic local removal.
+- `create_wager`: no race — single-actor path. Only failure mode is
+  `EInvalidStake` (code 0) if input rounds to 0 MIST. Pre-flight now
+  catches this too.
+- `settle_wager`, `admin_cancel_wager`, `cancel_expired_wager`: not
+  user-facing (treasury / cron / safety net). No UI change needed; the
+  shared `humanizeChainError(raw, ARENA_ABORT_CODES)` mapping still
+  applies if any of them ever surface in an admin console.
+
+### Added
+- `frontend/src/lib/arena-aborts.ts` — `ARENA_ABORT_CODES`
+  (`AbortCodeMap`) covering every constant in `arena.move:9-19`. Single
+  source of truth for the toast lookup; pinned by
+  `qa-arena-aborts.ts`.
+- `frontend/src/lib/wager-preflight.ts` — `simulateWagerTx(client, tx,
+  walletAddress, ctxLabel)`. Sets sender, runs
+  `client.simulateTransaction({ include: { effects: true } })`,
+  routes any abort through `assertTxSucceeded` with
+  `ARENA_ABORT_CODES` so the user sees the friendly copy BEFORE the
+  wallet popup. RPC failures fail-open (server's chain probe is the
+  final safety net).
+- `scripts/qa-arena-aborts.ts` — pure-unit gauntlet (41 assertions)
+  covering every Move constant + the canonical SDK error string from
+  the 2026-05-18 incident verbatim + the bare-code fallback +
+  every-code round-trip + unknown-code graceful fallback.
+- `scripts/qa-wager-accept-race.ts` — source-grep gauntlet (16
+  assertions) pinning the wiring: pre-flight present in every signing
+  path, REMOVE_WAGER_LOBBY_ENTRY dispatches on BOTH simulation
+  failure AND post-sign success, optimistic dispatch ordered before
+  the WS `wager_accepted` send, conditional `txDigest` spread.
+- `contracts/tests/arena_tests.move::test_double_accept_aborts` —
+  EXACT incident reproduction (Alice creates, Bob accepts → success,
+  Eve tries → abort code 1). Move-side regression guard.
+- `contracts/tests/arena_tests.move::test_cancel_after_accept_aborts`
+  — symmetric guard for the cancel race.
+
+### Changed
+- `matchmaking-queue.tsx::handleAcceptWager` —
+  (a) pre-flights via `simulateWagerTx` before signing; on failure
+  dispatches `REMOVE_WAGER_LOBBY_ENTRY` (clears the stale entry) and
+  surfaces the humanized abort copy via `SET_ERROR`; skips the wallet
+  popup entirely.
+  (b) on a successful post-sign result, dispatches
+  `REMOVE_WAGER_LOBBY_ENTRY` BEFORE the `wager_accepted` WS send so
+  the lobby reflects truth synchronously and a double-click during
+  the server-round-trip window can't fire a second sign attempt.
+  (c) passes `ARENA_ABORT_CODES` to `assertTxSucceeded` so any
+  post-sign abort gets the same friendly message as the pre-flight.
+- `matchmaking-queue.tsx::handleCancelWager` — same pre-flight + post-
+  sign assert wiring as accept.
+- `matchmaking-queue.tsx::handleQueue` (create_wager branch) — pre-
+  flight added; passes `ARENA_ABORT_CODES` to `assertTxSucceeded`.
+- `matchmaking-queue.tsx` — added `useCurrentClient` for the simulation
+  client; conditional `txDigest` spread (`...(digest ? { txDigest:
+  digest } : {})`) replaces the pre-existing `digest ?? undefined`
+  cast against a required field.
+- `ws-messages.ts` — `wager_accepted.txDigest` is now optional. The
+  server doesn't strictly need it (it re-reads chain state via
+  `getWagerStatus`) and some wallets occasionally return a
+  success-shaped result without a digest. Closes the pre-existing TS
+  regression flagged in commit `e91c8e7`.
+- `useEquipmentActions.ts` — imports `humanizeChainError` from
+  `@/lib/tx-result` (closes the other pre-existing TS regression).
+- `qa-wager-accept-gate.ts` — assertions updated to pin the new
+  `assertTxSucceeded(..., ARENA_ABORT_CODES)` call sites and the
+  presence of `simulateWagerTx`. Was 67 PASS → now 68 PASS.
+
+### Verified on-chain
+Reproduced the user's exact MoveAbort by calling
+`client.simulateTransaction` against the now-ACTIVE wager
+`0xbc34...7056` from ShakaLiX's address. Got back:
+```
+$kind: FailedTransaction
+abortCode: "1", module: "arena", functionName: "accept_wager", instruction: 14
+```
+Pre-flight catches this verbatim and surfaces:
+*"accept_wager failed: The wager is no longer waiting for an opponent —
+it was just accepted or cancelled. Refresh the lobby. (at arena::accept_wager:14)"*
+
+### Tests
+- 37 / 37 Move unit tests PASS (was 35 / 35 — added 2 new).
+- `qa-arena-aborts.ts` NEW (41 PASS).
+- `qa-wager-accept-race.ts` NEW (16 PASS).
+- `qa-wager-accept-gate.ts` (extended, 68 PASS).
+- 0 regressions in any other gauntlet.
+- Server tsc clean. Frontend tsc clean (the two pre-existing
+  regressions flagged at `e91c8e7` are now resolved).
+
+---
+
 ## [Unreleased] — Wallet-disconnect + guest spectator, 2026-05-18
 
 Fixes two post-disconnect UX bugs on the landing/lobby that surfaced

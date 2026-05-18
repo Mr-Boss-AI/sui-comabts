@@ -53,7 +53,13 @@ export type ClientMessage =
   | { type: "allocate_points"; strength: number; dexterity: number; intuition: number; endurance: number }
   | { type: "queue_fight"; fightType: FightType; wagerAmount?: number; wagerMatchId?: string; onChainEquipment?: Record<string, unknown> }
   | { type: "cancel_queue" }
-  | { type: "wager_accepted"; wagerMatchId: string; txDigest: string }
+  // txDigest is observability-only — the server re-reads chain state via
+  // getWagerStatus, so an absent digest is non-fatal. Optional so the
+  // dapp-kit signer's occasional digest-less success result (e.g. some
+  // wallets swallow it) doesn't force a `'' as string` cast at the call
+  // site (pre-fix that was a `digest ?? undefined` against a required
+  // field, flagged as a TS regression at e91c8e7).
+  | { type: "wager_accepted"; wagerMatchId: string; txDigest?: string }
   | { type: "fight_action"; attackZones: Zone[]; blockZones: Zone[] }
   | { type: "chat_message"; content: string; target?: string }
   | { type: "get_online_players" }

@@ -11,7 +11,11 @@ import {
   EMPTY_EQUIPMENT,
 } from "@/lib/loadout";
 import { evaluateTwoHandedConflict } from "@/lib/two-handed-weapons";
-import { assertTxSucceeded, type AbortCodeMap } from "@/lib/tx-result";
+import {
+  assertTxSucceeded,
+  humanizeChainError,
+  type AbortCodeMap,
+} from "@/lib/tx-result";
 import type { EquipmentSlots, Item } from "@/types/game";
 
 // Maps equipment.move abort codes to user-facing strings. These codes are

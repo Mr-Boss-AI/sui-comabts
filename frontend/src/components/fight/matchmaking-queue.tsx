@@ -6,13 +6,16 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useGame } from "@/hooks/useGameStore";
 import { useWalletBalance } from "@/hooks/useWalletBalance";
-import { useDAppKit } from "@mysten/dapp-kit-react";
+import { useDAppKit, useCurrentClient } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager, canAcceptWagerWithBalance } from "@/lib/wager-accept-gate";
 import { assertTxSucceeded, extractTxDigest } from "@/lib/tx-result";
+import { ARENA_ABORT_CODES } from "@/lib/arena-aborts";
+import { simulateWagerTx } from "@/lib/wager-preflight";
 import { computeBusyState, decideMatchmakingRender } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 import { ScreenLayout, TopBanner, SectionHeader } from "@/components/v2/layout";
@@ -160,6 +163,7 @@ export function MatchmakingQueue() {
     }
   }, [state.prefilledWagerTarget]);
   const dAppKit = useDAppKit();
+  const client = useCurrentClient() as SuiGrpcClient | null;
   const balance = useWalletBalance();
   // Reserve a buffer for gas. 0.05 SUI is more than enough headroom for the
   // create_wager tx (typical gas is <0.005 SUI) and prevents the user from
@@ -237,19 +241,30 @@ export function MatchmakingQueue() {
         const stakeAmountMist = BigInt(Math.round(parsedWager.amount * 1_000_000_000));
         const tx = buildCreateWagerTx(stakeAmountMist);
 
+        // 2026-05-18 pre-flight — catches `EInvalidStake (0)` if the
+        // input rounds to zero MIST and surfaces a friendly message
+        // before opening the wallet popup. Also catches any future
+        // create_wager checks added in v5.1 without needing to update
+        // this site.
+        const preflight = await simulateWagerTx(
+          client,
+          tx,
+          walletAddress,
+          "create_wager",
+        );
+        if (!preflight.ok) {
+          dispatch({ type: "SET_ERROR", message: preflight.message });
+          return;
+        }
+
         const signer = new CurrentAccountSigner(dAppKit as any);
         const result = await signer.signAndExecuteTransaction({ transaction: tx });
 
         // Phase A (2026-05-17) — Bug B branching via the shared
-        // `assertTxSucceeded` helper. Pre-fix, this site coalesced
-        // `Transaction || FailedTransaction || result` into a single
-        // `txData`, hiding chain failures behind the same code path as
-        // success. The helper now throws with a contextual message
-        // (`create_wager failed: ...`) on any of the three known failure
-        // shapes, so the catch block below surfaces a real reason
-        // instead of letting the orphan-wager fall-through fire with
-        // no wagerMatchId.
-        assertTxSucceeded(result, "create_wager");
+        // `assertTxSucceeded` helper. Now carries the arena-aborts
+        // humanizer (2026-05-18) so any unexpected post-sign abort
+        // surfaces with the same friendly copy as the pre-flight.
+        assertTxSucceeded(result, "create_wager", ARENA_ABORT_CODES);
         const resultAny = result as any;
         const txData = resultAny.Transaction || resultAny;
 
@@ -366,6 +381,8 @@ export function MatchmakingQueue() {
     walletAddress,
     parsedWager,
     dAppKit,
+    client,
+    state.prefilledWagerTarget,
     dispatch,
   ]);
 
@@ -420,7 +437,35 @@ export function MatchmakingQueue() {
     }
     setSigning(true);
     try {
+      // 2026-05-18 pre-flight (Bug — EMatchNotWaiting). Run an unsigned
+      // simulation FIRST so a "wager already accepted by someone else"
+      // (status flipped WAITING→ACTIVE between lobby render and click)
+      // surfaces as a friendly toast instead of dragging the user
+      // through the wallet popup just to see the cryptic
+      // `MoveAbort in 2nd command, abort code: 1` from dapp-kit's
+      // post-sign resolve step. We also drop the lobby entry locally
+      // on a positive simulation so a double-click can't race a
+      // second sign attempt against the now-ACTIVE wager.
       const tx = buildAcceptWagerTx(entry.wagerMatchId, stakeAmountMist);
+      const preflight = await simulateWagerTx(
+        client,
+        tx,
+        walletAddress,
+        "accept_wager",
+      );
+      if (!preflight.ok) {
+        // Friendly message already pulled from ARENA_ABORT_CODES by
+        // simulateWagerTx's assertTxSucceeded wrapper. Drop the stale
+        // entry from the local lobby — the server will broadcast its
+        // own `wager_lobby_removed` shortly but the user gets an
+        // instant accurate view either way.
+        dispatch({
+          type: "REMOVE_WAGER_LOBBY_ENTRY",
+          wagerMatchId: entry.wagerMatchId,
+        });
+        dispatch({ type: "SET_ERROR", message: preflight.message });
+        return;
+      }
 
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
@@ -429,18 +474,28 @@ export function MatchmakingQueue() {
       // `assertTxSucceeded` helper. Pre-fix, this site grabbed a digest
       // from either the Transaction or FailedTransaction wrapper and
       // proceeded to send `wager_accepted` over the WS, so the server's
-      // chain probe was the first place the failure surfaced — emitting
-      // the unhelpful "Wager not active on-chain (status: 0)" toast.
-      // The helper now throws with a contextual `accept_wager failed:
-      // <reason>` message that the catch block below surfaces to the
-      // user verbatim.
-      assertTxSucceeded(result, "accept_wager");
+      // chain probe was the first place the failure surfaced. The
+      // helper now throws with a contextual `accept_wager failed:
+      // <reason>` (now carrying the arena-abort-codes humanizer too)
+      // that the catch block below surfaces verbatim.
+      assertTxSucceeded(result, "accept_wager", ARENA_ABORT_CODES);
       const digest = extractTxDigest(result);
+
+      // Optimistic local removal — the server will broadcast
+      // `wager_lobby_removed` soon but in the meantime the lobby UI
+      // would still show this entry, and signing has just released
+      // `signing=false` in the finally block. A double-click during
+      // that window is the exact race that produced the 2026-05-18
+      // incident; locking the entry locally on success closes it.
+      dispatch({
+        type: "REMOVE_WAGER_LOBBY_ENTRY",
+        wagerMatchId: entry.wagerMatchId,
+      });
 
       state.socket.send({
         type: "wager_accepted",
         wagerMatchId: entry.wagerMatchId,
-        txDigest: digest ?? undefined,
+        ...(digest ? { txDigest: digest } : {}),
       });
     } catch (err: any) {
       console.error("[Wager] accept_wager failed:", err);
@@ -448,17 +503,52 @@ export function MatchmakingQueue() {
     } finally {
       setSigning(false);
     }
-  }, [dAppKit, state.socket, dispatch, walletAddress, wagerLobby, balance.error, balance.mist, balance.loading]);
+  }, [
+    dAppKit,
+    client,
+    state.socket,
+    dispatch,
+    walletAddress,
+    wagerLobby,
+    balance.error,
+    balance.mist,
+    balance.loading,
+  ]);
 
   const handleCancelWager = useCallback(async (entry: WagerLobbyEntry) => {
     setSigning(true);
     try {
-      // Cancel on-chain first (player's own cancel)
+      // Cancel on-chain first (player's own cancel). Same EMatchNotWaiting
+      // race as accept_wager applies here — if someone accepted between
+      // the lobby render and the cancel click, cancel_wager aborts with
+      // code 1 and the user gets the cryptic dapp-kit toast. Pre-flight
+      // surfaces "the wager is no longer waiting…" before signing.
       const tx = buildCancelWagerTx(entry.wagerMatchId);
+      const preflight = await simulateWagerTx(
+        client,
+        tx,
+        walletAddress,
+        "cancel_wager",
+      );
+      if (!preflight.ok) {
+        dispatch({
+          type: "REMOVE_WAGER_LOBBY_ENTRY",
+          wagerMatchId: entry.wagerMatchId,
+        });
+        dispatch({ type: "SET_ERROR", message: preflight.message });
+        return;
+      }
       const signer = new CurrentAccountSigner(dAppKit as any);
-      await signer.signAndExecuteTransaction({ transaction: tx });
+      const result = await signer.signAndExecuteTransaction({ transaction: tx });
+      assertTxSucceeded(result, "cancel_wager", ARENA_ABORT_CODES);
 
-      // Tell server to remove from lobby
+      // Optimistic local removal — same race as the accept path.
+      dispatch({
+        type: "REMOVE_WAGER_LOBBY_ENTRY",
+        wagerMatchId: entry.wagerMatchId,
+      });
+
+      // Tell server to remove from lobby (idempotent server-side).
       state.socket.send({
         type: "cancel_wager_lobby",
         wagerMatchId: entry.wagerMatchId,
@@ -469,7 +559,7 @@ export function MatchmakingQueue() {
     } finally {
       setSigning(false);
     }
-  }, [dAppKit, state.socket, dispatch]);
+  }, [dAppKit, client, state.socket, dispatch, walletAddress]);
 
   // Show queue status (friendly/ranked only) — matches the Claude
   // Design Arena screenshot: gunmetal panel, frog mascot top, Slackey

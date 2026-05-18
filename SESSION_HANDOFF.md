@@ -1,3 +1,43 @@
+# Session Handoff — 2026-05-18 (Wager-accept race + abort-code toast)
+
+> Wager accept failed live with `MoveAbort code 1 (EMatchNotWaiting)`
+> minutes after the disconnect/spectator bundle shipped. Root cause:
+> a double-click race between sign success and the server's
+> `wager_lobby_removed` broadcast. Fixed at the root — pre-flight
+> dry-run + optimistic local lobby removal + arena abort-code toast
+> mapping. Full detail in [`CHANGELOG.md`](./CHANGELOG.md) "Wager-accept
+> double-click race" entry. Branch `feature/phase-2-design`. Upstream
+> `main` still v4-era `08ff991`; **do not merge until v5.1 republish lands**.
+
+## 2026-05-18 (b) — what shipped
+
+- **Wager-accept EMatchNotWaiting** — root fix. On-chain query
+  confirmed ShakaLiX's first accept succeeded (`status WAITING→ACTIVE`,
+  escrow 0.2 SUI, player_b pinned). The user-visible MoveAbort was a
+  second click hitting the now-ACTIVE wager. Three-piece race closed:
+  (a) `simulateWagerTx` pre-flight before every sign; (b) optimistic
+  `REMOVE_WAGER_LOBBY_ENTRY` dispatch on success, BEFORE the WS round-
+  trip; (c) friendly `ARENA_ABORT_CODES` toast mapping replaces the
+  cryptic SDK string at every site.
+- **Symmetric audit** — `cancel_wager` had the identical race
+  shape (creator clicks Cancel while acceptor's tx lands first);
+  fixed in the same commit. `create_wager` is single-actor; only
+  failure is EInvalidStake; pre-flight covers it. Treasury-only
+  paths (`settle_wager`, `admin_cancel_wager`,
+  `cancel_expired_wager`) don't surface in the UI but inherit the
+  shared humanizer.
+- **Move tests** — `test_double_accept_aborts` +
+  `test_cancel_after_accept_aborts` lock the Move-side invariant.
+  37 / 37 Move PASS (was 35 / 35).
+- **Pre-existing TS regressions from `e91c8e7` resolved.**
+  `matchmaking-queue.tsx:443` (txDigest type) — conditional spread.
+  `useEquipmentActions.ts:183` — humanizeChainError imported.
+- **Live verification** — `client.simulateTransaction` against the
+  exact incident wager `0xbc34...7056` produces the verbatim
+  `MoveAbort code 1, instruction 14` error our pre-flight catches.
+
+---
+
 # Session Handoff — 2026-05-18 (Wallet-disconnect + guest spectator)
 
 > Two post-disconnect UX bugs caught during Phase A live-verification

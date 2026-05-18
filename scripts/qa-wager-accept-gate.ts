@@ -547,13 +547,20 @@ function testFailedTransactionBranchingShape(): void {
     src.includes('from "@/lib/tx-result"'),
     'imports the shared tx-result helper module',
   );
+  // 2026-05-18 — both sites now pass ARENA_ABORT_CODES so the post-sign
+  // failure path emits the same humanized copy as the pre-flight. The
+  // bare label call (`assertTxSucceeded(result, "...")`) is gone.
   truthy(
-    src.includes('assertTxSucceeded(result, "create_wager")'),
-    'create_wager path calls assertTxSucceeded with the context label',
+    src.includes('assertTxSucceeded(result, "create_wager", ARENA_ABORT_CODES)'),
+    'create_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   truthy(
-    src.includes('assertTxSucceeded(result, "accept_wager")'),
-    'accept_wager path calls assertTxSucceeded with the context label',
+    src.includes('assertTxSucceeded(result, "accept_wager", ARENA_ABORT_CODES)'),
+    'accept_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
+  );
+  truthy(
+    src.includes('simulateWagerTx('),
+    'pre-flight simulateWagerTx wired ahead of the wallet popup',
   );
   truthy(
     src.includes('extractTxDigest(result)'),
