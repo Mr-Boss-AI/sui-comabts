@@ -11,6 +11,7 @@ import { CharacterProfile } from "@/components/character/character-profile";
 import { FightArena } from "@/components/fight/fight-arena";
 import { MatchmakingQueue } from "@/components/fight/matchmaking-queue";
 import { SpectateView } from "@/components/fight/spectate-view";
+import { SpectatorLanding } from "@/components/fight/spectator-landing";
 import { Inventory } from "@/components/items/inventory";
 import { ChatPanel } from "@/components/social/chat-panel";
 import { ChallengePopup } from "@/components/social/challenge-popup";
@@ -228,10 +229,34 @@ function AreaContent() {
 export function GameScreen() {
   const account = useCurrentAccount();
   const { state, dispatch } = useGame();
-  const { character, fight, spectatingFight, authPhase } = state;
+  const { character, fight, spectatingFight, authPhase, spectatorMode } = state;
 
-  // Not connected — render the full Landing page composition.
+  // Not connected — two sub-flows depending on guest-spectator intent.
   if (!account) {
+    // Guest is watching a fight. <SpectateView /> renders against
+    // `state.spectatingFight` regardless of auth, so we just pass
+    // through. The Leave button in SpectateView drops
+    // `spectatingFight` back to null, which lands us in the picker
+    // branch below for the next pick.
+    if (spectatorMode && spectatingFight) {
+      return (
+        <div className="flex flex-col flex-1">
+          <Navbar />
+          <ErrorToast />
+          <SpectateView />
+        </div>
+      );
+    }
+    // Guest picked "Watch a Fight" but hasn't selected one yet.
+    if (spectatorMode) {
+      return (
+        <div className="flex flex-col flex-1">
+          <ErrorToast />
+          <SpectatorLanding />
+        </div>
+      );
+    }
+    // Pure landing — wallet-connect hero.
     return (
       <div className="flex flex-col flex-1">
         <Navbar />

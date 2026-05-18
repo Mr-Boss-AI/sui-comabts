@@ -7,7 +7,11 @@ import {
   useDAppKit,
 } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner, type DAppKit } from "@mysten/dapp-kit-core";
-import { useGameSocket, type SignChallengeFn } from "@/hooks/useGameSocket";
+import {
+  useGameSocket,
+  forgetStoredJwt,
+  type SignChallengeFn,
+} from "@/hooks/useGameSocket";
 import {
   GameContext,
   gameReducer,
@@ -46,11 +50,18 @@ export default function GameProvider({
     [dAppKit],
   );
 
-  const socket = useGameSocket(walletAddress, signChallenge);
-  const [state, dispatch] = useReducer(gameReducer, {
-    ...initialGameState,
-    socket,
-  });
+  // Reducer first so the guest-spectator flag can drive socket setup
+  // BELOW. `socket` is patched in via `stateWithSocket` and used by
+  // every consumer through context — the `socket: null!` initial slot
+  // is never observed because the merge below always overrides it.
+  const [state, dispatch] = useReducer(gameReducer, initialGameState);
+  const socket = useGameSocket(walletAddress, signChallenge, state.spectatorMode);
+  // Track the prior wallet address so the disconnect effect can:
+  //   1) Detect a truthy → null transition (logout) without firing on
+  //      first mount or on rapid re-mounts with the same value.
+  //   2) Forget the JWT keyed to that specific old address (other
+  //      stored JWTs for unrelated wallets are left alone).
+  const prevWalletRef = useRef<string | null>(walletAddress);
   // True while a fetchCharacterNFT scan is in flight. Prevents the chain-check
   // effect from double-firing if React re-renders mid-scan (StrictMode in dev,
   // or a state update from an unrelated message). Reset on auth flip and on
@@ -349,7 +360,17 @@ export default function GameProvider({
           }
           break;
         case "spectate_update":
-          dispatch({ type: "SET_SPECTATING", fight: msg.fight });
+          // Two-shape message — see ws-messages.ts. List-only replies
+          // (no `fight`) come from the SpectatorLanding initial fetch
+          // and feed the active-fights picker; live-fight replies route
+          // straight to the SET_SPECTATING slice that <SpectateView />
+          // renders.
+          if (msg.fight) {
+            dispatch({ type: "SET_SPECTATING", fight: msg.fight });
+          }
+          if (msg.activeFights) {
+            dispatch({ type: "SET_ACTIVE_SPECTATE_FIGHTS", fights: msg.activeFights });
+          }
           break;
         case "challenge_received":
           dispatch({
@@ -518,6 +539,67 @@ export default function GameProvider({
   useEffect(() => {
     return socket.addHandler(handleMessage);
   }, [socket, handleMessage]);
+
+  // Wallet-disconnect watcher (Bug 1 fix, 2026-05-18).
+  // ──────────────────────────────────────────────────────────────────────
+  // When dApp Kit's `useCurrentAccount()` flips from a connected address
+  // back to null (Disconnect button, account switcher dismissing the
+  // session, wallet extension removed mid-session, Enoki sign-out), the
+  // useGameSocket effect tears down the WS but leaves every wallet-scoped
+  // slice in the reducer untouched. Pre-fix that meant the Navbar still
+  // rendered the old character avatar / name / LV badge / ELO over the
+  // LandingPage (the inline `if (!account) return <LandingPage />` in
+  // game-screen only short-circuits the body — the surrounding Navbar
+  // reads `state.character` and rendered the stale row until manual
+  // refresh).
+  //
+  // We watch the previous → current transition explicitly. Effects with
+  // a `[walletAddress]` dep fire on EVERY change including null → addr
+  // (connect) and addr1 → addr2 (account swap); only truthy → null is
+  // the "logout" path that needs the full reset. Account swaps still
+  // need a reset too — different wallet, different character — so we
+  // also treat addr1 → addr2 as a wipe + re-init.
+  //
+  // Side-effects bundled here so they don't drift apart:
+  //   1. `RESET_WALLET_SCOPED` clears every wallet-keyed slice via
+  //      `buildWalletScopedReset` (single source of truth tested by
+  //      qa-wallet-disconnect-reset.ts).
+  //   2. `forgetStoredJwt` evicts the JWT for the *old* address so the
+  //      next session on that wallet re-signs (explicit disconnect is a
+  //      signout-intent, not a refresh). Other wallets' JWTs are
+  //      untouched.
+  //   3. `acknowledgedFightId` localStorage entries aren't wallet-keyed
+  //      and survive cleanly — fight-outcome ack is per-fight, not
+  //      per-wallet.
+  useEffect(() => {
+    const prev = prevWalletRef.current;
+    prevWalletRef.current = walletAddress;
+    if (prev === walletAddress) return;
+
+    if (prev !== null && walletAddress === null) {
+      // Truthy → null. Full disconnect.
+      forgetStoredJwt(prev);
+      dispatch({ type: "RESET_WALLET_SCOPED" });
+      return;
+    }
+    if (prev !== null && walletAddress !== null && prev !== walletAddress) {
+      // Account swap. The new wallet's character/inventory/etc are
+      // entirely separate from the old — wipe and let the auth flow
+      // hydrate the new session from scratch.
+      forgetStoredJwt(prev);
+      dispatch({ type: "RESET_WALLET_SCOPED" });
+      return;
+    }
+    if (prev === null && walletAddress !== null) {
+      // Null → truthy. Connect path. The reducer's spectatorMode is no
+      // longer meaningful (the authenticated UI takes over), so drop it
+      // explicitly. RESET would be too aggressive (it would re-clear
+      // auth phase / area state we may already be hydrating).
+      if (state.spectatorMode) {
+        dispatch({ type: "SET_SPECTATOR_MODE", enabled: false });
+      }
+    }
+  }, [walletAddress, state.spectatorMode]);
 
   // Keep the pinned-id ref in sync with state.character. handleMessage
   // reads pinnedCharIdRef.current when it needs to refresh the chain

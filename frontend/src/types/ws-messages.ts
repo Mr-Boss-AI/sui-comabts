@@ -175,7 +175,24 @@ export type ServerMessage =
   | { type: "item_purchased"; item: Item; character: Character }
   | { type: "leaderboard"; entries: LeaderboardEntry[] }
   | { type: "fight_history"; fights: FightHistoryEntry[] }
-  | { type: "spectate_update"; fight: FightState }
+  | {
+      // Two-shape message:
+      //   - With `fight`: spectator-attached, this is the live fight
+      //     state. Frontend reducer routes to SET_SPECTATING.
+      //   - With `activeFights`: "list" reply when client sent
+      //     `spectate_fight` without a fightId. Used by
+      //     <SpectatorLanding /> (guest spectator flow) to populate the
+      //     fight picker.
+      type: "spectate_update";
+      fight?: FightState;
+      activeFights?: Array<{
+        fightId: string;
+        type: string;
+        playerA: { name: string; level: number };
+        playerB: { name: string; level: number };
+        turn: number;
+      }>;
+    }
   | { type: "marketplace_data"; listings: MarketplaceListing[] }
   | { type: "item_listed"; listing: MarketplaceListing }
   | {

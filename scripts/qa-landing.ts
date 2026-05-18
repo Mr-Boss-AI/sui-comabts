@@ -78,8 +78,18 @@ function main(): void {
   contains(land, 'split on every wager.', '95/5 split tail');
   contains(land, '<DangerButton size="lg"', 'Connect Wallet primary danger button');
   contains(land, 'Connect Wallet', 'Connect Wallet label');
-  contains(land, '<GhostButton size="lg"', 'Watch a Fight ghost button');
+  contains(land, '<GhostButton', 'Watch a Fight ghost button');
+  contains(land, 'size="lg"', 'Watch a Fight ghost button is lg-sized');
   contains(land, 'Watch a Fight ▾', 'Watch a Fight label + chevron');
+  // Bug 2 fix (2026-05-18) — button must drive the guest-spectator
+  // flag, not the pre-fix `sc:nav` custom event that nothing listened
+  // for. Pinning the literal dispatch wording keeps a future refactor
+  // from silently regressing the disconnected-button case.
+  contains(
+    land,
+    'type: "SET_SPECTATOR_MODE", enabled: true',
+    'Watch a Fight onClick dispatches SET_SPECTATOR_MODE',
+  );
   // Bottom badge row
   contains(land, 'Walrus · Decentralized', 'Walrus badge');
   contains(land, 'Open Source · MIT', 'Open Source · MIT badge');

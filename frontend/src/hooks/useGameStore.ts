@@ -178,6 +178,26 @@ export interface GameState {
     unreadCount: number;
     createdAt: number;
   }>;
+
+  /** Guest spectator intent. Set when the disconnected user clicks
+   *  "Watch a Fight" on the landing screen. Game-screen reads this to
+   *  route into <SpectatorLanding /> + <SpectateView /> without
+   *  requiring a wallet. Cleared on wallet connect (the authenticated
+   *  flow takes over) and on the spectator landing "Back" button. */
+  spectatorMode: boolean;
+
+  /** Active-fights list rendered by <SpectatorLanding />. Populated by
+   *  the server's `spectate_update` reply when the client sent
+   *  `spectate_fight` without a fightId (list-mode). Both authenticated
+   *  and guest clients use this slice — the server endpoint is
+   *  pre-auth (see PRE_AUTH_TYPES in server/src/ws/handler.ts). */
+  activeSpectateFights: Array<{
+    fightId: string;
+    type: string;
+    playerA: { name: string; level: number };
+    playerB: { name: string; level: number };
+    turn: number;
+  }>;
 }
 
 export const initialGameState: GameState = {
@@ -219,7 +239,33 @@ export const initialGameState: GameState = {
   openDmPeer: null,
   prefilledWagerTarget: null,
   dmIncomingToasts: [],
+  spectatorMode: false,
+  activeSpectateFights: [],
 };
+
+/**
+ * Build the wallet-scoped reset target. `RESET_WALLET_SCOPED` reuses this
+ * to ensure every slice tied to a specific wallet's session resets back to
+ * its initial value on disconnect. We preserve only the live `socket`
+ * reference (the socket itself handles its own teardown/reconnect lifecycle
+ * inside `useGameSocket`) and `spectatorMode` so the caller can hand off
+ * to guest-spectator mode without bouncing through an extra render.
+ *
+ * The exported helper is shadow-tested by `qa-wallet-disconnect-reset.ts`
+ * so that any future field added to `GameState` either lands in here OR
+ * gets explicitly excluded — protecting against the silent-leak regression
+ * that motivated this bundle.
+ */
+export function buildWalletScopedReset(
+  prev: GameState,
+  opts: { keepSpectatorMode?: boolean } = {},
+): GameState {
+  return {
+    ...initialGameState,
+    socket: prev.socket,
+    spectatorMode: opts.keepSpectatorMode ? prev.spectatorMode : false,
+  };
+}
 
 export type GameAction =
   | { type: "SET_CHARACTER"; character: Character }
@@ -301,7 +347,26 @@ export type GameAction =
       unreadCount: number;
     }
   | { type: "DISMISS_DM_TOAST"; id: string }
-  | { type: "DISMISS_DM_TOASTS_FOR_CHANNEL"; channelId: string };
+  | { type: "DISMISS_DM_TOASTS_FOR_CHANNEL"; channelId: string }
+  // === Disconnect / guest-spectator (2026-05-18) ===
+  // RESET_WALLET_SCOPED — fired by GameProvider when `walletAddress`
+  // transitions from truthy → null (wallet disconnect). Clears every
+  // slice that's tied to a specific wallet's session so the next
+  // connect can't see leftover character / inventory / fight / DM
+  // state. `keepSpectatorMode` lets callers preserve the guest-spectator
+  // flag across the disconnect (only used in tests; runtime always
+  // resets it because disconnect happens from authenticated flows).
+  | { type: "RESET_WALLET_SCOPED"; keepSpectatorMode?: boolean }
+  // SET_SPECTATOR_MODE — landing-page "Watch a Fight" button flips
+  // this on so game-screen routes the disconnected user into the
+  // guest spectator flow. Cleared on wallet connect or explicit exit.
+  | { type: "SET_SPECTATOR_MODE"; enabled: boolean }
+  // SET_ACTIVE_SPECTATE_FIGHTS — populated by the server's list-mode
+  // `spectate_update` reply. Drives the picker in SpectatorLanding.
+  | {
+      type: "SET_ACTIVE_SPECTATE_FIGHTS";
+      fights: GameState["activeSpectateFights"];
+    };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
@@ -721,6 +786,28 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           (t) => t.channelId !== action.channelId,
         ),
       };
+    case "RESET_WALLET_SCOPED":
+      return buildWalletScopedReset(state, {
+        keepSpectatorMode: action.keepSpectatorMode,
+      });
+    case "SET_SPECTATOR_MODE":
+      if (state.spectatorMode === action.enabled) return state;
+      // Leaving spectator mode also drops any active spectate stream
+      // — caller should send `stop_spectating` over the socket first,
+      // but we wipe the local slice so a stale fight doesn't render
+      // against the LandingPage during the round-trip. The active-
+      // fights picker list is similarly local-only state; reset on
+      // exit so a re-entry refetches a fresh list.
+      return action.enabled
+        ? { ...state, spectatorMode: true }
+        : {
+            ...state,
+            spectatorMode: false,
+            spectatingFight: null,
+            activeSpectateFights: [],
+          };
+    case "SET_ACTIVE_SPECTATE_FIGHTS":
+      return { ...state, activeSpectateFights: action.fights };
     default:
       return state;
   }

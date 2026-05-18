@@ -12,6 +12,155 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — Wallet-disconnect + guest spectator, 2026-05-18
+
+Fixes two post-disconnect UX bugs on the landing/lobby that surfaced
+during Phase A live-verification.
+
+**Bug 1 — Stale character/inventory after wallet disconnect.** Pre-fix,
+clicking Disconnect (dapp-kit ConnectButton menu) left every wallet-
+scoped slice in the reducer untouched. The `game-screen.tsx`
+`if (!account) return <LandingPage />` short-circuit only swapped the
+body; the surrounding `<Navbar />` reads `state.character` directly and
+kept rendering the previous fighter's avatar / name / LV badge / ELO
+over the LandingPage until manual page refresh.
+
+**Bug 2 — "Watch a Fight" button broken in disconnected state.** The
+landing-page ghost button dispatched an `sc:nav` custom event that
+nothing listened for. Even if a router had heard it, the server's
+pre-auth WS whitelist (`auth_request`/`auth_signature`/`auth_token`
+only) would have rejected the guest's `spectate_fight` message anyway.
+Spectator mode wasn't actually wired to work without a wallet.
+
+### Added
+- `frontend/src/components/fight/spectator-landing.tsx` — guest
+  spectator fight picker. Lists active fights via the pre-auth
+  `spectate_fight` (no fightId) endpoint, auto-refreshes every 5s,
+  click attaches to the picked fight via `<SpectateView />`. Renders
+  its own `<Navbar />` (the wallet-connect button stays visible so the
+  guest can elevate at any time).
+- `server/src/ws/pre-auth-types.ts` — `PRE_AUTH_TYPES` exported from
+  its own module so the QA gauntlet can pin the whitelist without
+  dragging in `config.ts` (which would force the gauntlet to require
+  real testnet creds). Now admits `spectate_fight` and
+  `stop_spectating` alongside the auth handshake.
+- `buildWalletScopedReset` helper in `useGameStore.ts` — single source
+  of truth for "what does the logged-out reducer state look like."
+  Reuses `initialGameState`, preserves only the live socket reference
+  and (optionally) `spectatorMode`. The reducer's `RESET_WALLET_SCOPED`
+  case dispatches this helper.
+- `state.spectatorMode` + `state.activeSpectateFights` slices +
+  `SET_SPECTATOR_MODE` + `SET_ACTIVE_SPECTATE_FIGHTS` actions —
+  back the guest spectator UI.
+- `useGameSocket(walletAddress, signChallenge, guestMode=false)`
+  third parameter. When `guestMode=true` and `walletAddress=null`,
+  opens an unauthenticated WS — the `onopen` handler skips
+  `startHandshake` and lets the pre-auth-whitelisted spectator
+  messages flow.
+- `forgetStoredJwt(addr)` re-export from `useGameSocket.ts` —
+  used by the disconnect watcher in GameProvider to evict the JWT
+  for the OLD wallet on logout (explicit disconnect ≠ refresh).
+- `scripts/qa-wallet-disconnect-reset.ts` — pure-unit gauntlet
+  (51 assertions). Locks every wallet-scoped slice resets to
+  initial, socket reference is preserved, spectatorMode opt-in
+  works, reducer matches helper, SET_SPECTATOR_MODE entry/exit
+  drains the right slices.
+- `scripts/qa-spectator-guest-flow.ts` — pure-unit gauntlet
+  (29 assertions). Locks PRE_AUTH_TYPES membership (auth handshake
+  preserved, spectator messages admitted, action messages still
+  blocked), guest entry → list → attach → leave → back flow.
+- `scripts/qa-landing.ts` — assertion added: Watch a Fight button
+  dispatches `SET_SPECTATOR_MODE: true` (pins Bug 2's fix wording).
+
+### Changed
+- `game-provider.tsx` — reordered `useReducer` before `useGameSocket`
+  so the guest-mode flag (`state.spectatorMode`) can drive socket
+  setup. New `prevWalletRef` + disconnect watcher: on truthy → null
+  transition, dispatches `RESET_WALLET_SCOPED` and calls
+  `forgetStoredJwt(oldAddr)`. On account swap (addr1 → addr2) also
+  resets. On null → truthy, drops `spectatorMode` so the
+  authenticated UI takes over.
+- `game-screen.tsx` — `!account` branch now forks into three sub-
+  flows: pure landing, spectator picker (`spectatorMode && !
+  spectatingFight`), or attached spectator view (`spectatorMode
+  && spectatingFight`).
+- `landing-page.tsx` — Watch a Fight `onClick` flips
+  `SET_SPECTATOR_MODE: true` instead of dispatching the dead
+  `sc:nav` event.
+- `server/src/ws/handler.ts` — `handleSpectateFight` uses
+  `client.walletAddress ?? \`guest:${client.id}\`` as the spectator
+  key. `stop_spectating` switched from no-op to real
+  `handleStopSpectating` that calls `removeSpectator`. Disconnect
+  cleanup hoisted outside the `if (client.walletAddress)` block so
+  guest spectators don't leak across socket close.
+- `ws-messages.ts` — `spectate_update` payload widened to optional
+  `fight` + optional `activeFights` (list-mode reply).
+- `useGameSocket.ts` — effect bails only when BOTH `walletAddress`
+  and `guestMode` are falsy; `addr` guards added to the JWT write
+  sites for guest sessions.
+
+### Audit summary
+Searched every wallet-scoped state vector for the same disconnect-leak
+pattern as Bug 1 and every read-only surface for the same wallet-gate
+hole as Bug 2.
+
+**Disconnect-leak audit — clean. One root fix covers all surfaces.**
+- Every reducer slice (27 total) routes through
+  `buildWalletScopedReset`, pinned by the new gauntlet. Adding a new
+  field that should leak through requires explicit opt-out.
+- `useWalletBalance` already resets to EMPTY on `owner === null`
+  (frontend/src/hooks/useWalletBalance.ts:39-42) — confirmed clean.
+- WS lifecycle: the existing `useGameSocket` cleanup closes the
+  socket and sets `authenticated=false` on dep change, so the WS
+  itself doesn't leak. Server-side `handleDisconnect` correctly
+  drops the player from matchmaking / chat / presence / wager-lobby
+  on socket close.
+- JWT in localStorage: keyed per wallet (`sui-combats-jwt-<addr>`),
+  but the disconnect watcher now actively evicts the entry for the
+  outgoing address. Other wallets' JWTs are untouched (intentional —
+  shared-device scenarios are out of scope).
+- `acknowledgedFightId` localStorage: per-fight, not per-wallet —
+  survives logout cleanly, no leak.
+
+**Unauthenticated read-only surface audit — public endpoints already
+public.**
+- `GET /api/leaderboard` — no auth check, public. ✓
+- `GET /api/character/:walletAddress` — no auth check, public. ✓
+- `GET /api/fights/:fightId` — public. ✓
+- `POST /api/admin/grant-xp` — admin-only (network gate), correct
+  to require credentials.
+- WS pre-auth surface previously: `auth_*` only. Now widened to
+  `spectate_fight` + `stop_spectating`. All write/action messages
+  (`queue_fight`, `fight_action`, `wager_accepted`,
+  `create_character`, `chat_message`, `equip_item`, etc.) stay
+  behind the auth wall, pinned by the new gauntlet.
+- Marketplace browse / leaderboard / character-by-address are
+  REST + public WS broadcasts respectively; the disconnected
+  spectator flow doesn't currently surface them in the UI, but
+  the data path is unauthenticated-friendly. **New backlog item:
+  add a public Browse Marketplace / Hall of Fame entry from the
+  landing screen** (deferred — not in this commit's scope).
+
+**Pre-existing TypeScript errors (NOT touched by this commit):**
+- `frontend/src/components/fight/matchmaking-queue.tsx:443` —
+  `txDigest: digest ?? undefined` violates `txDigest: string`.
+- `frontend/src/hooks/useEquipmentActions.ts:183` —
+  `humanizeChainError` not imported (lives in `lib/tx-result.ts`).
+- Both were present at `ffc24a3` despite that doc's "tsc clean"
+  claim; flagging here so the next session picks them up.
+
+### Tests
+- 2,307 + 80 (this commit) + 13 (Watch-a-Fight pin in qa-landing) =
+  full pass on every non-dotenv-infra gauntlet.
+- The dotenv-infra ERR set (qa-marketplace, qa-orphan-sweep,
+  qa-tavern-handlers, qa-tavern-presence, qa-tavern-dm-channels,
+  qa-tavern-fight-requests, qa-treasury-queue, qa-xp) is identical
+  pre/post — verified by `git stash` + re-run.
+- Move unit tests untouched (contracts unchanged); 35/35 PASS
+  at last run.
+
+---
+
 ## [Unreleased] — Phase A Sui-latest integration, 2026-05-17
 
 zkLogin via Enoki lands in the wallet connect modal; the wager-accept

@@ -1,6 +1,40 @@
+# Session Handoff — 2026-05-18 (Wallet-disconnect + guest spectator)
+
+> Two post-disconnect UX bugs caught during Phase A live-verification
+> are fixed at the root. Full detail in the
+> [`CHANGELOG.md`](./CHANGELOG.md) "Wallet-disconnect + guest spectator"
+> entry. Branch `feature/phase-2-design`. Upstream `main` still v4-era
+> `08ff991`; **do not merge until v5.1 republish lands**.
+
+## 2026-05-18 — what shipped
+
+- **Bug 1 (stale character after disconnect)** — root fix.
+  `RESET_WALLET_SCOPED` reducer action driven by a wallet-transition
+  watcher in `game-provider.tsx` clears every wallet-scoped slice
+  (27 fields, gauntlet-pinned). JWT for the old address is evicted.
+  Audit found one other potential leak vector (`useWalletBalance`) —
+  already correct, no change needed.
+- **Bug 2 (Watch-a-Fight broken disconnected)** — root fix.
+  Landing button now flips `SET_SPECTATOR_MODE`; new
+  `<SpectatorLanding />` opens an unauthenticated WS via
+  `useGameSocket(..., guestMode=true)`. Server's `PRE_AUTH_TYPES`
+  whitelist (now in its own module) admits `spectate_fight` +
+  `stop_spectating`. Spectator key falls back to `guest:<clientId>`.
+  Action messages stay behind the auth wall, gauntlet-pinned.
+- **Tests added** — `qa-wallet-disconnect-reset.ts` (51 PASS),
+  `qa-spectator-guest-flow.ts` (29 PASS); `qa-landing.ts` extended
+  to pin the new `SET_SPECTATOR_MODE` dispatch (51 PASS total).
+- **No contract change. No package republish. v5 still canonical.**
+- **Pre-existing TS regressions flagged** at
+  `matchmaking-queue.tsx:443` (txDigest type) and
+  `useEquipmentActions.ts:183` (missing humanizeChainError import) —
+  both present at `ffc24a3` baseline, not touched here.
+
+---
+
 # Session Handoff — 2026-05-17 (Phase A — Sui-latest integration pass)
 
-> Single-page summary of tonight's session. Full detail lives in
+> Single-page summary of last session. Full detail lives in
 > [`STATE_OF_PROJECT_2026-05-17.md`](./STATE_OF_PROJECT_2026-05-17.md).
 > Branch `feature/phase-2-design`. Upstream `main` stays at the v4-era
 > `08ff991`; **do not merge until v5.1 republish lands**.

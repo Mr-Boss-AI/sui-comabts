@@ -32,6 +32,7 @@ import { dbInsertWagerInFlight } from '../data/db';
 import {
   submitTurnAction,
   addSpectator,
+  removeSpectator,
   getActiveFights,
   getFight,
   setClientsRef,
@@ -221,6 +222,18 @@ function handleDisconnect(client: ConnectedClient): void {
 
   console.log(`[WS] Client disconnected: ${client.id} (wallet: ${client.walletAddress || 'none'})`);
 
+  // Guest + authenticated spectator cleanup (Bug 2 fix, 2026-05-18).
+  // Pre-fix this branch ran only inside the `if (client.walletAddress)`
+  // block, so a guest spectator that lost connectivity stayed in the
+  // fight's spectator set forever — fight-room would keep fanning
+  // broadcasts at a dead socket. Hoisted out so it covers both flavours.
+  if (client.spectatingFightId) {
+    try {
+      removeSpectator(client.spectatingFightId, spectatorKeyForClient(client));
+    } catch { /* fight may have already ended */ }
+    client.spectatingFightId = undefined;
+  }
+
   if (client.walletAddress) {
     // Remove from matchmaking queue (friendly/ranked only now)
     try {
@@ -349,17 +362,16 @@ async function hydrateDOFsForCharacter(
   );
 }
 
+// PRE_AUTH_TYPES lives in its own module (`./pre-auth-types`) so the QA
+// gauntlet can import the canonical set without dragging in `config.ts`,
+// which requires a fully-populated `.env` and would otherwise force the
+// gauntlet to run with real testnet credentials configured. Re-exported
+// here for backwards compatibility with any external import.
+export { PRE_AUTH_TYPES } from './pre-auth-types';
+import { PRE_AUTH_TYPES as PRE_AUTH_TYPES_LOCAL } from './pre-auth-types';
+
 function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
-  // Pre-auth message types the router accepts before client.authenticated.
-  // The legacy bare `auth { walletAddress }` no longer authenticates — it now
-  // returns an instructive error that points the client at auth_request.
-  const preAuthTypes = new Set([
-    'auth_request',
-    'auth_signature',
-    'auth_token',
-    'auth', // legacy; rejected with guidance
-  ]);
-  if (!preAuthTypes.has(msg.type) && !client.authenticated) {
+  if (!PRE_AUTH_TYPES_LOCAL.has(msg.type) && !client.authenticated) {
     sendError(client, 'Not authenticated. Send auth_request first.');
     return;
   }
@@ -457,6 +469,8 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
       handleAllocatePoints(client, msg);
       break;
     case 'stop_spectating':
+      handleStopSpectating(client);
+      break;
     case 'challenge_player':
     case 'accept_challenge':
     case 'decline_challenge':
@@ -1215,11 +1229,34 @@ function handleGetFightHistory(client: ConnectedClient): void {
 
 // === Spectate Fight ===
 
+/**
+ * Resolve the spectator key for `addSpectator` / `removeSpectator`.
+ *
+ * Authenticated clients use their wallet address — same as pre-fix
+ * behaviour, so existing spectator records stay routable. Guest clients
+ * (Bug 2 fix, 2026-05-18 — disconnected users clicking "Watch a Fight"
+ * on the landing screen) get a synthetic `guest:<clientId>` key. The
+ * key only needs to be unique per connected client and round-trip
+ * consistent for the duration of the session; client.id is a uuid
+ * minted at WS-accept time and lives in `connectedClients`, so this
+ * holds even across reconnects from the same client (each reconnect
+ * gets a fresh uuid → fresh spectator entry).
+ *
+ * Lives next to handleSpectateFight rather than fight-room because
+ * fight-room operates on `Set<string>` and shouldn't know about the
+ * auth/guest distinction — that's purely a handler-layer concern.
+ */
+function spectatorKeyForClient(client: ConnectedClient): string {
+  return client.walletAddress ?? `guest:${client.id}`;
+}
+
 function handleSpectateFight(client: ConnectedClient, msg: ClientMessage): void {
   const fightId = msg.fightId as string;
 
   if (!fightId) {
-    // List active fights
+    // List active fights — read-only, no spectator registration. Both
+    // authenticated and guest clients hit this branch when the
+    // SpectatorLanding component first mounts.
     const fights = getActiveFights().map((f) => ({
       fightId: f.id,
       type: f.type,
@@ -1235,7 +1272,8 @@ function handleSpectateFight(client: ConnectedClient, msg: ClientMessage): void 
     return;
   }
 
-  const result = addSpectator(fightId, client.walletAddress!);
+  const spectatorKey = spectatorKeyForClient(client);
+  const result = addSpectator(fightId, spectatorKey);
   if (!result.success) {
     sendError(client, result.error || 'Cannot spectate this fight');
     return;
@@ -1267,6 +1305,26 @@ function handleSpectateFight(client: ConnectedClient, msg: ClientMessage): void 
       },
     },
   });
+}
+
+/**
+ * Pre-fix this case fell through the switch as a no-op, so the
+ * fight-room's spectator set kept the wallet (or guest key) until the
+ * fight ended — broadcast traffic for that fight continued to fan out
+ * to a client that had moved on. With the guest spectator flow shipped
+ * (Bug 2 fix, 2026-05-18) a leaked spectator means a guest who clicked
+ * "Leave" is still receiving turn updates over the WS, so we now
+ * actively unregister.
+ *
+ * Idempotent: removeSpectator silently ignores unknown keys, so a
+ * double-send from the client (or a client that never spectated)
+ * doesn't error.
+ */
+function handleStopSpectating(client: ConnectedClient): void {
+  const fightId = client.spectatingFightId;
+  if (!fightId) return;
+  removeSpectator(fightId, spectatorKeyForClient(client));
+  client.spectatingFightId = undefined;
 }
 
 // === Wager Lobby ===

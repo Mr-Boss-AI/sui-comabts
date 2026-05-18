@@ -71,7 +71,11 @@ function clearStoredJwt(walletAddress: string): void {
  *  polling cadence; older entries are dropped first. */
 const PENDING_QUEUE_MAX = 200;
 
-export function useGameSocket(walletAddress: string | null, signChallenge: SignChallengeFn) {
+export function useGameSocket(
+  walletAddress: string | null,
+  signChallenge: SignChallengeFn,
+  guestMode: boolean = false,
+) {
   const wsRef = useRef<WebSocket | null>(null);
   const handlersRef = useRef<Set<MessageHandler>>(new Set());
   const signChallengeRef = useRef(signChallenge);
@@ -144,7 +148,14 @@ export function useGameSocket(walletAddress: string | null, signChallenge: SignC
   }, []);
 
   useEffect(() => {
-    if (!walletAddress) return;
+    // Connect criteria:
+    //   - wallet connected → authenticated session
+    //   - guest spectator mode → unauthenticated session (server's
+    //     preAuthTypes whitelist accepts spectate_fight / stop_spectating
+    //     so a guest can browse + watch fights without ever signing).
+    // Bail when neither is true — covers the disconnected / logged-out
+    // baseline.
+    if (!walletAddress && !guestMode) return;
 
     function startHandshake(ws: WebSocket, addr: string) {
       const stored = readStoredJwt(addr);
@@ -155,14 +166,19 @@ export function useGameSocket(walletAddress: string | null, signChallenge: SignC
       }
     }
 
-    function connect(addr: string) {
+    function connect(addr: string | null) {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setConnected(true);
         setAuthError(null);
-        startHandshake(ws, addr);
+        // Guest spectator path skips auth entirely — server's
+        // preAuthTypes whitelist accepts the spectator messages we
+        // need (spectate_fight, stop_spectating). When the user later
+        // connects a wallet, the effect re-runs with `walletAddress`
+        // set and falls through to the signed-challenge handshake.
+        if (addr) startHandshake(ws, addr);
 
         // Drain any messages queued during the disconnect window
         // (Fix 2, 2026-05-04). Stale messages (>30 s old) are
@@ -218,7 +234,10 @@ export function useGameSocket(walletAddress: string | null, signChallenge: SignC
 
         if (msg.type === "auth_required") {
           // The token we just sent was rejected; drop it and request a fresh
-          // signed challenge.
+          // signed challenge. Guest sessions never trigger this branch
+          // (they never sent auth_request/auth_token) but we keep the
+          // null-guard so TS sees the invariant.
+          if (!addr) return;
           clearStoredJwt(addr);
           if (wsRef.current === ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "auth_request", walletAddress: addr }));
@@ -229,7 +248,7 @@ export function useGameSocket(walletAddress: string | null, signChallenge: SignC
         if (msg.type === "auth_ok") {
           setAuthenticated(true);
           setAuthError(null);
-          if (msg.token && msg.tokenExpiresAt) {
+          if (msg.token && msg.tokenExpiresAt && addr) {
             writeStoredJwt(addr, msg.token, msg.tokenExpiresAt);
           }
         }
@@ -252,6 +271,10 @@ export function useGameSocket(walletAddress: string | null, signChallenge: SignC
       };
     }
 
+    // walletAddress wins when both are set — the authenticated session
+    // is the strictly broader capability. `connect(null)` is the guest
+    // path; the server-side preAuthTypes whitelist lets that client send
+    // spectate_fight without ever authenticating.
     connect(walletAddress);
 
     return () => {
@@ -261,7 +284,7 @@ export function useGameSocket(walletAddress: string | null, signChallenge: SignC
       setConnected(false);
       setAuthenticated(false);
     };
-  }, [walletAddress]);
+  }, [walletAddress, guestMode]);
 
   return useMemo(
     () => ({ send, addHandler, connected, authenticated, authError }),
@@ -272,5 +295,15 @@ export function useGameSocket(walletAddress: string | null, signChallenge: SignC
 /** Helper for callers that want to surface a "signed out" UI: clears any
  *  stored JWT and lets the next reconnect re-trigger the signed handshake. */
 export function clearWalletAuthToken(walletAddress: string): void {
+  clearStoredJwt(walletAddress);
+}
+
+/**
+ * Alias of `clearWalletAuthToken` used by the wallet-disconnect watcher in
+ * GameProvider. Kept as a separate export so the call-site reads at face
+ * value ("forget the JWT for this address") even though the underlying
+ * effect is identical.
+ */
+export function forgetStoredJwt(walletAddress: string): void {
   clearStoredJwt(walletAddress);
 }

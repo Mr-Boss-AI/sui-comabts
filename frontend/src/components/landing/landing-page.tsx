@@ -35,6 +35,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useGame } from "@/hooks/useGameStore";
 import { Wordmark } from "@/components/v2/wordmark";
 import {
   BronzeButton,
@@ -156,6 +157,7 @@ function clickNavbarConnect() {
 
 export function LandingPage() {
   const account = useCurrentAccount();
+  const { dispatch } = useGame();
   const bp = useBreakpoint();
   const heroSideBySide = bpGte("lg", bp);
   const stepsStack = !bpGte("md", bp);
@@ -225,12 +227,24 @@ export function LandingPage() {
             <DangerButton size="lg" onClick={clickNavbarConnect}>
               Connect Wallet
             </DangerButton>
-            <GhostButton size="lg" onClick={() => {
-              if (typeof window === "undefined") return;
-              window.dispatchEvent(
-                new CustomEvent("sc:nav", { detail: { area: "tavern" } }),
-              );
-            }}>
+            <GhostButton
+              size="lg"
+              onClick={() => {
+                // Bug 2 fix (2026-05-18). Pre-fix this dispatched an
+                // `sc:nav` custom event nobody listens for — the
+                // tavern area is only routable when authenticated and
+                // game-screen short-circuits to <LandingPage /> long
+                // before any router could see the event. The button
+                // appeared "broken".
+                //
+                // Now: flip the guest spectator flag. game-screen sees
+                // `!account && spectatorMode` and renders
+                // <SpectatorLanding />, which opens a guest WS (no
+                // signin) and lists active fights via the pre-auth
+                // `spectate_fight` endpoint.
+                dispatch({ type: "SET_SPECTATOR_MODE", enabled: true });
+              }}
+            >
               Watch a Fight ▾
             </GhostButton>
           </div>
