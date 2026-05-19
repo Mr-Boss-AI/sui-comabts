@@ -1,3 +1,47 @@
+# Session Handoff — 2026-05-19 (Bug 6 — server-restart amnesia)
+
+> Server-restart between sessions wiped the in-memory character map;
+> client kept stale state; next create_wager landed on chain
+> (0xd94d…01a2) but the WS follow-up failed → orphan SUI. Refunded
+> via admin/cancel-wager (tx 4RbEv5RJ…). Root-fixed with three
+> layers: auth_ok self-heal in the client, pre-sign presence check
+> at every wager-signing path, and a JSON-on-disk persistence
+> fallback so characters survive `pkill node && npm run dev`.
+> Full detail in [`CHANGELOG.md`](./CHANGELOG.md). Branch
+> `feature/phase-2-design`. `main` still v4-era `08ff991`.
+
+## 2026-05-19 — what shipped
+
+- **Refund landed** — tx `4RbEv5RJpWgVcA74uoBUX9aChq7qte2KWdgVMsPjobmV`,
+  0.1 SUI returned to MrBoss, wager `0xd94d…01a2` status → SETTLED.
+- **Self-heal (Layer 1)** — `auth_ok` handler now branches on
+  `msg.hasCharacter === false`: dispatches `BEGIN_SERVER_REHYDRATE`
+  which clears the cached character + flips `authPhase` to
+  `chain_check_pending`. The existing chain-check effect re-arms and
+  re-fetches via `restore_character`. Brief loader, no orphan.
+- **Pre-sign presence (Layer 2)** —
+  `verifyServerHasCharacter({ socket })` runs before every
+  `signAndExecuteTransaction` in matchmaking-queue.tsx (accept and
+  create paths). On failure → `BEGIN_SERVER_REHYDRATE` + cancel the
+  click. The user's pending SUI never reaches the wallet popup.
+- **Restart-survival (Layer 3)** — `server/src/data/local-persistence.ts`
+  adds a JSON-on-disk snapshot fallback for character rows when
+  Supabase isn't configured. Atomic write. Hooks into `db.ts` at
+  `dbSaveCharacter` / `dbLoadCharacter` / `dbDeleteCharacter`.
+  `server/.local-state/characters.json` now persists across restarts.
+- **Audit exhaustive** — all 17 `getCharacterByWallet` call sites
+  reviewed and pinned in the CHANGELOG. The self-heal is at the
+  entry of every authenticated session, so every downstream
+  `getCharacterByWallet` site is implicitly covered.
+- **Gauntlets** — `qa-auth-ok-server-amnesia.ts` (13), 
+  `qa-create-wager-orphan-guard.ts` (15), 
+  `qa-server-restart-recovery.ts` (20). 0 regressions in the wider sweep.
+- **Live-verified** — restarted both servers; both wallets
+  auto-reconnected; `[Character] Restored from chain` for both;
+  `.local-state/characters.json` populated with both rows.
+
+---
+
 # Session Handoff — 2026-05-18 (Wager-accept race + abort-code toast)
 
 > Wager accept failed live with `MoveAbort code 1 (EMatchNotWaiting)`

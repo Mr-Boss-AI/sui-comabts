@@ -6,6 +6,11 @@
  */
 
 import { getSupabase } from './supabase';
+import {
+  localSaveCharacter,
+  localLoadCharacter,
+  localDeleteCharacter,
+} from './local-persistence';
 import type { Character, FightHistoryEntry, Item, EquipmentSlots } from '../types';
 
 // ─── Character persistence ──────────────────────────────────────────
@@ -33,11 +38,15 @@ export interface DbCharacter {
   created_at: string;
 }
 
-/** Save a character to Supabase (upsert by wallet). */
+/** Save a character to Supabase (upsert by wallet).
+ *
+ *  When Supabase isn't configured (no SUPABASE_URL/KEY in env) the
+ *  call falls through to the JSON-on-disk snapshot at
+ *  `server/.local-state/characters.json`. Bug 6 (2026-05-19) — without
+ *  this fallback the in-memory characters map is wiped on every
+ *  restart, which produced the 21:23Z orphan-wager incident.
+ */
 export async function dbSaveCharacter(char: Character): Promise<void> {
-  const sb = getSupabase();
-  if (!sb) return;
-
   const row: DbCharacter = {
     wallet_address: char.walletAddress,
     name: char.name,
@@ -56,6 +65,16 @@ export async function dbSaveCharacter(char: Character): Promise<void> {
     created_at: new Date(char.createdAt).toISOString(),
   };
 
+  const sb = getSupabase();
+  if (!sb) {
+    try {
+      localSaveCharacter(row);
+    } catch (err) {
+      console.error('[DB] Local snapshot save failed:', (err as Error).message);
+    }
+    return;
+  }
+
   const { error } = await sb
     .from('characters')
     .upsert(row, { onConflict: 'wallet_address' });
@@ -65,10 +84,23 @@ export async function dbSaveCharacter(char: Character): Promise<void> {
   }
 }
 
-/** Load a character row from Supabase by wallet. Returns null if not found. */
+/** Load a character row from Supabase by wallet. Returns null if not found.
+ *
+ *  Falls through to the JSON-on-disk snapshot when Supabase isn't
+ *  configured. Both branches return the same `DbCharacter` shape, so
+ *  callers (`restoreCharacterFromDb` in characters.ts) don't need to
+ *  branch on the source.
+ */
 export async function dbLoadCharacter(walletAddress: string): Promise<DbCharacter | null> {
   const sb = getSupabase();
-  if (!sb) return null;
+  if (!sb) {
+    try {
+      return localLoadCharacter(walletAddress);
+    } catch (err) {
+      console.error('[DB] Local snapshot load failed:', (err as Error).message);
+      return null;
+    }
+  }
 
   const { data, error } = await sb
     .from('characters')
@@ -84,10 +116,17 @@ export async function dbLoadCharacter(walletAddress: string): Promise<DbCharacte
   return data as DbCharacter | null;
 }
 
-/** Delete a character and their items from Supabase. */
+/** Delete a character and their items from Supabase / local snapshot. */
 export async function dbDeleteCharacter(walletAddress: string): Promise<void> {
   const sb = getSupabase();
-  if (!sb) return;
+  if (!sb) {
+    try {
+      localDeleteCharacter(walletAddress);
+    } catch (err) {
+      console.error('[DB] Local snapshot delete failed:', (err as Error).message);
+    }
+    return;
+  }
 
   // Delete items first (foreign key constraint)
   await sb.from('items').delete().eq('owner_wallet', walletAddress);

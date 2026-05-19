@@ -12,6 +12,137 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — Server-restart amnesia (Bug 6), 2026-05-19
+
+Fixes the second wager-loss vector found minutes after the
+wager-accept race shipped. A `pkill node && npm run dev` cycle wiped
+the server's in-memory `characters` map; the frontend kept its
+cached character, the next on-chain `create_wager` succeeded
+(escrow `0xd94d…01a2` for 0.1 SUI), and the WS follow-up
+`queue_fight` hit `getCharacterByWallet → null → sendError`. The
+REST fallback `/api/admin/adopt-wager` answered with the same null
+lookup and returned 409 *"Creator has no active character on
+server"*. SUI locked, orphan toast fired, manual
+`/api/admin/cancel-wager` refund required.
+
+### Recovery
+Tx `4RbEv5RJpWgVcA74uoBUX9aChq7qte2KWdgVMsPjobmV` at 21:26:23Z
+refunded MrBoss's 0.1 SUI from `0xd94d…01a2`. Wager status → SETTLED,
+escrow drained.
+
+### Root cause (chain + log evidence)
+1. Servers bounced at 21:11:43Z to live-verify the wager-race fix.
+2. In-memory `characters` map wiped (no Supabase, server.log:
+   `[Supabase] No credentials configured — running in-memory only`).
+3. Frontend `useGameSocket` auto-reconnected with the stored JWT
+   (`auth_token`). Server's `acceptAuthenticatedSession`
+   (`handler.ts:607-610`) found nothing in memory, `restoreCharacterFromDb`
+   returned null (no Supabase), so `auth_ok` went out with
+   `character: null, hasCharacter: false`.
+4. Frontend `auth_ok` handler at `game-provider.tsx:84-94` was
+   null-tolerant — `if (msg.character) dispatch(...)` — so it did
+   nothing. State kept the pre-restart character.
+5. The chain-check effect at `game-provider.tsx:566-651` bailed on
+   `if (state.character) return;`. `restore_character` was never sent.
+6. User clicked Create Wager → handleQueue → signed on-chain → server
+   `handleQueueFight::getCharacterByWallet` → null → sendError → ACK
+   timeout → REST adopt-wager fallback → also null → 409 → orphan.
+
+### Audit — every `getCharacterByWallet` call site
+| File:Line | Caller | Failure shape pre-fix | Covered by self-heal? |
+|---|---|---|---|
+| `ws/handler.ts:133-134` | onAcceptFightRequest | sendError | ✅ |
+| `ws/handler.ts:607` | acceptAuthenticatedSession (ROOT) | auth_ok with hasCharacter:false | ✅ (the entry point) |
+| `ws/handler.ts:778` | handleRestoreCharacter (cache hit) | n/a (restore path) | ✅ |
+| `ws/handler.ts:876` | handleGetCharacter | sendError | ✅ + presence-check uses this |
+| `ws/handler.ts:919` | handleQueueFight (SHIP-LOST PATH) | sendError + orphan SUI | ✅ self-heal + defence-in-depth presence check |
+| `ws/handler.ts:1106` | handleEquipItem (post-equip read) | sends `character: null` | ✅ |
+| `ws/handler.ts:1140` | handleAllocatePoints | sendError | ✅ |
+| `ws/handler.ts:1160` | handleEquipItem | sendError | ✅ |
+| `ws/handler.ts:1171` | handleUnequipItem | sendError | ✅ |
+| `ws/handler.ts:1218` | handleGetFightHistory | falls back to "Unknown" | ✅ |
+| `ws/handler.ts:1543-1544` | handleWagerAccepted | sendError | ✅ + the wager-race fix |
+| `ws/handler.ts:1595` | handleSendFightRequest | sendError | ✅ |
+| `ws/chat.ts:46` | handleChatMessage | silent drop | ✅ |
+| `data/presence.ts:208` | presence helper | falls back to stub | ✅ |
+| `data/fight-requests.ts:263-264` | sendFightRequest | sendError | ✅ |
+| `data/marketplace.ts:477` | seller events | logs warning | ✅ |
+| `data/player-profile.ts:105` | profile lookup | falls back to DB | ✅ |
+| `index.ts:58,99,170,292,416` | REST endpoints | 404/409 | ✅ + restart-survival makes this unreachable |
+
+**Verdict:** the auth_ok self-heal is at the entry point of every
+authenticated session — every downstream site is implicitly covered
+because no action message can run before `auth_ok` (the router
+gates on `client.authenticated`). The defence-in-depth presence
+check catches the secondary race (restart mid-form). The restart-
+survival JSON snapshot eliminates the trigger.
+
+### Added
+- `frontend/src/hooks/useGameStore.ts` — `BEGIN_SERVER_REHYDRATE`
+  reducer action. Clears character + equipment + flips `authPhase`
+  to `chain_check_pending` so the chain-check effect re-arms.
+  Distinct from `RESET_WALLET_SCOPED` because socket / fight /
+  spectator state are preserved — a server restart shouldn't blow
+  up an active fight the user is watching, only the character cache.
+- `frontend/src/lib/character-presence-check.ts` —
+  `verifyServerHasCharacter({ socket, timeoutMs? })`. Round-trips
+  `get_character` over WS, resolves `{ok:true}` on `character_data`
+  or `{ok:false, reason}` on `error` / timeout / not-yet-connected.
+  Defence-in-depth for the "restart mid-form" race.
+- `server/src/data/local-persistence.ts` — JSON-on-disk fallback
+  for character rows when Supabase isn't configured. Atomic write
+  (write-to-temp + rename). Cache + load-from-file logic. Survives
+  process boundaries. Gitignored at `server/.local-state/`.
+- `scripts/qa-auth-ok-server-amnesia.ts` — 13 assertions.
+- `scripts/qa-create-wager-orphan-guard.ts` — 15 assertions.
+- `scripts/qa-server-restart-recovery.ts` — 20 assertions
+  (integration test: save → simulate restart → load round-trip;
+  multi-wallet isolation; corrupted snapshot fails soft).
+
+### Changed
+- `frontend/src/app/game-provider.tsx` — `auth_ok` handler now
+  branches on `msg.hasCharacter === false`: dispatches
+  `BEGIN_SERVER_REHYDRATE`. Triggers the chain-check effect to
+  re-restore from chain. The user briefly sees
+  "Checking the chain for your fighter…" instead of stale state +
+  silent action failures.
+- `frontend/src/components/fight/matchmaking-queue.tsx` —
+  `handleAcceptWager` and `handleQueue` (create_wager branch) both
+  call `verifyServerHasCharacter` BEFORE the simulation /
+  wallet-popup path. On failure: `BEGIN_SERVER_REHYDRATE` + SET_ERROR
+  + return without signing. No orphan possible.
+- `server/src/data/db.ts` — `dbSaveCharacter`, `dbLoadCharacter`,
+  `dbDeleteCharacter` fall through to `local-persistence.ts` when
+  `getSupabase()` returns null. Same shape returned either way —
+  callers (`characters.ts::restoreCharacterFromDb`) don't branch.
+- `.gitignore` — `server/.local-state/` added.
+
+### Live-verified
+After implementing, restarted both servers. Both wallets
+auto-reconnected → `[Character] Restored from chain: "ShakaLiX"`
++ `"MrBoss"` in server.log. `server/.local-state/characters.json`
+now contains both rows. A subsequent `pkill node && npm run dev`
+will load these rows at auth time, no chain RPC needed.
+
+### Tests
+- 37 / 37 Move PASS (unchanged — no contract change).
+- All existing gauntlets PASS (0 regressions across the wider sweep).
+- New: `qa-auth-ok-server-amnesia.ts` (13), `qa-create-wager-orphan-guard.ts`
+  (15), `qa-server-restart-recovery.ts` (20).
+- Server tsc clean. Frontend tsc clean.
+
+### Note on Supabase
+The host running this environment has no Supabase credentials set.
+The JSON-on-disk fallback gives us restart-survival without
+external infra. A future operator who wants cloud-side replication
+should run `cd server && node setup-db.mjs` to print the migration
+SQL, paste it into a Supabase project, and set `SUPABASE_URL` /
+`SUPABASE_KEY` in `server/.env`. The `db.ts` adapter will prefer
+Supabase when configured; the local snapshot stays as a write-
+through cache and disaster-recovery insurance.
+
+---
+
 ## [Unreleased] — Wager-accept double-click race + abort-code toast, 2026-05-18
 
 Fixes the EMatchNotWaiting (abort code 1) MoveAbort that blocked wager

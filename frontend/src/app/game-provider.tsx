@@ -90,8 +90,33 @@ export default function GameProvider({
           // game-screen rendered with character=null AFTER auth completed
           // (LoadingScreen looked skipped). Dispatching here makes the
           // gate release with full equipment in one step.
+          //
+          // Bug 6 (2026-05-19) — server-restart amnesia self-heal. When the
+          // server restarts WITHOUT Supabase, the in-memory characters map
+          // is empty after boot. The client auto-reconnects with its
+          // existing JWT (`auth_token`) and the server responds with
+          // `auth_ok` carrying `hasCharacter: false, character: null` —
+          // but the FRONTEND's reducer still holds the pre-restart
+          // character. Pre-fix the null branch was silent: state.character
+          // stayed stale, the chain-check effect bailed (its
+          // `state.character` guard), and `restore_character` was never
+          // sent. Any subsequent action (queue_fight, allocate_points,
+          // equip_item, …) hit a missing-character sendError; create_wager
+          // already-signed-on-chain ended up as an orphan (see
+          // 0xd94d...01a2). Now: when auth_ok reports no character but we
+          // hold one, dispatch BEGIN_SERVER_REHYDRATE. The reducer drops
+          // the cached character + flips authPhase to chain_check_pending;
+          // the chain-check effect re-arms, fetches the on-chain NFT, and
+          // re-sends restore_character. PreCharacterGate renders the
+          // "Checking the chain for your fighter…" loader during the
+          // round-trip so every wallet-action button is blocked.
           if (msg.character) {
             dispatch({ type: "SET_CHARACTER", character: msg.character });
+          } else if (msg.hasCharacter === false) {
+            // Only rehydrate when there IS a cached character — a
+            // genuinely-no-character session (never minted, or just
+            // deleted) keeps the existing PreCharacterGate flow.
+            dispatch({ type: "BEGIN_SERVER_REHYDRATE" });
           }
           break;
         case "character_data":

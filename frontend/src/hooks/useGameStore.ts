@@ -366,7 +366,18 @@ export type GameAction =
   | {
       type: "SET_ACTIVE_SPECTATE_FIGHTS";
       fights: GameState["activeSpectateFights"];
-    };
+    }
+  // BEGIN_SERVER_REHYDRATE (Bug 6, 2026-05-19) — fired when `auth_ok`
+  // arrives with `hasCharacter: false` while the frontend has a cached
+  // character (server-restart amnesia: in-memory map empty, no
+  // Supabase fallback). Drops the stale character + equipment so the
+  // PreCharacterGate renders the loading screen, and arms the chain-
+  // check effect by transitioning authPhase to "chain_check_pending"
+  // (the gate's normal restore path will fetch the on-chain NFT and
+  // send `restore_character` to re-populate the server). Distinct from
+  // RESET_WALLET_SCOPED because socket / WS / spectator state are
+  // unaffected — only the per-character cache resets.
+  | { type: "BEGIN_SERVER_REHYDRATE" };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
@@ -808,6 +819,21 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           };
     case "SET_ACTIVE_SPECTATE_FIGHTS":
       return { ...state, activeSpectateFights: action.fights };
+    case "BEGIN_SERVER_REHYDRATE":
+      // Clear character + equipment + auth-phase. The chain-check
+      // effect in GameProvider re-runs (deps include state.character +
+      // state.authPhase), fetches the on-chain NFT, sends
+      // restore_character, and the server-side record is repopulated.
+      // We intentionally do NOT clear fight / spectatingFight / wager
+      // state — those are independent slices and a server-restart
+      // shouldn't blow up an in-flight match the user is watching.
+      return {
+        ...state,
+        character: null,
+        committedEquipment: EMPTY_EQUIPMENT,
+        pendingEquipment: EMPTY_EQUIPMENT,
+        authPhase: "chain_check_pending",
+      };
     default:
       return state;
   }

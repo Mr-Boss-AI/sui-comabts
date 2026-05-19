@@ -16,6 +16,7 @@ import { canAcceptWager, canAcceptWagerWithBalance } from "@/lib/wager-accept-ga
 import { assertTxSucceeded, extractTxDigest } from "@/lib/tx-result";
 import { ARENA_ABORT_CODES } from "@/lib/arena-aborts";
 import { simulateWagerTx } from "@/lib/wager-preflight";
+import { verifyServerHasCharacter } from "@/lib/character-presence-check";
 import { computeBusyState, decideMatchmakingRender } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
 import { ScreenLayout, TopBanner, SectionHeader } from "@/components/v2/layout";
@@ -238,6 +239,26 @@ export function MatchmakingQueue() {
       // Sign create_wager on-chain first
       setSigning(true);
       try {
+        // Bug 6 defence-in-depth (2026-05-19). Mirrors the
+        // handleAcceptWager check — verify the server still holds our
+        // character record before locking SUI on chain. The 2026-05-18
+        // orphan incident (wager 0xd94d…01a2) was exactly this race:
+        // server restart, frontend cached character is stale, queue_fight
+        // hits a missing-character sendError after the on-chain
+        // create_wager already locked the escrow. The auth_ok self-heal
+        // catches the common case (reconnect after restart); this catches
+        // the "restart mid-form" race.
+        const presence = await verifyServerHasCharacter({ socket: state.socket });
+        if (!presence.ok) {
+          console.warn("[Wager] create_wager presence check failed:", presence.reason);
+          dispatch({ type: "BEGIN_SERVER_REHYDRATE" });
+          dispatch({
+            type: "SET_ERROR",
+            message: "Reconnecting your character with the server — try again in a moment.",
+          });
+          return;
+        }
+
         const stakeAmountMist = BigInt(Math.round(parsedWager.amount * 1_000_000_000));
         const tx = buildCreateWagerTx(stakeAmountMist);
 
@@ -437,6 +458,25 @@ export function MatchmakingQueue() {
     }
     setSigning(true);
     try {
+      // Bug 6 defence-in-depth (2026-05-19). Even with the auth_ok
+      // self-heal in place, the server could lose our character record
+      // *while* the wager UI is open (a restart between the form
+      // mounting and the user clicking Accept). Verify the server
+      // still knows us BEFORE the SDK opens the wallet popup. On
+      // failure, dispatch BEGIN_SERVER_REHYDRATE so the user lands in
+      // the loader while the chain-check re-restores; their pending
+      // click is cancelled rather than orphaned-on-chain.
+      const presence = await verifyServerHasCharacter({ socket: state.socket });
+      if (!presence.ok) {
+        console.warn("[Wager] Server-character presence check failed:", presence.reason);
+        dispatch({ type: "BEGIN_SERVER_REHYDRATE" });
+        dispatch({
+          type: "SET_ERROR",
+          message: "Reconnecting your character with the server — try again in a moment.",
+        });
+        return;
+      }
+
       // 2026-05-18 pre-flight (Bug — EMatchNotWaiting). Run an unsigned
       // simulation FIRST so a "wager already accepted by someone else"
       // (status flipped WAITING→ACTIVE between lobby render and click)
