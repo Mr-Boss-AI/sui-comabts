@@ -1,3 +1,19 @@
+# Session Handoff
+
+> Canonical single-page session summary lives in dated
+> `HANDOVER_<YYYY-MM-DD>.md` files now. The latest:
+> **[`HANDOVER_2026-05-19.md`](./HANDOVER_2026-05-19.md)** — end-of-
+> session wrap covering tonight's four shipped commits (Bug 1+2,
+> Bug 5, Bug 6, Bug 8), level-up live-verify, two open polish items,
+> the mainnet-blocker zkLogin-confirm-popup line, the next-session
+> pickup order, and stale-files cleanup status.
+>
+> The older inline entries below are kept for git-history continuity.
+> When a new session ships, append a one-line pointer at the top of
+> this file to the new dated handover.
+
+---
+
 # Session Handoff — 2026-05-19 (Bug 7 — wager-accepted silent gate)
 
 > Second-round wager 0xce620b9c…6d59 stuck on chain (status=1 ACTIVE,

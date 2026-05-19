@@ -186,8 +186,8 @@ Each item below must be verified before running `sui client publish` against mai
 
 ### Frontend layer
 
-- [ ] **Delete dead code: `frontend/src/components/items/equipment-grid.tsx`** — exported `EquipmentGrid` component, never imported anywhere (grep confirms zero consumers as of 2026-04-18). The active equipment UI lives in `character-profile.tsx`. Parked for separate cleanup PR rather than deleted alongside refactors.
-- [ ] **`frontend/src/lib/sui-contracts.ts:5-7`** — remove the hardcoded testnet fallback `"0x7fd54c4d..."` for `NEXT_PUBLIC_SUI_PACKAGE_ID`. Missing env should throw at build time.
+- [x] ~~**Delete dead code: `frontend/src/components/items/equipment-grid.tsx`**~~ — DONE (file no longer present, verified 2026-05-19).
+- [x] ~~**`frontend/src/lib/sui-contracts.ts:5-7`** — remove the hardcoded testnet fallback~~ — DONE; `PACKAGE_ID` now resolves through a `required(name, value)` env helper at sui-contracts.ts:44 that throws when `NEXT_PUBLIC_SUI_PACKAGE_ID` is absent.
 - [ ] **All `moveCall` targets use the upgraded package ID** — on mainnet there's only one package, so this is moot, but the pattern should stay so future upgrades work cleanly
 - [ ] **No testnet wallet addresses visible in source** — search the frontend tree for `0xdbd3`, `0x3606`, `0xa5ad`, `0x07fd`, `0xff99` and remove all hits
 - [ ] **No dev-mode API endpoints** — all RPC URLs come from env, no hardcoded testnet fullnode
@@ -200,8 +200,8 @@ Each item below must be verified before running `sui client publish` against mai
   - [ ] `server/.env.example` — `SUPABASE_URL=https://your-project.supabase.co`, `SUI_PACKAGE_ID=0x...`, etc.
   - [ ] `frontend/.env.local.example` (create if missing)
   - [ ] No real secrets, no real addresses
-- [ ] **`scripts/mint-demo-items.sh`** — file is testnet-specific (hardcodes `0xa5ad...` as recipient). Either delete before mainnet or rewrite with env vars + safety check for `NETWORK=mainnet`.
-- [ ] **`deployment.json`** — delete or move to `deployment.testnet.json`. Mainnet starts with a fresh `deployment.mainnet.json`.
+- [x] ~~**`scripts/mint-demo-items.sh`**~~ — DONE (file no longer present, verified 2026-05-19).
+- [x] ~~**`deployment.json`** — delete or move to `deployment.testnet.json`~~ — DONE (root now holds only `deployment.testnet-v5.json`).
 - [ ] **`contracts/Published.toml`** — delete the testnet publish metadata. It will regenerate on mainnet publish.
 - [ ] **`contracts/Move.toml`** — currently has `sui_combats = "0x0"`. Leave as is; `sui client publish` auto-updates.
 
@@ -218,6 +218,30 @@ Each item below must be verified before running `sui client publish` against mai
 - [ ] **`option::is_some` guards before every `option::borrow`** — `arena.move:163, 255, 313` flagged. Add per-line.
 - [ ] **Item stat bonus caps** — `mint_item_admin` should cap each `*_bonus: u16` at some reasonable maximum (e.g. 10000) to prevent integer overflow in combat math on frontend/server.
 - [ ] **`level_req` cap** — `mint_item_admin` should `assert!(level_req <= MAX_LEVEL)` (20) so items can't be permanently unusable.
+
+### UX gates — zkLogin signing must require explicit confirmation
+
+> **HARD MAINNET BLOCKER — added 2026-05-19.** On testnet, Enoki
+> zkLogin signs every `signAndExecuteTransaction` silently for demo-
+> smoothness reasons (the Phase A login pass deliberately accepted
+> the no-popup UX to keep the demo headline simple). That is **not
+> safe for mainnet**: a logged-in user who walks away from their
+> screen could lose real SUI to anyone with physical access, and
+> a malicious page-injection attack could fire arbitrary
+> `accept_wager` / `list_item` / `buy_listing` PTBs without the
+> user noticing. Confirm popups are the line of defence between
+> a stolen browser session and a drained mainnet wallet.
+
+- [ ] **Every wallet-popup site must gain an explicit confirm-popup gate.** All sites that today call `signer.signAndExecuteTransaction({ transaction })` go through this gate. Audit checklist:
+  - [ ] `frontend/src/components/fight/matchmaking-queue.tsx` — `handleQueue` (create_wager), `handleAcceptWager`, `handleCancelWager`
+  - [ ] `frontend/src/components/character/character-creation.tsx` — initial mint
+  - [ ] `frontend/src/hooks/useEquipmentActions.ts` — `saveLoadout`
+  - [ ] `frontend/src/components/character/stat-allocate-modal.tsx` — `allocate_points`
+  - [ ] `frontend/src/components/marketplace/*` — `list_item`, `delist_item`, `buy_listing`, kiosk withdraw
+  - [ ] Any future signer.signAndExecuteTransaction call site — grep before every release.
+- [ ] **Implementation shape:** the confirm modal SHOULD show: (a) target Move function (`arena::accept_wager`), (b) human-readable amount + asset (`0.1 SUI`), (c) recipient if applicable (`creator's address …4ed3`), (d) gas estimate. A single shared `<ConfirmTxModal />` component renders before the signer call; the user must click "Sign" before the Enoki popup fires.
+- [ ] **Pinning:** add a gauntlet that fails if a new `signAndExecuteTransaction` is added without an immediately-preceding `await confirmTransaction(...)` call. Mirror the pattern in `qa-wager-accept-race.ts` (source-grep count of signing sites with paired pre-flight).
+- [ ] **Settings toggle (optional, not safe-by-default):** a "Trust this session for 30 minutes" setting that bypasses the popup for the same Move function. Default OFF. Surface clearly in the UI so the user knows they've reduced their own defence depth.
 
 ### Operational security
 
