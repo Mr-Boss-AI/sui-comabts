@@ -714,3 +714,24 @@ function gracefulShutdown(signal: string): void {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Bug 7 (2026-05-19) safety net. The handleWagerAccepted incident
+// at 0xce620b9c… traced to an async handler whose unhandled rejection
+// vanished into Node's default "warning only" behaviour, leaving 0.2
+// SUI locked on chain with no server log. We catch globally now so
+// any promise that escapes a local catch still lands in the log with
+// enough context for triage. Process stays up — these are typically
+// transient (RPC blips); kill -9 would lock more SUI than it saved.
+process.on('unhandledRejection', (reason, _promise) => {
+  const r = reason as Error | { message?: string; stack?: string } | string | undefined;
+  const stack = (r as Error)?.stack;
+  const message = typeof r === 'string' ? r : (r as { message?: string })?.message;
+  console.error(
+    '[unhandledRejection]',
+    stack || message || JSON.stringify(reason),
+  );
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err?.stack || err?.message || err);
+});

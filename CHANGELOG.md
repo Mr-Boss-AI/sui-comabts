@@ -12,6 +12,108 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — Wager-accepted silent gate (Bug 7), 2026-05-19
+
+Second-round wager stuck on chain with 0.2 SUI locked. The
+`handleWagerAccepted` flow exited through one of six silent
+`sendError` gates, leaving NO server breadcrumb to triage from. This
+commit doesn't pinpoint WHICH gate fired — we don't have enough
+evidence — but it makes every future repro instantly diagnosable
+AND prevents the same silent SUI-lock failure mode.
+
+### The incident
+- create_wager tx `3hk7Wi3o1ob65FeQCyGe8oK4XijgXZq52wEy7hhwG6Jq`
+  (ShakaLiX 0x03c3…985f, 0.1 SUI stake)
+- accept_wager tx `EgYPPXw85FApM4LkeW8RuFzm7s46mkhL79UJjFabX2Cv`
+  (MrBoss 0xf669…0f33, matching 0.1 SUI)
+- wager match `0xce620b9cff…6d59`, on-chain status=1 (ACTIVE), 0.2 SUI
+  in escrow, never settled, no fight started.
+- The PREVIOUS wager in the same session (`0xa75d171a…`, ShakaLiX won)
+  settled cleanly. So the bug fires on the *second* round only.
+
+### Refund
+tx `AZsFE7jxxuCrHj1kZeUkEDiRCVWnk8ApgeYA8kTKcJDx` at 21:45:58Z. Status
+1 (ACTIVE) → admin_cancel_wager splits 50/50; each player gets their
+0.1 SUI back. Wager → status 2 (SETTLED), escrow drained.
+
+### Server log timeline
+```
+4596  [WS in] 0x03c33df0 queue_fight [wager=0xce620b9cff]
+4597  [Wager Lobby] ShakaLiX created wager for 0.1 SUI (0xce620b9cff…6d59)
+4607  [WS in] 0xf669789c wager_accepted [wager=0xce620b9cff]
+4746  [Wager] Admin-cancelling 0xce620b9cff…   ← manual refund
+4817  [Wager Lobby] Expired: 0xce620b9cff…     ← 10-min sweeper
+```
+Between line 4607 (the WS-in trace) and line 4746 (the refund), the
+log says NOTHING — no proceed-path "[Wager Lobby] X accepted Y's
+wager", no autoRollback warning, no chain-RPC error, no character-
+not-found error. Whatever exited didn't log.
+
+### Six gates that could have fired silently (pre-fix)
+| Gate | Exit shape pre-fix | Now |
+|---|---|---|
+| `!wagerMatchId` | sendError | `[handleWagerAccepted] reject(missing-wagerMatchId)` |
+| `processingWagerAccepts.has` | sendError | `…reject(processing-inflight)` |
+| `client.currentFightId` truthy | sendError | `…reject(caller-in-fight) currentFightId=<id>` |
+| `!client.walletAddress` | sendError | `…reject(caller-not-authed)` |
+| `targetChainStatus === null` | sendError | `…reject(chain-status-null)` |
+| `outcome.kind === 'reject'` | sendError | `…reject(outcome-reject:<reason>)` |
+| `!charA \|\| !charB` | sendError | `…reject(character-missing(a=…,b=…))` |
+| `!client.characterId` | sendError | `…reject(caller-no-characterId)` |
+
+### Defence layers shipped
+1. **`gateExit(reason, userMessage)` helper** — every silent gate now
+   logs a structured `[handleWagerAccepted] reject(<reason>) wager=
+   <id> caller=<wallet> currentFightId=<id\|none>` line. Single
+   choke point so log + toast can't drift.
+2. **Proceed-path positive breadcrumbs** —
+   `[handleWagerAccepted] chain probe ok …` (with full predicate
+   context: status, targetInLobby, ownWager, inMmQueue) and
+   `[handleWagerAccepted] proceed-complete wager=<id> fight=<id>`.
+   So a partial-success run also tells us where it got to.
+3. **Top-level try/catch around the proceed body** — pre-fix any
+   throw inside the try block escaped to the WS router which didn't
+   await OR catch. Now: `[handleWagerAccepted] UNHANDLED wager=<id>`
+   + a user-facing toast pointing at `/api/admin/cancel-wager`. The
+   user's stake stays refundable; the bug surfaces immediately.
+4. **WS router `.catch()`** — `handleWagerAccepted(client,
+   msg).catch(...)` so async rejections that bypass the inner
+   try/catch still hit `[router:wager_accepted] unhandled async
+   rejection`.
+5. **Process-level safety nets** — `process.on('unhandledRejection')`
+   + `process.on('uncaughtException')` in index.ts. Process stays
+   up (transient RPC blips would kill more SUI than they'd save) but
+   every escaped promise logs.
+
+### Added
+- `scripts/qa-wager-accepted-diagnostics.ts` — 19 PASS. Pins every
+  gate emits its reason; proceed-path logs; try/catch wrapper; router
+  `.catch()`; process-level handlers.
+
+### Changed
+- `server/src/ws/handler.ts::handleWagerAccepted` — gateExit helper +
+  every silent return logs + try/catch + .catch() at router.
+- `server/src/index.ts` — process-level unhandledRejection +
+  uncaughtException handlers.
+
+### Tests
+- Server tsc clean. Frontend tsc unchanged from prior commit.
+- qa-wager-accepted-diagnostics.ts NEW (19 PASS).
+- 0 regressions on prior gauntlets (Move 37/37, the wider TS suite
+  unchanged).
+- Servers restarted with the patch live.
+
+### Next session
+This patch makes the bug **observable**. The fix for the root cause
+needs one more live repro: with this commit, the next "stale lobby
+after a second-round wager" will leave a `[handleWagerAccepted]
+reject(<reason>) …` line in the server log. That reason names the
+gate, the gate names the predicate, and the predicate names the
+fix. Until then we ship the defence-in-depth — silent SUI-locks
+become triageable, not hidden.
+
+---
+
 ## [Unreleased] — Server-restart amnesia (Bug 6), 2026-05-19
 
 Fixes the second wager-loss vector found minutes after the

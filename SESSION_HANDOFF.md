@@ -1,3 +1,37 @@
+# Session Handoff — 2026-05-19 (Bug 7 — wager-accepted silent gate)
+
+> Second-round wager 0xce620b9c…6d59 stuck on chain (status=1 ACTIVE,
+> 0.2 SUI locked, no fight). Refunded via admin/cancel-wager
+> (tx AZsFE7jx…). handleWagerAccepted exited through one of 6 silent
+> `sendError` gates leaving no server log. This commit makes every
+> gate emit a structured `[handleWagerAccepted] reject(<reason>) …`
+> breadcrumb + adds try/catch + router .catch() + process-level
+> unhandledRejection handler. Next repro will tell us which gate
+> fired. Full detail in [`CHANGELOG.md`](./CHANGELOG.md).
+
+## 2026-05-19 (b) — what shipped
+
+- **Refund landed** — tx `AZsFE7jxxuCrHj1kZeUkEDiRCVWnk8ApgeYA8kTKcJDx`,
+  50/50 split via admin_cancel_wager (status was ACTIVE), each player
+  refunded 0.1 SUI.
+- **gateExit helper** — every silent sendError in handleWagerAccepted
+  routes through `gateExit(reason, msg)` which emits
+  `[handleWagerAccepted] reject(<reason>) wager=… caller=… currentFightId=…`.
+- **Positive breadcrumbs** — `[handleWagerAccepted] chain probe ok`
+  with status + lobby + ownWager + queue context, and
+  `[handleWagerAccepted] proceed-complete wager=… fight=…`.
+- **try/catch + router .catch()** — unhandled exceptions can no
+  longer disappear; user sees a toast pointing at
+  /api/admin/cancel-wager; server logs `[handleWagerAccepted] UNHANDLED`.
+- **Process-level safety nets** — unhandledRejection +
+  uncaughtException handlers in index.ts.
+- **Gauntlet** — qa-wager-accepted-diagnostics.ts (19 PASS).
+- **No root-cause fix yet.** This is observability — the next live
+  repro will name the exact gate via the new logs, and that names
+  the predicate to fix.
+
+---
+
 # Session Handoff — 2026-05-19 (Bug 6 — server-restart amnesia)
 
 > Server-restart between sessions wiped the in-memory character map;

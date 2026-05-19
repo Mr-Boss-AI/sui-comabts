@@ -447,7 +447,18 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
       handleSpectateFight(client, msg);
       break;
     case 'wager_accepted':
-      handleWagerAccepted(client, msg);
+      // Async handler — pre-fix the router fire-and-forgot, so any
+      // unhandled rejection inside handleWagerAccepted got swallowed
+      // by Node's default `unhandledRejection` behaviour. Now we
+      // .catch() at the call site so the breadcrumb lands in the
+      // server log even when the inner try/catch is bypassed by
+      // an unexpected code path.
+      handleWagerAccepted(client, msg).catch((err: any) => {
+        console.error(
+          '[router:wager_accepted] unhandled async rejection:',
+          err?.stack || err?.message || err,
+        );
+      });
       break;
     case 'get_wager_lobby':
       handleGetWagerLobby(client);
@@ -1408,12 +1419,31 @@ const processingWagerAccepts = new Set<string>();
 async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage): Promise<void> {
   const wagerMatchId = msg.wagerMatchId as string;
   if (!wagerMatchId) {
+    console.warn('[handleWagerAccepted] reject(missing-wagerMatchId)');
     sendError(client, 'Missing wagerMatchId');
     return;
   }
+  // Bug 7 (2026-05-19) diagnostic. Every silent sendError gate now
+  // emits a server-side breadcrumb so the next repro of "wager
+  // accepted on-chain but fight never starts" tells us exactly which
+  // gate fired. Pre-fix the 0xce620b9c… incident left no trace at
+  // all on the server side: 0.2 SUI locked, two clients staring at
+  // stale lobby, no error log, no way to triage from the data we had.
+  // The shared `gateExit(...)` helper keeps the call sites short and
+  // ensures every exit goes through one breadcrumb path — easy to
+  // pin in qa-wager-accept-gate.ts.
+  const gateExit = (reason: string, userMessage: string): void => {
+    console.warn(
+      `[handleWagerAccepted] reject(${reason}) ` +
+      `wager=${wagerMatchId.slice(0, 14)} ` +
+      `caller=${client.walletAddress?.slice(0, 10) ?? '(none)'} ` +
+      `currentFightId=${client.currentFightId ?? 'none'}`,
+    );
+    sendError(client, userMessage);
+  };
 
   if (processingWagerAccepts.has(wagerMatchId)) {
-    sendError(client, 'This wager is already being accepted. Try again in a moment.');
+    gateExit('processing-inflight', 'This wager is already being accepted. Try again in a moment.');
     return;
   }
   processingWagerAccepts.add(wagerMatchId);
@@ -1422,12 +1452,12 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     // gate; checked separately so the 'in a fight' message survives any
     // future reshuffle of the accept-decision predicate).
     if (client.currentFightId) {
-      sendError(client, 'Cannot accept a wager while in a fight');
+      gateExit('caller-in-fight', 'Cannot accept a wager while in a fight');
       return;
     }
 
     if (!client.walletAddress) {
-      sendError(client, 'Authenticate first');
+      gateExit('caller-not-authed', 'Authenticate first');
       return;
     }
 
@@ -1459,9 +1489,18 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     // "can't determine" and reject so we don't accidentally proceed.
     const targetChainStatus = await getWagerStatus(wagerMatchId);
     if (targetChainStatus === null) {
-      sendError(client, 'Could not read wager status from chain. Try again in a moment.');
+      gateExit(
+        'chain-status-null',
+        'Could not read wager status from chain. Try again in a moment.',
+      );
       return;
     }
+    console.log(
+      `[handleWagerAccepted] chain probe ok wager=${wagerMatchId.slice(0, 14)} ` +
+      `status=${targetChainStatus} targetInLobby=${!!targetEntry} ` +
+      `ownWager=${callerOwnWager?.wagerMatchId.slice(0, 14) ?? 'none'} ` +
+      `inMmQueue=${callerInMatchmakingQueue}`,
+    );
 
     const outcome = decideAcceptOutcome({
       callerWallet: client.walletAddress,
@@ -1475,7 +1514,7 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     });
 
     if (outcome.kind === 'reject') {
-      sendError(client, outcome.reason);
+      gateExit(`outcome-reject:${outcome.reason.slice(0, 60)}`, outcome.reason);
       return;
     }
 
@@ -1544,12 +1583,15 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     const charB = getCharacterByWallet(client.walletAddress);
 
     if (!charA || !charB) {
-      sendError(client, 'Character not found');
+      gateExit(
+        `character-missing(a=${!!charA},b=${!!charB})`,
+        'Character not found',
+      );
       return;
     }
 
     if (!client.characterId) {
-      sendError(client, 'Create a character first');
+      gateExit('caller-no-characterId', 'Create a character first');
       return;
     }
 
@@ -1579,6 +1621,28 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     const mm = getMatchmaking();
     mm.removeFromQueue(entry.creatorWallet);
     mm.removeFromQueue(client.walletAddress);
+    console.log(
+      `[handleWagerAccepted] proceed-complete wager=${wagerMatchId.slice(0, 14)} ` +
+      `fight=${fight.id.slice(0, 14)}`,
+    );
+  } catch (err: any) {
+    // Bug 7 (2026-05-19) safety net. Pre-fix any exception here was
+    // silently absorbed because the WS router (`case 'wager_accepted':
+    // handleWagerAccepted(client, msg)`) didn't await OR catch. With
+    // 0.2 SUI in escrow this was the wrong default — surface the
+    // failure to the user AND log it, then leave it to admin/cancel-
+    // wager to refund. The `processingWagerAccepts` cleanup in the
+    // finally still runs.
+    console.error(
+      `[handleWagerAccepted] UNHANDLED wager=${wagerMatchId.slice(0, 14)}:`,
+      err?.stack || err?.message || err,
+    );
+    sendError(
+      client,
+      'Server hit an unexpected error while finalising your wager. ' +
+        'Your stake is on chain — escrow can be refunded via ' +
+        '/api/admin/cancel-wager. Please notify the dev with the wager id.',
+    );
   } finally {
     processingWagerAccepts.delete(wagerMatchId);
   }
