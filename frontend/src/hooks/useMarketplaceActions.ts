@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useDAppKit, useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useDAppKit, useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { useGame } from "@/hooks/useGameStore";
 import {
   buildBuyItemTx,
@@ -10,6 +11,7 @@ import {
   buildDelistItemTx,
   buildListItemTx,
   buildTakeFromKioskTx,
+  buildWithdrawAllKioskProfitsTx,
   buildWithdrawKioskProfitsTx,
   computeRoyalty,
   TRANSFER_POLICY_ID,
@@ -48,6 +50,7 @@ export function useMarketplaceActions() {
   const { state, dispatch } = useGame();
   const dAppKit = useDAppKit();
   const account = useCurrentAccount();
+  const client = useCurrentClient() as SuiGrpcClient | null;
   const [signing, setSigning] = useState(false);
 
   const sign = useCallback(
@@ -80,9 +83,38 @@ export function useMarketplaceActions() {
     [account?.address, dAppKit, dispatch],
   );
 
+  /**
+   * Create a Kiosk for the connected wallet — but ONLY if one doesn't already
+   * exist. The phantom-empty-kiosk incident (May 2026) was caused by a second
+   * `create_player_kiosk` call landing while the first cap was still propagating
+   * through RPC indexing; subsequent listings settled in the new kiosk while
+   * the UI kept pointing at the first one. The chain-side `create_player_kiosk`
+   * is unconditional (no per-address registry yet — pending v5.1), so this
+   * guard lives in JS: we query the wallet's owned KioskOwnerCaps and short-
+   * circuit if any exist, bumping the on-chain refresh so the UI re-discovers
+   * the existing kiosk instead.
+   */
   const createKiosk = useCallback(async (): Promise<ActionResult> => {
+    if (!account?.address) return { ok: false, error: "Connect a wallet first" };
+    if (client) {
+      try {
+        const { objects: existing } = await client.listOwnedObjects({
+          owner: account.address,
+          type: "0x2::kiosk::KioskOwnerCap",
+          include: { json: true },
+        });
+        if (existing.length > 0) {
+          dispatch({ type: "BUMP_ONCHAIN_REFRESH" });
+          return { ok: false, error: "You already own a Kiosk — refreshing." };
+        }
+      } catch (err: any) {
+        console.warn("[Marketplace] pre-create cap check failed:", err?.message ?? err);
+        // Fall through and let the user attempt creation — a transient RPC
+        // failure shouldn't lock them out of marketplace setup.
+      }
+    }
     return sign(() => buildCreateKioskTx());
-  }, [sign]);
+  }, [account?.address, client, dispatch, sign]);
 
   const listItem = useCallback(
     async (
@@ -159,6 +191,21 @@ export function useMarketplaceActions() {
     [account?.address, sign],
   );
 
+  /**
+   * Sweep profits from every kiosk the wallet owns into the wallet in one
+   * signature. Required by the post-orphan-bug aggregation contract — the UI
+   * shows a single aggregated Profits number, so a single Withdraw click has
+   * to clear it regardless of how many kiosks the wallet ended up owning.
+   */
+  const withdrawAllProfits = useCallback(
+    async (kiosks: Array<{ kioskId: string; capId: string }>): Promise<ActionResult> => {
+      if (!account?.address) return { ok: false, error: "Connect a wallet first" };
+      if (kiosks.length === 0) return { ok: false, error: "No kiosks to withdraw from" };
+      return sign(() => buildWithdrawAllKioskProfitsTx(kiosks, account.address));
+    },
+    [account?.address, sign],
+  );
+
   return {
     signing,
     createKiosk,
@@ -167,6 +214,7 @@ export function useMarketplaceActions() {
     retrieveFromKiosk,
     buyItem,
     withdrawProfits,
+    withdrawAllProfits,
     /** Pre-compute the royalty (in SUI) for a purchase price (in SUI). */
     previewRoyalty(priceSui: number): { royaltySui: number; totalSui: number; royaltyMist: bigint; priceMist: bigint } {
       const priceMist = suiToMist(priceSui);

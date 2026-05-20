@@ -415,6 +415,7 @@ export async function fetchKioskItems(
             maxDamage: Number(json.max_damage ?? 0),
             inKiosk: true,
             kioskListed: listedItemIds.has(obj.objectId),
+            kioskId,
           });
         } catch {
           // Skip items that fail to fetch
@@ -702,5 +703,39 @@ export function buildWithdrawKioskProfitsTx(
     ],
   });
   tx.transferObjects([profits], tx.pure.address(recipient));
+  return tx;
+}
+
+/**
+ * Withdraw the full profits balance from every kiosk in `kiosks`, in one PTB.
+ *
+ * The phantom-empty-kiosk bug (May 2026) means a wallet can legitimately own
+ * more than one Kiosk after a duplicate `create_player_kiosk` call — the
+ * orphaned kiosk holds the actual sale profits while the UI was historically
+ * tracking only the first cap returned by RPC. Aggregating into a single
+ * signature here is the user-facing repair path: the seller signs once and
+ * sweeps every kiosk they own, regardless of which one holds the profits.
+ *
+ * Per-kiosk withdraw is a separate Coin<SUI>; they're all transferred to
+ * `recipient` in one batched `transferObjects` call.
+ */
+export function buildWithdrawAllKioskProfitsTx(
+  kiosks: Array<{ kioskId: string; capId: string }>,
+  recipient: string,
+): Transaction {
+  const tx = new Transaction();
+  const coins = kiosks.map(({ kioskId, capId }) =>
+    tx.moveCall({
+      target: `0x2::kiosk::withdraw`,
+      arguments: [
+        tx.object(kioskId),
+        tx.object(capId),
+        tx.pure.option('u64', null),
+      ],
+    }),
+  );
+  if (coins.length > 0) {
+    tx.transferObjects(coins, tx.pure.address(recipient));
+  }
   return tx;
 }

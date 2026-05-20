@@ -7,7 +7,13 @@
 > git-history continuity and the bookmarks people already have.
 >
 > Bucket pointer: Phase 2 visual-QA + polish track open on
-> `feature/phase-2-design`. Phase A Sui-latest integration shipped
+> `feature/phase-2-design`. Phantom-empty-kiosk bug (May 20 2026) fixed —
+> `useKiosk` now enumerates every owned `KioskOwnerCap` and aggregates
+> profits/listings; `withdrawAllProfits` sweeps across kiosks in one
+> signature; `createKiosk` refuses to mint a second cap on a wallet that
+> already owns one. 46/46 pinned in `scripts/qa-kiosk-orphan.ts`. On-chain
+> registry fix bundled into v5.1 republish (`MAINNET_PREP.md` section C
+> Contract layer). Phase A Sui-latest integration shipped
 > 2026-05-17 — Enoki zkLogin (Google + Twitch) live in the wallet
 > connect modal, Bug A wager-accept pre-flight balance check shipped,
 > Bug B `FailedTransaction` branching shipped across every

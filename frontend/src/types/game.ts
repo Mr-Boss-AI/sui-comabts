@@ -200,6 +200,12 @@ export interface Item {
    *  but not for sale — and the user can pull it back to their wallet
    *  via the Retrieve action. */
   kioskListed?: boolean;
+  /** Kiosk shared-object ID that physically holds this item, when
+   *  `inKiosk` is true. Required to address the correct kiosk when a
+   *  wallet owns more than one — e.g. the post-orphan-bug repair
+   *  flow where Retrieve / Delist must target the kiosk containing
+   *  the item, not the wallet's "primary" cap. */
+  kioskId?: string;
 }
 
 // ===== FIGHT =====

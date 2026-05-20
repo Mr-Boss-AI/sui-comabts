@@ -25,11 +25,11 @@ import type { Item, MarketplaceListing } from "@/types/game";
  * `onChainRefreshTrigger` bumps after every tx so the kiosk re-fetches.
  */
 export function MyKioskPanel() {
-  const { state } = useGame();
+  const { state, dispatch } = useGame();
   const account = useCurrentAccount();
   const kiosk = useKiosk(state.onChainRefreshTrigger);
   const { listings } = useMarketplace();
-  const { createKiosk, delistItem, retrieveFromKiosk, withdrawProfits, signing } = useMarketplaceActions();
+  const { createKiosk, delistItem, retrieveFromKiosk, withdrawAllProfits, signing } = useMarketplaceActions();
   const [picker, setPicker] = useState(false);
   const [selectedToList, setSelectedToList] = useState<Item | null>(null);
 
@@ -67,27 +67,48 @@ export function MyKioskPanel() {
   async function handleSetupKiosk() {
     const result = await createKiosk();
     if (result.ok) {
-      // Force kiosk re-fetch (the BUMP_ONCHAIN_REFRESH inside the action hook
-      // already does this; this is just a paranoia call for the local hook).
       kiosk.refresh();
+      return;
     }
+    // createKiosk's pre-flight may detect an existing cap and refuse — that's
+    // not an error from the user's perspective, just a no-op. Surface the
+    // message so they know to wait for the refresh instead of clicking again.
+    if (result.error) dispatch({ type: "SET_ERROR", message: result.error });
   }
 
   async function handleDelist(listing: MarketplaceListing) {
-    if (!kiosk.kioskId || !kiosk.capId) return;
-    await delistItem(listing.item.id, kiosk.kioskId, kiosk.capId);
+    // Always operate on the kiosk that holds the listing — the server stamps
+    // kioskId per listing, and the cap is looked up from the wallet's owned
+    // set. This is the orphan-kiosk-safe path: a wallet with two kiosks
+    // delists from whichever kiosk the buyer would have purchased from.
+    const cap = kiosk.capForKiosk(listing.kioskId);
+    if (!cap) return;
+    await delistItem(listing.item.id, listing.kioskId, cap);
     kiosk.refresh();
   }
 
-  async function handleRetrieveStuck(itemId: string) {
-    if (!kiosk.kioskId || !kiosk.capId) return;
-    await retrieveFromKiosk(itemId, kiosk.kioskId, kiosk.capId);
+  async function handleRetrieveStuck(item: Item) {
+    // Items stamped by `fetchKioskItems` carry their containing kioskId.
+    // Falling back to the primary cap is only safe when the wallet owns
+    // exactly one kiosk — orphan-bug repair requires the per-item id.
+    const kioskId = item.kioskId ?? kiosk.kioskId;
+    if (!kioskId) return;
+    const cap = kiosk.capForKiosk(kioskId) ?? kiosk.capId;
+    if (!cap) return;
+    await retrieveFromKiosk(item.id, kioskId, cap);
     kiosk.refresh();
   }
 
   async function handleWithdraw() {
-    if (!kiosk.kioskId || !kiosk.capId) return;
-    await withdrawProfits(kiosk.kioskId, kiosk.capId);
+    // Aggregate withdraw across every kiosk the wallet owns. The UI's
+    // Profits number is the sum across kiosks; a single signature has to
+    // clear all of them. `withdrawAllProfits` only includes kiosks with
+    // a non-zero balance so the PTB stays minimal.
+    const withProfits = kiosk.kiosks.filter((k) => k.profitsMist > 0n);
+    if (withProfits.length === 0) return;
+    await withdrawAllProfits(
+      withProfits.map((k) => ({ kioskId: k.kioskId, capId: k.capId })),
+    );
     kiosk.refresh();
   }
 
@@ -305,7 +326,7 @@ export function MyKioskPanel() {
                       <Button
                         size="sm"
                         variant="secondary"
-                        onClick={() => handleRetrieveStuck(item.id)}
+                        onClick={() => handleRetrieveStuck(item)}
                         disabled={signing}
                       >
                         {signing ? "…" : "Retrieve"}

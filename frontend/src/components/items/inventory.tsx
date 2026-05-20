@@ -473,7 +473,7 @@ export function Inventory() {
           onClose={() => setSelectedItem(null)}
           actions={
             <div className="space-y-3">
-              {selectedItem.inKiosk && !selectedItem.kioskListed && kiosk.kioskId && kiosk.capId && (
+              {selectedItem.inKiosk && !selectedItem.kioskListed && (selectedItem.kioskId ?? kiosk.kioskId) && (kiosk.capForKiosk(selectedItem.kioskId ?? kiosk.kioskId!) ?? kiosk.capId) && (
                 <div
                   style={{
                     padding: 12,
@@ -492,10 +492,14 @@ export function Inventory() {
                   </p>
                   <button
                     onClick={async () => {
+                      // Orphan-bug repair: target the kiosk that actually holds
+                      // this item, not the wallet's "primary" kiosk.
+                      const kId = selectedItem.kioskId ?? kiosk.kioskId!;
+                      const cId = kiosk.capForKiosk(kId) ?? kiosk.capId!;
                       const result = await retrieveFromKiosk(
                         selectedItem.id,
-                        kiosk.kioskId!,
-                        kiosk.capId!,
+                        kId,
+                        cId,
                       );
                       if (result.ok) {
                         dispatch({

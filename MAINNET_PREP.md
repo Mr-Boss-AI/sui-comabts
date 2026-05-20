@@ -162,6 +162,7 @@ Each item below must be verified before running `sui client publish` against mai
 - [ ] **Equip/unequip have owner check + fight-lock check** — the `_v2` functions in `equipment.move` already include both
 - [ ] **`option::borrow` is always guarded by `option::is_some`** — check `contracts/sources/arena.move:163, 255, 313` (flagged in Phase 0.5 audit, address during mainnet prep)
 - [ ] **`#[allow(lint(public_entry))]` suppressions or cleanups** — the `public entry` redundancy warnings throughout the codebase are harmless but noisy; clean up for mainnet professionalism
+- [ ] **One-Kiosk-per-wallet invariant must be on-chain enforced** — `marketplace::create_player_kiosk` (`contracts/sources/marketplace.move:59`) is currently unconditional; a second call mints a second `KioskOwnerCap` and the wallet ends up owning two shared kiosks. On testnet (May 20 2026, ShakaLiX) this produced the phantom-empty-kiosk bug — the UI tracked the first cap returned by RPC while sale profits settled in the second kiosk. **On mainnet this is a real lost-funds vector**, not testnet annoyance. The JS-side guard in `useMarketplaceActions.createKiosk` (queries `KioskOwnerCap` ownership before signing) is the deployed testnet fix, but it can be bypassed by anyone hand-crafting a PTB or racing two tabs through tx-indexing lag. Bundle into the v5.1 republish: add a shared `KioskRegistry { table: Table<address, ID> }` and a `create_or_get_player_kiosk(registry, ctx)` entry function that returns the existing kiosk_id if `tx_context::sender` is already registered, otherwise creates one and registers it. Frontend can then drop the JS guard.
 
 ### Server layer
 
@@ -192,6 +193,7 @@ Each item below must be verified before running `sui client publish` against mai
 - [ ] **No testnet wallet addresses visible in source** — search the frontend tree for `0xdbd3`, `0x3606`, `0xa5ad`, `0x07fd`, `0xff99` and remove all hits
 - [ ] **No dev-mode API endpoints** — all RPC URLs come from env, no hardcoded testnet fullnode
 - [ ] **Frontend error handlers surface, not swallow** — sweep for `catch {}`
+- [ ] **Kiosk cap resolution is aggregate, not `caps[0]`** — `useKiosk` (`frontend/src/hooks/useKiosk.ts`) enumerates every `KioskOwnerCap` the wallet owns and surfaces aggregated profits / listing count / item count. The seller-panel `Withdraw` button must call `buildWithdrawAllKioskProfitsTx` (single PTB, every kiosk swept in one signature), and `Delist` / `Retrieve` must look up the matching cap via `kiosk.capForKiosk(listingOrItem.kioskId)` rather than the wallet's "primary" cap. **Regression guard:** the gauntlet `scripts/qa-kiosk-orphan.ts` pins `aggregateKiosks` primary-selection, `buildWithdrawAllKioskProfitsTx` PTB shape, and the `createKiosk` pre-flight contract. Re-run before any change to `useKiosk` / `useMarketplaceActions`.
 
 ### Shared
 
@@ -321,6 +323,8 @@ Execute in order. Do NOT skip steps.
 28. [ ] Unequip item, verify DOF removed
 29. [ ] List item for sale (wallet popup → 0.01 SUI fee routes to TREASURY, item in kiosk)
 30. [ ] Second wallet buys listed item — verify TransferPolicy royalty (2.5%) taken
+30a. [ ] Seller withdraws profits — verify aggregated `profitsSui` clears to 0 in one signature, balance lands in wallet
+30b. [ ] Click "Create my Kiosk" a second time — confirm the JS guard short-circuits to "You already own a Kiosk — refreshing." (or, post-v5.1, that `create_or_get_player_kiosk` returns the existing id)
 31. [ ] Queue a friendly fight between the two wallets — fight resolves, `update_after_fight` lands on both characters
 32. [ ] Queue a wager fight (start with 0.1 SUI to minimize blast radius) — wager creation + acceptance + settlement all land on-chain
 33. [ ] Verify TREASURY received 5% of the wager pot
