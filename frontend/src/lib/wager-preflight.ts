@@ -81,6 +81,23 @@ export async function simulateWagerTx(
     );
     return { ok: true };
   }
+  // Diagnostic (2026-05-27). The 2026-05-27 accept_wager incident logged
+  // `Raw result: {}` from assertTxSucceeded — but the underlying accept
+  // tx (81M27eNDr…) had in fact landed on chain. The empty-object dump
+  // may be a serialization artifact of the gRPC response wrapper rather
+  // than an actual empty wire payload. Capture the keys + the expected
+  // envelope fields so the next repro tells us exactly which.
+  const rTyped = result as Record<string, unknown> | null;
+  console.log(
+    `[Preflight:${ctxLabel}] simulateTransaction returned. ` +
+      `type=${typeof result} ` +
+      `keys=${rTyped && typeof rTyped === "object" ? JSON.stringify(Object.keys(rTyped)) : "(non-object)"} ` +
+      `hasEffects=${!!(rTyped as any)?.effects} ` +
+      `hasTransaction=${!!(rTyped as any)?.Transaction} ` +
+      `$kind=${(rTyped as any)?.$kind ?? "(undef)"} ` +
+      `raw=`,
+    result,
+  );
   try {
     assertTxSucceeded(result, ctxLabel, ARENA_ABORT_CODES);
     return { ok: true };

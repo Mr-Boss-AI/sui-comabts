@@ -49,7 +49,7 @@ import {
   getChatClients,
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
-import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint } from '../utils/sui-settle';
+import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint, waitForWagerTxFinality } from '../utils/sui-settle';
 import { decideAcceptOutcome } from './wager-accept-gate';
 import { evaluateServerBusy } from './busy-state';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
@@ -1418,6 +1418,12 @@ const processingWagerAccepts = new Set<string>();
 
 async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage): Promise<void> {
   const wagerMatchId = msg.wagerMatchId as string;
+  // Diagnostic (2026-05-27). Frontend sends `txDigest` after a successful
+  // assertTxSucceeded on the accept_wager sign result (matchmaking-queue.tsx:538).
+  // Logging it lets the next finality-race repro be traced from the WS event
+  // straight to the on-chain tx — we hit a "status=0 / accept-actually-landed"
+  // race on 2026-05-27 where the server's chain probe read pre-finality.
+  const txDigest = (msg as { txDigest?: string }).txDigest;
   if (!wagerMatchId) {
     console.warn('[handleWagerAccepted] reject(missing-wagerMatchId)');
     sendError(client, 'Missing wagerMatchId');
@@ -1436,6 +1442,7 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     console.warn(
       `[handleWagerAccepted] reject(${reason}) ` +
       `wager=${wagerMatchId.slice(0, 14)} ` +
+      `txDigest=${txDigest ?? 'none'} ` +
       `caller=${client.walletAddress?.slice(0, 10) ?? '(none)'} ` +
       `currentFightId=${client.currentFightId ?? 'none'}`,
     );
@@ -1484,6 +1491,42 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     // client gate.
     const callerInMatchmakingQueue = getMatchmaking().isInQueue(client.walletAddress);
 
+    // Tx-digest-driven finality (option c2, 2026-05-28). Before probing
+    // `arena.move::WagerMatch.status`, wait for the caller's accept_wager
+    // tx to finalize on chain. The fullnode used by `getWagerStatus` can
+    // lag the tx's actual finalization by hundreds of ms; pre-fix the
+    // probe routinely read pre-finality WAITING and rejected legitimate
+    // fast-accept clicks (incident: 2026-05-27/28, wagers 0xf3aae8c5468e
+    // and 0x0c24213f9f59).
+    //
+    // Backward-compat: legacy clients that don't send `txDigest` skip
+    // this and fall straight through to `getWagerStatus` — same behaviour
+    // as before this fix.
+    if (txDigest) {
+      const txOutcome = await waitForWagerTxFinality(txDigest, 3000);
+      if (txOutcome.kind === 'failure') {
+        gateExit(
+          `tx-failed-onchain:${txDigest.slice(0, 14)}`,
+          `Your accept_wager transaction failed on chain: ${txOutcome.error}`,
+        );
+        return;
+      }
+      if (txOutcome.kind === 'timeout') {
+        console.warn(
+          `[handleWagerAccepted] tx-finality timeout digest=${txDigest.slice(0, 14)} ` +
+          `wager=${wagerMatchId.slice(0, 14)} — falling through to status probe`,
+        );
+        // Worst case the probe still reads WAITING and the caller hits
+        // the same reject as pre-fix — no regression on the long-tail
+        // of genuinely slow fullnodes.
+      } else {
+        console.log(
+          `[handleWagerAccepted] tx-finality confirmed digest=${txDigest.slice(0, 14)} ` +
+          `wager=${wagerMatchId.slice(0, 14)} — proceeding to status probe`,
+        );
+      }
+    }
+
     // Single chain probe — checks `arena.move::WagerMatch.status`.
     // Returns null on RPC failure or missing object; treat both as
     // "can't determine" and reject so we don't accidentally proceed.
@@ -1497,6 +1540,7 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     }
     console.log(
       `[handleWagerAccepted] chain probe ok wager=${wagerMatchId.slice(0, 14)} ` +
+      `txDigest=${txDigest ?? 'none'} ` +
       `status=${targetChainStatus} targetInLobby=${!!targetEntry} ` +
       `ownWager=${callerOwnWager?.wagerMatchId.slice(0, 14) ?? 'none'} ` +
       `inMmQueue=${callerInMatchmakingQueue}`,

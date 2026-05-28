@@ -483,6 +483,63 @@ export async function getWagerStatus(wagerMatchId: string): Promise<number | nul
 }
 
 /**
+ * Tx-digest-driven finality wait (2026-05-28, option c2). Before
+ * `handleWagerAccepted` probes `WagerMatch.status` on chain, wait for the
+ * caller's accept_wager tx to finalize via the same fullnode the probe uses.
+ * Closes the 2026-05-27/28 finality race where the probe ran ahead of the
+ * fullnode's propagation and read pre-finality WAITING.
+ *
+ * `waitForTransaction` polls `getTransactionBlock` with a short interval
+ * until the tx returns OR the timeout fires. On timeout we fall through
+ * to the caller — graceful degradation matches today's reject behaviour.
+ *
+ * Three outcomes:
+ *   - `success` → tx landed with `effects.status === "success"`; wager is
+ *                 guaranteed to reflect ACTIVE on this fullnode.
+ *   - `failure` → tx landed but the Move call aborted; abort error string
+ *                 is propagated to the caller.
+ *   - `timeout` → fullnode didn't see the tx within the budget; caller
+ *                 falls through to the legacy `getWagerStatus` probe.
+ */
+export type TxFinalityOutcome =
+  | { kind: 'success'; digest: string }
+  | { kind: 'failure'; digest: string; error: string }
+  | { kind: 'timeout'; digest: string };
+
+export async function waitForWagerTxFinality(
+  digest: string,
+  timeoutMs: number = 3000,
+): Promise<TxFinalityOutcome> {
+  try {
+    const tx = await client.waitForTransaction({
+      digest,
+      options: { showEffects: true },
+      timeout: timeoutMs,
+      pollInterval: 200,
+    });
+    const status = tx.effects?.status;
+    if (status?.status === 'success') return { kind: 'success', digest };
+    return {
+      kind: 'failure',
+      digest,
+      error: status?.error ?? 'unknown chain failure',
+    };
+  } catch (err) {
+    const msg = (err as Error)?.message ?? '';
+    if (
+      msg.toLowerCase().includes('timeout') ||
+      msg.toLowerCase().includes('aborted')
+    ) {
+      return { kind: 'timeout', digest };
+    }
+    // Unexpected RPC error — treat as timeout so the caller falls through
+    // to the legacy probe rather than failing outright.
+    console.warn('[waitForWagerTxFinality] non-timeout error:', msg);
+    return { kind: 'timeout', digest };
+  }
+}
+
+/**
  * Generic SDK-backed object reader. Callers (e.g. /api/admin/adopt-wager)
  * use this instead of raw fetch so they inherit retry-with-backoff and the
  * SDK's connection pooling. Returns the full object response so the caller

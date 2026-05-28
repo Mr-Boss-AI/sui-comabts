@@ -1,10 +1,13 @@
 # SUI Combats — Mainnet Deployment Prep Checklist
 
 > **READ THIS BEFORE ANY MAINNET ACTION.** Testnet lessons encoded here.
-> Last updated: 2026-05-03, after the v5 testnet hardening pass and
-> repo cleanup. The Sui-protocol content (sections A–H) is unchanged
-> from the original 2026-04-18 draft — those facts are baked into the
-> chain semantics, not our code state.
+> Last updated: 2026-05-28, after the wager-accept finality-race fix
+> shipped and the mutual-KO / draw bundle was added to the v5.1
+> backlog (§C Contract layer). Earlier-dated content from 2026-05-03
+> (v5 testnet hardening + repo cleanup) and 2026-05-20 (KioskRegistry
+> bundling) remains canonical. The Sui-protocol content (sections
+> A–H) is unchanged from the original 2026-04-18 draft — those facts
+> are baked into the chain semantics, not our code state.
 
 ---
 
@@ -24,6 +27,8 @@ change still pending so we never re-publish for a single fix:
 | `CharacterRegistry` | shared object mapping `address → ID`; aborts new mints when wallet already has one | Closes layer 3 of the duplicate-mint bug (UI bypass via direct Slush PTB) |
 | `burn_character` | admin-gated entry to retire a Character object | Cleanup for legacy mr_boss + sx multi-Character residue |
 | Admin-signed loot mint | reuse existing `item::mint_item` with rarity + stat-roll math from `server/src/game/loot.ts` | Replace the v5 disabled "fake loot" path with real on-chain Item NFTs |
+| `settle_tie` for mutual-KO | new `settle_tie(wager, clock, ctx)` entry — full refund both sides (no platform fee on draws) | Today a true tie (both 0 HP same turn) silently strands the escrow in ACTIVE; no native Move path exists. Testnet manual-refund safety net works but is unacceptable for mainnet. See §C Contract layer for full bundle (server router + frontend Draw modal + `draws: u32`). |
+| `draws: u32` on `Character` | add `draws: u32` field to the `Character` struct + increment in `update_after_fight` when `draw=true` | W/L/D record across the on-chain NFT; needed for leaderboard, character-profile badge, history-row tinting. Move-side struct change — pure v5.1 republish item. |
 
 **Mainnet readiness:** 5/8 original blockers + 8 hotfixes closed (see
 `STATUS.md` → "Mainnet readiness"). The only ⚠️ items are (a) Block 2
@@ -163,6 +168,14 @@ Each item below must be verified before running `sui client publish` against mai
 - [ ] **`option::borrow` is always guarded by `option::is_some`** — check `contracts/sources/arena.move:163, 255, 313` (flagged in Phase 0.5 audit, address during mainnet prep)
 - [ ] **`#[allow(lint(public_entry))]` suppressions or cleanups** — the `public entry` redundancy warnings throughout the codebase are harmless but noisy; clean up for mainnet professionalism
 - [ ] **One-Kiosk-per-wallet invariant must be on-chain enforced** — `marketplace::create_player_kiosk` (`contracts/sources/marketplace.move:59`) is currently unconditional; a second call mints a second `KioskOwnerCap` and the wallet ends up owning two shared kiosks. On testnet (May 20 2026, ShakaLiX) this produced the phantom-empty-kiosk bug — the UI tracked the first cap returned by RPC while sale profits settled in the second kiosk. **On mainnet this is a real lost-funds vector**, not testnet annoyance. The JS-side guard in `useMarketplaceActions.createKiosk` (queries `KioskOwnerCap` ownership before signing) is the deployed testnet fix, but it can be bypassed by anyone hand-crafting a PTB or racing two tabs through tx-indexing lag. Bundle into the v5.1 republish: add a shared `KioskRegistry { table: Table<address, ID> }` and a `create_or_get_player_kiosk(registry, ctx)` entry function that returns the existing kiosk_id if `tx_context::sender` is already registered, otherwise creates one and registers it. Frontend can then drop the JS guard.
+
+- [ ] **Mutual-KO / draw bundle (added 2026-05-28).** A tied fight (both players reach 0 HP on the same turn — happens via combat resolver `server/src/game/combat.ts:422` `if (aDead && bDead) return { finished: true, draw: true }`) currently has NO on-chain settlement path: `arena::settle_wager` requires a single `winner` address, and the server's post-fight code (`server/src/ws/fight-room.ts:467` + `:482`) gates settlement behind `!draw`. Result: the wager stays `STATUS_ACTIVE` with full escrow stranded; both clients show "Defeat / You Lose" (`frontend/src/app/game-provider.tsx:267-271` has no draw branch — `msg.fight.winner === null` is falsy for both wallets). Live incident 2026-05-28: wager `0xf2f3982266cfa69d7061638b00c191dca30dcbe546eef217557622719cbee608`, fight `87ce91b9`, server log `[Fight] End id=87ce91b9 reason=draw winner=none draw=true turn=5 hpA=0/50 hpB=0/50` — 0.2 SUI orphaned in escrow; manually refunded via tx `9YPY7K9yNWeNbdvryhHyJAXVoyH3bTJtpsQ56sz5E37x` through `admin_cancel_wager`. **Bundle for v5.1:**
+  - **Move** — add `public fun settle_tie(wager: &mut WagerMatch, clock: &Clock, ctx: &mut TxContext)` to `arena.move`, TREASURY-only, asserts `status == STATUS_ACTIVE && option::is_some(&player_b)`, refunds 100% to each (no 5% platform fee on draws — design decision option A2 over A1's `admin_cancel_wager` hack and over A3's 47.5/47.5/5 split). Emits new `WagerTied { match_id, player_a, player_b, refund_each }` event. Sets `status = STATUS_SETTLED, settled_at = clock`. Matches the existing `WagerRefunded` event shape so indexers can fold both into the same "no-winner" bucket if desired.
+  - **Move** — add `draws: u32` to the `Character` struct alongside `wins: u32, losses: u32`. Bump `update_after_fight` signature to accept a `result: u8` discriminator (`0=loss, 1=win, 2=draw`) or split into `update_after_fight_draw(character, xp_gained, clock, ctx)`. Initial value 0 for new mints. Adds one `u32` per Character — negligible storage.
+  - **Server** — in `fight-room.ts:728` `else if (draw)` branch, fire `settleTieOnChain(fight.wagerMatchId)` (new helper in `sui-settle.ts`, mirrors `adminCancelWagerOnChain` but calls `settle_tie`) for `fight.type === 'wager'`. Award draw XP (`calculateXpReward(fight.type, false, …)` currently used — fine to keep). Update `update_after_fight` call to pass `result: 'draw'` so the on-chain `draws` counter increments. Fall back to `admin_cancel_wager` if `settle_tie` fails — keeps the testnet safety net alive on mainnet too.
+  - **Frontend** — `game-provider.tsx:258 case "fight_end"` add an explicit draw branch: detect `msg.fight.winner === null && fight.status === 'finished'`, dispatch `SET_DRAW_OUTCOME` (new), play a neutral "draw" sound (or no sound). New `<DrawOutcomeModal />` mirroring the post-fight modal layout, neutral copy ("Draw — both fighters down"), shows refund amount instead of "−0.1 SUI", shows XP gain (consolation). History rows: widen `result` type from `'win' | 'loss'` to `'win' | 'loss' | 'draw'`; add badge tint (neutral grey, not victory-green nor blood-red) at `character-profile.tsx:817-818`. Navbar W/L counter becomes W/L/D.
+  - **Tests** — Move unit test for `settle_tie` (mirror `settle_wager` tests; assert refund_each == stake_amount, status flips to SETTLED, both balances credited). Frontend gauntlet pinning the draw branch dispatch + draw badge + W/L/D counter render.
+  - **Until v5.1 ships:** testnet QA uses `admin_cancel_wager` as manual safety net — endpoint already exists; both this incident (2026-05-28 `0xf2f3982266…`) and earlier ones (2026-05-27 `0xf3aae8c5468e…` via disconnect cleanup, `0x0c24213f9f59…` via curl) prove the path works for 50/50 refunds. Acceptable for testnet; unacceptable for mainnet because (a) it requires admin intervention per draw, (b) the 50/50 split semantically reads as "cancelled" not "tied," and (c) no on-chain record of the draw outcome.
 
 ### Server layer
 
@@ -423,3 +436,5 @@ On unstable connections, the browser socket can reconnect silently during the ga
 | Date | Author | Change |
 |---|---|---|
 | 2026-04-18 | Initial draft | After Phase 0 + 0.5 testnet upgrade revealed Sui upgrade semantics (old bytecode stays callable). Documented to prevent future sessions from assuming upgrade-to-mainnet is viable. |
+| 2026-05-20 | Session wrap | Bundled `KioskRegistry` + `create_or_get_player_kiosk` into v5.1 (§C Contract layer) after the 2026-05-20 phantom-empty-kiosk incident. |
+| 2026-05-28 | Session wrap | Bundled mutual-KO / draw handling into v5.1 (§C Contract layer): `settle_tie` Move entry, `draws: u32` on `Character`, server router, frontend Draw modal + W/L/D counter. Triggered by the 2026-05-28 live tie (wager `0xf2f3982266…`, fight `87ce91b9`) — 0.2 SUI orphaned, refunded via `admin_cancel_wager` (`9YPY7K9yNWeNbdvryhHyJAXVoyH3bTJtpsQ56sz5E37x`). |
