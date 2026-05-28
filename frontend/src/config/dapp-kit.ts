@@ -102,6 +102,17 @@ const ENOKI_INITIALIZER =
     : null;
 
 export const dAppKit = createDAppKit({
+  // v5.1 (2026-05-28 PM) — UX choice. dapp-kit-core defaults
+  // `autoConnect: true`, which silently re-auths the last-used wallet
+  // (especially Enoki/zkLogin via the persisted session) on every page
+  // load. The user wanted to PICK a login method on each fresh session,
+  // so we disable the silent restore here. The connect-wallet UX still
+  // works: clicking <ConnectButton /> opens the wallet picker; clicking
+  // it while connected exposes a Disconnect option in the dropdown.
+  // JWT auth-resume for the WS connection during an ACTIVE session is
+  // unaffected — that's keyed on the server-issued JWT, not the wallet
+  // adapter's autoConnect.
+  autoConnect: false,
   networks: ["testnet", "mainnet"] as const,
   defaultNetwork: "testnet",
   enableBurnerWallet: process.env.NODE_ENV === "development",

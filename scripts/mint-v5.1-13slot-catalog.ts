@@ -45,10 +45,11 @@ if (!PKG || !ADMIN_CAP || !TRZ_KEY) {
 const MR_BOSS = '0xf669789c0e6d30627e8480b5886721d608d796277aab0664cfa84b2c04590f33';
 const SX      = '0x03c33df0c97d4dfb3792d340bbf83891e2a20d653155874fd37a350ad443985f';
 
-// Item type constants (mirrors item.move v5.1).
+// Item type constants (mirrors item.move v5.1 — pauldrons REMOVED, ring_3
+// reuses RING=8).
 const IT_WEAPON = 1, IT_SHIELD = 2, IT_HELMET = 3, IT_CHEST = 4, IT_GLOVES = 5;
 const IT_BOOTS = 6, IT_BELT = 7, IT_RING = 8, IT_NECKLACE = 9;
-const IT_PANTS = 10, IT_BRACELETS = 11, IT_PAULDRONS = 12;
+const IT_PANTS = 10, IT_BRACELETS = 11;
 // Slot type constants.
 const SLOT_MAINHAND = 0, SLOT_OFFHAND = 1, SLOT_BOTH_HANDS = 2;
 
@@ -112,7 +113,8 @@ function mrBossKit(): ItemSpec[] {
     // v5.1 new slots — Mr_Boss
     { name: 'Iron Greaves',        image_url: placeholder, item_type: IT_PANTS,     class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 0, dexterity_bonus: 0, intuition_bonus: 0, endurance_bonus: 2, hp_bonus: 5, armor_bonus: 3, defense_bonus: 0, attack_bonus: 0, crit_chance_bonus: 0, crit_multiplier_bonus: 0, evasion_bonus: 0, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: MR_BOSS },
     { name: 'Spiked Bracelets',    image_url: placeholder, item_type: IT_BRACELETS, class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 1, dexterity_bonus: 1, intuition_bonus: 0, endurance_bonus: 0, hp_bonus: 0, armor_bonus: 0, defense_bonus: 0, attack_bonus: 1, crit_chance_bonus: 1, crit_multiplier_bonus: 0, evasion_bonus: 0, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: MR_BOSS },
-    { name: 'Iron Pauldrons',      image_url: placeholder, item_type: IT_PAULDRONS, class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 2, dexterity_bonus: 0, intuition_bonus: 0, endurance_bonus: 1, hp_bonus: 3, armor_bonus: 4, defense_bonus: 0, attack_bonus: 0, crit_chance_bonus: 0, crit_multiplier_bonus: 0, evasion_bonus: 0, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: MR_BOSS },
+    // v5.1 (final) — third ring for Mr_Boss (reuses RING item_type=8).
+    { name: 'Obsidian Band',       image_url: placeholder, item_type: IT_RING,      class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 1, dexterity_bonus: 0, intuition_bonus: 1, endurance_bonus: 0, hp_bonus: 0, armor_bonus: 0, defense_bonus: 0, attack_bonus: 1, crit_chance_bonus: 1, crit_multiplier_bonus: 0, evasion_bonus: 0, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: MR_BOSS },
   ];
 }
 
@@ -132,7 +134,8 @@ function sxKit(): ItemSpec[] {
     // v5.1 new slots — Sx
     { name: 'Quicksilver Trousers',image_url: placeholder, item_type: IT_PANTS,     class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 0, dexterity_bonus: 2, intuition_bonus: 0, endurance_bonus: 0, hp_bonus: 0, armor_bonus: 0, defense_bonus: 0, attack_bonus: 0, crit_chance_bonus: 0, crit_multiplier_bonus: 0, evasion_bonus: 3, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: SX },
     { name: 'Silken Wraps',        image_url: placeholder, item_type: IT_BRACELETS, class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 0, dexterity_bonus: 2, intuition_bonus: 0, endurance_bonus: 0, hp_bonus: 0, armor_bonus: 0, defense_bonus: 0, attack_bonus: 1, crit_chance_bonus: 0, crit_multiplier_bonus: 0, evasion_bonus: 2, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: SX },
-    { name: 'Shadowstep Mantle',   image_url: placeholder, item_type: IT_PAULDRONS, class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 0, dexterity_bonus: 1, intuition_bonus: 0, endurance_bonus: 0, hp_bonus: 0, armor_bonus: 1, defense_bonus: 0, attack_bonus: 0, crit_chance_bonus: 0, crit_multiplier_bonus: 0, evasion_bonus: 3, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: SX },
+    // v5.1 (final) — third ring for Sx (reuses RING item_type=8).
+    { name: 'Moonshade Band',      image_url: placeholder, item_type: IT_RING,      class_req: 0, level_req: 1, rarity: 1, slot_type: SLOT_MAINHAND, strength_bonus: 0, dexterity_bonus: 2, intuition_bonus: 0, endurance_bonus: 0, hp_bonus: 0, armor_bonus: 0, defense_bonus: 0, attack_bonus: 0, crit_chance_bonus: 0, crit_multiplier_bonus: 0, evasion_bonus: 2, anti_crit_bonus: 0, anti_evasion_bonus: 0, min_damage: 0, max_damage: 0, to: SX },
   ];
 }
 

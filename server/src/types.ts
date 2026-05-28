@@ -92,11 +92,11 @@ export interface EquipmentSlots {
   ring1: Item | null;
   ring2: Item | null;
   necklace: Item | null;
-  // v5.1 (2026-05-28 PM) — 3 new slots. Optional so v5.0 wire payloads that
-  // pre-date the schema still type-check cleanly during the cutover window.
+  // v5.1 (2026-05-28 PM, final) — 3 new slots: ring_3, pants, bracelets.
+  // Optional so wire payloads that pre-date the schema still type-check.
+  ring3?: Item | null;
   pants?: Item | null;
   bracelets?: Item | null;
-  pauldrons?: Item | null;
 }
 
 // === Character ===

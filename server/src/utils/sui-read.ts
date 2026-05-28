@@ -18,13 +18,13 @@ const CHAIN_TO_SERVER_SLOT: Record<string, keyof EquipmentSlots> = {
   belt: 'belt',
   ring_1: 'ring1',
   ring_2: 'ring2',
+  ring_3: 'ring3',
   necklace: 'necklace',
-  // v5.1 (2026-05-28 PM) — chain keys for the 3 new slots. Frontend uses
-  // identical names (no camelCase translation needed since there's no
-  // underscore to drop).
+  // v5.1 (2026-05-28 PM, final) — chain keys for the 3 new slots: ring_3,
+  // pants, bracelets. ring_3 follows the existing ring_N pattern
+  // (underscore stripped on the server side).
   pants: 'pants',
   bracelets: 'bracelets',
-  pauldrons: 'pauldrons',
 };
 
 const CHAIN_SLOT_NAMES = Object.keys(CHAIN_TO_SERVER_SLOT);
@@ -63,8 +63,8 @@ export type DOFEquipment = Record<keyof EquipmentSlots, Item | null>;
 const EMPTY: DOFEquipment = {
   weapon: null, offhand: null, helmet: null, chest: null, gloves: null,
   boots: null, belt: null, ring1: null, ring2: null, necklace: null,
-  // v5.1 — 3 new slots.
-  pants: null, bracelets: null, pauldrons: null,
+  // v5.1 (final) — 3 new slots: ring_3, pants, bracelets.
+  ring3: null, pants: null, bracelets: null,
 };
 
 /**

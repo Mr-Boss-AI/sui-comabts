@@ -1,29 +1,43 @@
 {
-  "version": "5.1.0-13slot",
+  "version": "5.1.0-13slot-ring3",
   "network": "testnet",
-  "publishedAt": "2026-05-28-PM",
-  "publishDigest": "2eQedAHCjNE9kpkQPVwqdTkA7fa5xy1qeAruRt2mtTPh",
-  "policyDigest": "26drZZUnMkbwbi1kFBSzDifRvE83G1oR3o5iGrzLwA48",
-  "packageId": "0x95c231e5909678609202b5a976c575366280222cdb703e4a7a097043bd712c69",
+  "publishedAt": "2026-05-28-PM-final",
+  "publishDigest": "5mtUf93YMfS2p45xFgGCiZyDGGNPJcRWXwMYKHYQRgAy",
+  "policyDigest": "3kKCKnJtMY7KuFnfdaRbfS3Wa3WgBF8Z1nDPDzccyGPU",
+  "displayCharacterDigest": "HXov9TSx2gp7Np4DfE5fZmpz2E27ziUdXCdZrHRntWBk",
+  "displayItemDigest": "FrjSeampx9SZ3RrmoUc2vvvnxb4rM15YeGEuXTdsQYCY",
+  "packageId": "0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717",
 
-  "supersedes": {
-    "packageId": "0x7853412fb905e73cf8d2ba3f8377045720069c25b5e656abc926119659641518",
-    "publishDigest": "DJjfc4tWN3EdXqjJLnfENj79AjNSgmJUgEEM4XSkznkY",
-    "reason": "Slot count + Item type enum widened (10 → 13 slots) — requires fresh publish per Sui semantics (no upgrade for struct/enum changes)."
-  },
+  "supersedes": [
+    {
+      "packageId": "0x95c231e5909678609202b5a976c575366280222cdb703e4a7a097043bd712c69",
+      "publishDigest": "2eQedAHCjNE9kpkQPVwqdTkA7fa5xy1qeAruRt2mtTPh",
+      "reason": "13-slot v5.1 with pauldrons. User decided to drop pauldrons and add ring_3 instead — fresh publish needed because Item type enum changed (PAULDRONS=12 removed) and a new equip primitive (equip_ring_3 / unequip_ring_3) was added."
+    },
+    {
+      "packageId": "0x7853412fb905e73cf8d2ba3f8377045720069c25b5e656abc926119659641518",
+      "publishDigest": "DJjfc4tWN3EdXqjJLnfENj79AjNSgmJUgEEM4XSkznkY",
+      "reason": "Original 10-slot v5.1 from the overnight run."
+    }
+  ],
 
   "shared": {
-    "characterRegistry": "0x6c4fdf3cff4617903fe8bfbd24a9e81f4e3e15f4efbef614ecea1d6056ab2a1a",
-    "openWagerRegistry": "0x3a7f198458af69490d58ac03460be9c123b8d90160d04fdb828d2c3e67d36b7c",
-    "kioskRegistry": "0x4994aa3eae7d6922c7db466c69b1e9d135aa23837be26905eb0179f43ee5d17b",
-    "transferPolicy": "0x6e5319160d84bbc3492725bbbaab2004629886e664aad928f730c83e80cb0654"
+    "characterRegistry": "0xad05d60e00149ab105ee60f8eaaec1542ec08d8c8795da53305f01bde4c9105f",
+    "openWagerRegistry": "0xa3be188a6b636bdf12d1d7b79f866fc6d22f287c60daf7157f95b3c246908e20",
+    "kioskRegistry": "0x05d355fdf844bc615d66bd621f1a8aa7f673784f70d1d991681e4c6a012d4860",
+    "transferPolicy": "0x0483cd855318921a330ff2d8967fb925382d76c7360a29a5d2bbf676bd13f69f"
   },
 
   "caps": {
-    "adminCap": "0x7796675da7a290085c1b1ed812ed344abff69bd29544d7d10cc5fa28a383576a",
-    "upgradeCap": "0x6216b0c33d01a9976d034b712985eb8f3d1c7886972e591cd470ea2e2e7f07d1",
-    "publisher": "0x3d9e48b7d647f6d8bd1b57622b684f4372a148386c3c6c3f53f7cc17fae4ed6c",
-    "transferPolicyCap": "0x5464653700d6bf22ea6ac4e4da7368520889fcc024f0e97eee1169652fe5f0d8"
+    "adminCap": "0x2cbeef93fb0d167ccd87fd67f99542b7e2387601a0a3644bb19a600db3461c50",
+    "upgradeCap": "0x7434a214aa346c5af0199bee519cc8203ce4d8633bcc8397fba08e281dbbb07a",
+    "publisher": "0x2cb1d94c837bae772ce1122f8c17314bc2fdb0bbec4991540e1a38c4c28495b1",
+    "transferPolicyCap": "0xee5a808c9aa22daf8c57420fa06e9ae0073b0d6a22e55a8be7c84da3f6ed31c8"
+  },
+
+  "display": {
+    "character": "0x94a855326a01a91e247a8062d9c475eddf5770829f52d7dbfceef535a5fc0885",
+    "item": "0x32bdda84dd589ed21e804171b924cc5b3676f97b35b55dff2d064d035a5aa658"
   },
 
   "treasury": "0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d",
@@ -38,7 +52,7 @@
   ],
 
   "slots": {
-    "_comment": "13-slot loadout. v5.0 / v5.1-pre-13 had 10. The 3 new slots are pants (legs lower armor), bracelets (forearm accessory), pauldrons (shoulder armor).",
+    "_comment": "13-slot loadout (final). pauldrons REMOVED; ring_3 added. Total slot count matches the original v5.1 plan.",
     "count": 13,
     "all": [
       "weapon",
@@ -50,15 +64,15 @@
       "belt",
       "ring_1",
       "ring_2",
+      "ring_3",
       "necklace",
       "pants",
-      "bracelets",
-      "pauldrons"
+      "bracelets"
     ],
-    "new_in_v5_1_13slot": [
+    "new_in_v5_1": [
+      "ring_3",
       "pants",
-      "bracelets",
-      "pauldrons"
+      "bracelets"
     ]
   },
 
@@ -73,18 +87,17 @@
     "RING": 8,
     "NECKLACE": 9,
     "PANTS": 10,
-    "BRACELETS": 11,
-    "PAULDRONS": 12
+    "BRACELETS": 11
   },
 
-  "v5.1_13slot_changes_vs_v5.1_10slot": [
-    "Item.item_type enum widened: PANTS=10, BRACELETS=11, PAULDRONS=12 added (mint_item_admin shape validation requires slot_type=mainhand for non-weapon non-shield types)",
-    "equipment.move: equip_pants / unequip_pants, equip_bracelets / unequip_bracelets, equip_pauldrons / unequip_pauldrons primitives added — same shape as helmet/chest/gloves/boots/belt (owner + fight-lock + type + level-req + slot-empty checks)",
-    "DOF slot keys added: 'pants', 'bracelets', 'pauldrons' — all string-keyed on Character.id alongside existing 10",
-    "Server combat math updated: getEquipmentBonuses iterates over 13 slots when aggregating bonuses",
-    "Frontend EQUIPMENT_SLOT_KEYS extended from 10 to 13; PTB save_loadout PTB-builder picks them up automatically via the existing iteration",
-    "Move test count: 64 → 71 (added 7 tests: 3 happy-path equip/unequip, 4 abort-path)"
-  ],
+  "rarity_stat_budgets": {
+    "_comment": "Sum of all *_bonus fields + max_damage capped per rarity in mint_item_admin.",
+    "COMMON": 20,
+    "UNCOMMON": 40,
+    "RARE": 70,
+    "EPIC": 110,
+    "LEGENDARY": 160
+  },
 
   "v5_2_deferred": [
     "sui::random for loot rolls (D1)",
@@ -97,16 +110,23 @@
     "Empty catch sweep + StatBonuses shape unification"
   ],
 
+  "mint_instructions": {
+    "_comment": "How to mint items into TREASURY then transfer to a player wallet. The frontend supports drag-equip/inventory-pick across all 13 slots once items are in the player's wallet.",
+    "from_repo_root_run": "cd ~/sui-comabts/server && SUI_PACKAGE_ID=0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717 ADMIN_CAP_ID=0x2cbeef93fb0d167ccd87fd67f99542b7e2387601a0a3644bb19a600db3461c50 NODE_PATH=node_modules npx tsx <your-mint-script>.ts",
+    "mint_item_admin_signature": "mint_item_admin(admin_cap, name, image_url, item_type, class_req, level_req, rarity, slot_type, str_bonus, dex_bonus, int_bonus, end_bonus, hp_bonus, armor_bonus, defense_bonus, attack_bonus, crit_chance_bonus, crit_multiplier_bonus, evasion_bonus, anti_crit_bonus, anti_evasion_bonus, min_damage, max_damage, ctx)",
+    "slot_type_rules": {
+      "WEAPON": "0 (mainhand) OR 2 (both_hands). Never 1.",
+      "SHIELD": "Must be 1 (offhand).",
+      "everything_else": "Must be 0 (mainhand) by convention — armor slots are determined by item_type alone, slot_type is a no-op for them but must be zero per validator."
+    },
+    "rarity_budget": "Sum of all *_bonus fields + max_damage must be ≤ rarity budget. mint_item_admin aborts with ERarityBudgetExceeded (code 5) if exceeded.",
+    "example_mint_script": "See scripts/mint-v5.1-13slot-catalog.ts in the repo — illustrates the full mint+transfer pattern with retry-on-version-race. Adjust item specs + recipient wallet, then run with the v5.1 SUI_PACKAGE_ID and ADMIN_CAP_ID env vars."
+  },
+
   "gas_costs": {
     "publish_sui": 0.16,
     "policy_setup_sui": 0.003,
-    "treasury_remaining_estimate_sui": 3.14
-  },
-
-  "stat_profiles_for_new_slots": {
-    "_comment": "Recommended stat profiles for catalog mints. Each within the user's rarity stat-budget (Common=20, Uncommon=40, Rare=70, Epic=110, Legendary=160).",
-    "pants": "Legs lower armor — primary: armor + endurance. Secondary: small HP. Profile mirrors boots.",
-    "bracelets": "Forearm accessory — primary: dexterity + crit_chance_bonus. Secondary: small attack_bonus. Lighter than armor slots; light arms enable swift strikes.",
-    "pauldrons": "Shoulder/upper armor — primary: armor + strength. Secondary: small HP. Heavier than helmet, shielding the upper body."
+    "display_setup_sui": 0.006,
+    "treasury_estimate_post_setup_sui": 2.79
   }
 }

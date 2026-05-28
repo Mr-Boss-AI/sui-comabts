@@ -97,11 +97,10 @@ export function computeRoyalty(priceMist: bigint): bigint {
 
 export type EquipSlotKey =
   | "weapon" | "offhand" | "helmet" | "chest" | "gloves"
-  | "boots" | "belt" | "ring_1" | "ring_2" | "necklace"
-  // v5.1 (2026-05-28 PM) — 3 new slots. Chain-side and frontend share the
-  // same snake_case keys here (no underscore-stripping needed since the
-  // names don't conflict with existing JS camelCase).
-  | "pants" | "bracelets" | "pauldrons";
+  | "boots" | "belt" | "ring_1" | "ring_2" | "ring_3" | "necklace"
+  // v5.1 (2026-05-28 PM, final) — 3 new slots: ring_3, pants, bracelets.
+  // ring_3 follows the existing snake_case ring_N convention.
+  | "pants" | "bracelets";
 
 // =============================================================================
 // CHARACTER NFT

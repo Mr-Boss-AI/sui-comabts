@@ -1006,12 +1006,12 @@ function EquipmentFrame({
             emptyLabel="Helmet"
           />
           <SlotTile
-            slot="pauldrons"
-            item={eq.pauldrons}
+            slot="bracelets"
+            item={eq.bracelets}
             size={bigSize}
-            isDirty={dirtySlots.has("pauldrons")}
-            onClick={() => onSlot("pauldrons")}
-            emptyLabel="Pauldrons"
+            isDirty={dirtySlots.has("bracelets")}
+            onClick={() => onSlot("bracelets")}
+            emptyLabel="Bracelets"
           />
           <SlotTile
             slot="weapon"
@@ -1099,12 +1099,11 @@ function EquipmentFrame({
               onClick={() => onSlot("ring2")}
             />
             <SlotTile
-              slot="bracelets"
-              item={eq.bracelets}
+              slot="ring3"
+              item={eq.ring3}
               size={ringSlotSize}
-              isDirty={dirtySlots.has("bracelets")}
-              onClick={() => onSlot("bracelets")}
-              emptyLabel="Bracelets"
+              isDirty={dirtySlots.has("ring3")}
+              onClick={() => onSlot("ring3")}
             />
           </div>
           <SlotTile

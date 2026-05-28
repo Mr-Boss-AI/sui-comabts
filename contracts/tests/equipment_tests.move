@@ -579,22 +579,23 @@ module sui_combats::equipment_tests {
     }
 
     #[test]
-    fun test_equip_unequip_pauldrons_happy() {
+    fun test_equip_unequip_ring_3_happy() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        mint_misc_to_alice(&mut scenario, item::pauldrons_type(), 1, 2, b"Spaulders");
+        // ring_3 takes item_type=RING (same as ring_1 / ring_2).
+        mint_misc_to_alice(&mut scenario, item::ring_type(), 1, 1, b"Third Band");
 
         ts::next_tx(&mut scenario, ALICE);
         {
             let mut c = ts::take_shared<Character>(&scenario);
-            let p = ts::take_from_sender<Item>(&scenario);
-            equipment::equip_pauldrons(&mut c, p, &clock, ts::ctx(&mut scenario));
+            let r = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_ring_3(&mut c, r, &clock, ts::ctx(&mut scenario));
             ts::return_shared(c);
         };
         ts::next_tx(&mut scenario, ALICE);
         {
             let mut c = ts::take_shared<Character>(&scenario);
-            equipment::unequip_pauldrons(&mut c, &clock, ts::ctx(&mut scenario));
+            equipment::unequip_ring_3(&mut c, &clock, ts::ctx(&mut scenario));
             ts::return_shared(c);
         };
 
@@ -650,17 +651,17 @@ module sui_combats::equipment_tests {
 
     #[test]
     #[expected_failure(abort_code = 3, location = sui_combats::equipment)]  // ELevelTooLow
-    fun test_equip_pauldrons_level_too_low_aborts() {
+    fun test_equip_ring_3_level_too_low_aborts() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        // Level-15 pauldrons; ALICE is level 1.
-        mint_misc_to_alice(&mut scenario, item::pauldrons_type(), 15, 4, b"Epic");
+        // Level-15 ring; ALICE is level 1.
+        mint_misc_to_alice(&mut scenario, item::ring_type(), 15, 4, b"Epic Ring");
 
         ts::next_tx(&mut scenario, ALICE);
         {
             let mut c = ts::take_shared<Character>(&scenario);
-            let p = ts::take_from_sender<Item>(&scenario);
-            equipment::equip_pauldrons(&mut c, p, &clock, ts::ctx(&mut scenario));
+            let r = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_ring_3(&mut c, r, &clock, ts::ctx(&mut scenario));
             ts::return_shared(c);
         };
 

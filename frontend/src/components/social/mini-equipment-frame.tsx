@@ -133,7 +133,7 @@ export function MiniEquipmentFrame({
         }}
       >
         <SlotTile slot="helmet" item={equipment.helmet} size={bigSize} emptyLabel="Helmet" />
-        <SlotTile slot="pauldrons" item={equipment.pauldrons} size={bigSize} emptyLabel="Pauldrons" />
+        <SlotTile slot="bracelets" item={equipment.bracelets} size={bigSize} emptyLabel="Bracelets" />
         <SlotTile slot="weapon" item={equipment.weapon} size={bigSize} emptyLabel="Weapon" />
         <SlotTile slot="chest" item={equipment.chest} size={bigSize} emptyLabel="Chest" />
         <SlotTile
@@ -186,7 +186,7 @@ export function MiniEquipmentFrame({
         >
           <SlotTile slot="ring1" item={equipment.ring1} size={ringSlotSize} />
           <SlotTile slot="ring2" item={equipment.ring2} size={ringSlotSize} />
-          <SlotTile slot="bracelets" item={equipment.bracelets} size={ringSlotSize} emptyLabel="Bracelets" />
+          <SlotTile slot="ring3" item={equipment.ring3} size={ringSlotSize} />
         </div>
         <SlotTile slot="gloves" item={equipment.gloves} size={bigSize} emptyLabel="Gloves" />
         <SlotTile slot="offhand" item={equipment.offhand} size={bigSize} emptyLabel="Off-hand" />
