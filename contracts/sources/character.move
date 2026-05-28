@@ -3,6 +3,7 @@ module sui_combats::character {
     use sui::event;
     use sui::clock::{Self, Clock};
     use sui::dynamic_field as df;
+    use sui::table::{Self, Table};
     use std::string::String;
 
     // ===== Error constants =====
@@ -12,6 +13,15 @@ module sui_combats::character {
     const ENameTooLong: u64 = 3;
     const ELockTooLong: u64 = 4;
     const ENotOwner: u64 = 5;
+    /// v5.1 — Wallet already has a Character registered. Closes Block A Layer 3
+    /// (PTB-crafted duplicate-mint that bypasses the auth-phase + server pre-mint
+    /// guards). Chain-side is now the primary defence; frontend + server become
+    /// defence-in-depth.
+    const EWalletAlreadyHasCharacter: u64 = 6;
+    /// v5.1 — Caller tried to burn a Character not in the registry, or the
+    /// registry entry points at a different Character object. Either is a sign
+    /// the caller passed the wrong object id.
+    const ENotRegistered: u64 = 7;
 
     // ===== Fight-lock dynamic field key (u64 unix-ms expiry) =====
     const LOCK_KEY: vector<u8> = b"fight_lock_expires_at";
@@ -37,6 +47,16 @@ module sui_combats::character {
     // ===== AdminCap — minted once at init, held by server/treasury =====
     public struct AdminCap has key, store { id: UID }
 
+    // ===== CharacterRegistry (v5.1) — shared object enforcing one Character per wallet =====
+    /// Maps player address → Character object id. Inserted by create_character,
+    /// removed by burn_character. The registry is the chain-side source of truth
+    /// for the one-character-per-wallet invariant; the auth-phase + server
+    /// pre-mint guards now act as defence-in-depth.
+    public struct CharacterRegistry has key {
+        id: UID,
+        table: Table<address, ID>,
+    }
+
     // ===== Character shared object =====
     // Equipment lives ONLY in dynamic object fields keyed by slot name.
     // No parallel Option<ID> pointers: DOFs are the single source of truth.
@@ -56,6 +76,9 @@ module sui_combats::character {
         // Combat record
         wins: u32,
         losses: u32,
+        /// v5.1 — Draws counter for mutual-KO outcomes. update_after_fight_draw
+        /// increments this; W/L/D leaderboards read it.
+        draws: u32,
         rating: u16,
         // Timestamps
         created_at: u64,
@@ -104,10 +127,33 @@ module sui_combats::character {
         remaining_points: u16,
     }
 
-    // ===== Init — mint single AdminCap to the deployer =====
+    /// v5.1 — Draw outcome recorded against a Character. Mirrors
+    /// FightResultUpdated but increments draws rather than wins/losses.
+    public struct DrawRecorded has copy, drop {
+        character_id: ID,
+        owner: address,
+        xp_gained: u64,
+        new_xp: u64,
+        new_draws: u32,
+    }
+
+    /// v5.1 — Admin burned a Character. Cleans up the registry entry for `owner`
+    /// so they can mint a fresh Character on the same wallet.
+    public struct CharacterBurned has copy, drop {
+        character_id: ID,
+        owner: address,
+    }
+
+    // ===== Init — mint single AdminCap to the deployer + share CharacterRegistry =====
     fun init(ctx: &mut TxContext) {
         let admin_cap = AdminCap { id: object::new(ctx) };
         transfer::transfer(admin_cap, tx_context::sender(ctx));
+
+        let registry = CharacterRegistry {
+            id: object::new(ctx),
+            table: table::new<address, ID>(ctx),
+        };
+        transfer::share_object(registry);
     }
 
     #[test_only]
@@ -150,6 +196,7 @@ module sui_combats::character {
     // ===== Public entry functions =====
 
     /// Mint a new character. Stat sum must equal INITIAL_STAT_POINTS (20).
+    /// v5.1 — Aborts if `tx_context::sender` already has a Character registered.
     /// Character is shared so the server can update it via AdminCap.
     public fun create_character(
         name: String,
@@ -157,6 +204,7 @@ module sui_combats::character {
         dex: u16,
         int: u16,
         end: u16,
+        registry: &mut CharacterRegistry,
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
@@ -164,6 +212,8 @@ module sui_combats::character {
         assert!(str + dex + int + end == INITIAL_STAT_POINTS, EInvalidStatTotal);
 
         let player = tx_context::sender(ctx);
+        assert!(!table::contains(&registry.table, player), EWalletAlreadyHasCharacter);
+
         let now = clock::timestamp_ms(clock);
 
         let character = Character {
@@ -179,6 +229,7 @@ module sui_combats::character {
             unallocated_points: 0,
             wins: 0,
             losses: 0,
+            draws: 0,
             rating: DEFAULT_RATING,
             created_at: now,
             last_updated: now,
@@ -186,6 +237,9 @@ module sui_combats::character {
         };
 
         let character_id = object::id(&character);
+
+        // Register before sharing — atomic guard against the racing-PTB case.
+        table::add(&mut registry.table, player, character_id);
 
         event::emit(CharacterCreated {
             character_id,
@@ -198,6 +252,51 @@ module sui_combats::character {
         });
 
         transfer::share_object(character);
+    }
+
+    /// v5.1 — Admin burns a Character. Removes the registry entry so the owner
+    /// can mint a fresh Character on the same wallet. The admin is responsible
+    /// for ensuring the Character has no attached equipment DOFs before calling
+    /// — orphaned DOFs are unreachable post-delete but consume storage rent.
+    /// Aborts with ENotRegistered if the registry doesn't map owner → this id.
+    public fun burn_character(
+        _admin: &AdminCap,
+        character: Character,
+        registry: &mut CharacterRegistry,
+    ) {
+        let character_id = object::id(&character);
+        let owner = character.owner;
+
+        assert!(table::contains(&registry.table, owner), ENotRegistered);
+        let registered_id = *table::borrow(&registry.table, owner);
+        assert!(registered_id == character_id, ENotRegistered);
+        let _ = table::remove(&mut registry.table, owner);
+
+        event::emit(CharacterBurned { character_id, owner });
+
+        // Unpack and delete. Fields with `copy/drop/store` (which all our
+        // primitives have) are dropped automatically when the binding goes out
+        // of scope; only the UID needs explicit deletion.
+        let Character {
+            id,
+            owner: _,
+            name: _,
+            level: _,
+            xp: _,
+            strength: _,
+            dexterity: _,
+            intuition: _,
+            endurance: _,
+            unallocated_points: _,
+            wins: _,
+            losses: _,
+            draws: _,
+            rating: _,
+            created_at: _,
+            last_updated: _,
+            loadout_version: _,
+        } = character;
+        object::delete(id);
     }
 
     /// Server (AdminCap holder) persists fight result. Aborts if `xp_gained`
@@ -252,6 +351,50 @@ module sui_combats::character {
             new_rating,
             new_wins: character.wins,
             new_losses: character.losses,
+        });
+    }
+
+    /// v5.1 — Server (AdminCap holder) records a draw outcome. Increments
+    /// `draws`, applies XP (typically 10% of normal — server enforces), keeps
+    /// rating unchanged. Auto-levels exactly like update_after_fight.
+    public fun update_after_fight_draw(
+        _admin: &AdminCap,
+        character: &mut Character,
+        xp_gained: u64,
+        clock: &Clock,
+    ) {
+        assert!(xp_gained <= MAX_XP_PER_FIGHT, EXpTooHigh);
+
+        character.draws = character.draws + 1;
+        character.xp = character.xp + xp_gained;
+
+        while (character.level < MAX_LEVEL) {
+            let next_level = character.level + 1;
+            let required_xp = xp_for_level(next_level);
+            if (character.xp >= required_xp) {
+                character.level = next_level;
+                character.unallocated_points = character.unallocated_points + POINTS_PER_LEVEL;
+
+                event::emit(LevelUp {
+                    character_id: object::id(character),
+                    owner: character.owner,
+                    new_level: character.level,
+                    xp: character.xp,
+                    unallocated_points: character.unallocated_points,
+                });
+            } else {
+                break
+            }
+        };
+
+        character.last_updated = clock::timestamp_ms(clock);
+
+        event::emit(DrawRecorded {
+            character_id: object::id(character),
+            owner: character.owner,
+            xp_gained,
+            new_xp: character.xp,
+            new_draws: character.draws,
         });
     }
 
@@ -348,9 +491,21 @@ module sui_combats::character {
     public fun endurance(character: &Character): u16 { character.endurance }
     public fun wins(character: &Character): u32 { character.wins }
     public fun losses(character: &Character): u32 { character.losses }
+    /// v5.1 — Draws accessor.
+    public fun draws(character: &Character): u32 { character.draws }
     public fun rating(character: &Character): u16 { character.rating }
     public fun name(character: &Character): String { character.name }
     public fun created_at(character: &Character): u64 { character.created_at }
     public fun last_updated(character: &Character): u64 { character.last_updated }
     public fun loadout_version(character: &Character): u64 { character.loadout_version }
+
+    /// v5.1 — CharacterRegistry accessor for test + read-only callers.
+    public fun registry_has(registry: &CharacterRegistry, who: address): bool {
+        table::contains(&registry.table, who)
+    }
+
+    /// v5.1 — Look up a wallet's Character id. Aborts via Table abort if absent.
+    public fun registry_get(registry: &CharacterRegistry, who: address): ID {
+        *table::borrow(&registry.table, who)
+    }
 }

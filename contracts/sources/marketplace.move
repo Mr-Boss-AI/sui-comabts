@@ -6,6 +6,7 @@ module sui_combats::marketplace {
     use sui::kiosk::{Self, Kiosk, KioskOwnerCap};
     use sui::transfer_policy::{Self, TransferPolicy};
     use sui::package::Publisher;
+    use sui::table::{Self, Table};
 
     use sui_combats::item::Item;
     use sui_combats::royalty_rule;
@@ -22,8 +23,28 @@ module sui_combats::marketplace {
     // ===== Listing fee: flat 0.01 SUI charged on every list, not refunded =====
     const LISTING_FEE_MIST: u64 = 10_000_000;
 
+    // ===== KioskRegistry (v5.1) — chain-side one-kiosk-per-wallet enforcement =====
+    /// Maps owner → kiosk_id. `create_or_get_player_kiosk` returns the existing
+    /// id if registered; otherwise creates a Kiosk + KioskOwnerCap, registers,
+    /// and returns the new id. Closes the phantom-empty-kiosk vector (a single
+    /// wallet ending up with multiple shared Kiosks where sale proceeds go to
+    /// the "wrong" one). The JS pre-flight in useMarketplaceActions becomes
+    /// redundant after v5.1.
+    public struct KioskRegistry has key {
+        id: UID,
+        table: Table<address, ID>,
+    }
+
     // ===== Events =====
     public struct KioskCreated has copy, drop {
+        kiosk_id: ID,
+        owner: address,
+    }
+
+    /// v5.1 — Emitted only on first registration. Distinguishes "user just
+    /// created their first Kiosk" from "user already had one and we returned
+    /// the existing id" so indexers can count unique kiosk owners cleanly.
+    public struct KioskRegistered has copy, drop {
         kiosk_id: ID,
         owner: address,
     }
@@ -53,18 +74,53 @@ module sui_combats::marketplace {
         policy_id: ID,
     }
 
+    // ===== Init — share KioskRegistry once at publish =====
+    fun init(ctx: &mut TxContext) {
+        let registry = KioskRegistry {
+            id: object::new(ctx),
+            table: table::new<address, ID>(ctx),
+        };
+        transfer::share_object(registry);
+    }
+
+    #[test_only]
+    public fun init_for_testing(ctx: &mut TxContext) {
+        init(ctx);
+    }
+
     // ===== Public functions =====
 
-    /// Create a Kiosk owned by the sender. Kiosk is shared, OwnerCap goes to sender.
-    public fun create_player_kiosk(ctx: &mut TxContext) {
-        let (kiosk, cap) = kiosk::new(ctx);
-        let kiosk_id = object::id(&kiosk);
+    /// v5.1 — Create a Kiosk for the sender IF they don't already have one.
+    /// Returns the kiosk_id (existing OR newly created). Replaces the v5
+    /// unconditional create_player_kiosk, which used to mint a second Kiosk +
+    /// second OwnerCap on a dup click, producing the 2026-05-20 phantom-empty-
+    /// kiosk incident. The frontend reads the returned id (or queries the
+    /// registry by address) to render seller actions.
+    ///
+    /// Emits KioskRegistered + KioskCreated only on first registration; the
+    /// returning-existing path is silent (no event spam on repeated calls).
+    public fun create_or_get_player_kiosk(
+        registry: &mut KioskRegistry,
+        ctx: &mut TxContext,
+    ): ID {
         let owner = tx_context::sender(ctx);
 
+        if (table::contains(&registry.table, owner)) {
+            return *table::borrow(&registry.table, owner)
+        };
+
+        let (kiosk, cap) = kiosk::new(ctx);
+        let kiosk_id = object::id(&kiosk);
+
+        table::add(&mut registry.table, owner, kiosk_id);
+
         event::emit(KioskCreated { kiosk_id, owner });
+        event::emit(KioskRegistered { kiosk_id, owner });
 
         transfer::public_share_object(kiosk);
         transfer::public_transfer(cap, owner);
+
+        kiosk_id
     }
 
     /// List an Item in the player's Kiosk at `price` MIST. Caller pays a flat
@@ -171,5 +227,15 @@ module sui_combats::marketplace {
         let owner = tx_context::sender(ctx);
         transfer::public_share_object(policy);
         transfer::public_transfer(cap, owner);
+    }
+
+    // ===== v5.1 — KioskRegistry accessors =====
+
+    public fun registry_has(registry: &KioskRegistry, who: address): bool {
+        table::contains(&registry.table, who)
+    }
+
+    public fun registry_get(registry: &KioskRegistry, who: address): ID {
+        *table::borrow(&registry.table, who)
     }
 }

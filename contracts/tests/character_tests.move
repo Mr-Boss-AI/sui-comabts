@@ -7,6 +7,7 @@ module sui_combats::character_tests {
     use sui_combats::character::{
         Self,
         Character,
+        CharacterRegistry,
         AdminCap,
         init_for_testing,
         xp_for_level_for_testing,
@@ -25,7 +26,7 @@ module sui_combats::character_tests {
         clock
     }
 
-    /// Boot AdminCap + one shared Character owned by ALICE.
+    /// Boot AdminCap + CharacterRegistry, then mint one shared Character owned by ALICE.
     fun bootstrap(scenario: &mut ts::Scenario): Clock {
         ts::next_tx(scenario, PUBLISHER);
         { init_for_testing(ts::ctx(scenario)); };
@@ -34,12 +35,15 @@ module sui_combats::character_tests {
 
         ts::next_tx(scenario, ALICE);
         {
+            let mut registry = ts::take_shared<CharacterRegistry>(scenario);
             character::create_character(
                 string::utf8(b"Alice"),
                 5, 5, 5, 5,
+                &mut registry,
                 &clock,
                 ts::ctx(scenario),
             );
+            ts::return_shared(registry);
         };
 
         clock
@@ -84,6 +88,7 @@ module sui_combats::character_tests {
             assert!(character::strength(&c) == 5, 3);
             assert!(character::wins(&c) == 0, 4);
             assert!(character::losses(&c) == 0, 5);
+            assert!(character::draws(&c) == 0, 9);
             assert!(character::rating(&c) == 1000, 6);
             assert!(character::unallocated_points(&c) == 0, 7);
             assert!(character::loadout_version(&c) == 0, 8);
@@ -104,13 +109,16 @@ module sui_combats::character_tests {
 
         ts::next_tx(&mut scenario, ALICE);
         {
+            let mut registry = ts::take_shared<CharacterRegistry>(&scenario);
             // 5+5+5+4 = 19, should be 20
             character::create_character(
                 string::utf8(b"BadAlice"),
                 5, 5, 5, 4,
+                &mut registry,
                 &clock,
                 ts::ctx(&mut scenario),
             );
+            ts::return_shared(registry);
         };
 
         clock::destroy_for_testing(clock);
@@ -127,13 +135,97 @@ module sui_combats::character_tests {
 
         ts::next_tx(&mut scenario, ALICE);
         {
+            let mut registry = ts::take_shared<CharacterRegistry>(&scenario);
             // 33-char name (max is 32)
             character::create_character(
                 string::utf8(b"abcdefghijklmnopqrstuvwxyz1234567"),
                 5, 5, 5, 5,
+                &mut registry,
                 &clock,
                 ts::ctx(&mut scenario),
             );
+            ts::return_shared(registry);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    // ──────── v5.1 — CharacterRegistry duplicate-mint guard ────────
+
+    #[test]
+    #[expected_failure(abort_code = 6, location = sui_combats::character)]  // EWalletAlreadyHasCharacter
+    fun test_create_character_duplicate_aborts() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap(&mut scenario);  // ALICE has a Character
+
+        // ALICE tries to mint a SECOND character — should abort.
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut registry = ts::take_shared<CharacterRegistry>(&scenario);
+            character::create_character(
+                string::utf8(b"AliceTwo"),
+                5, 5, 5, 5,
+                &mut registry,
+                &clock,
+                ts::ctx(&mut scenario),
+            );
+            ts::return_shared(registry);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_registry_tracks_owner() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap(&mut scenario);
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let registry = ts::take_shared<CharacterRegistry>(&scenario);
+            assert!(character::registry_has(&registry, ALICE), 0);
+            assert!(!character::registry_has(&registry, BOB), 1);
+            ts::return_shared(registry);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    // ──────── v5.1 — burn_character clears registry ────────
+
+    #[test]
+    fun test_burn_character_clears_registry() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap(&mut scenario);
+
+        // Admin burns ALICE's character.
+        ts::next_tx(&mut scenario, PUBLISHER);
+        {
+            let admin = ts::take_from_sender<AdminCap>(&scenario);
+            let character = ts::take_shared<Character>(&scenario);
+            let mut registry = ts::take_shared<CharacterRegistry>(&scenario);
+            character::burn_character(&admin, character, &mut registry);
+            assert!(!character::registry_has(&registry, ALICE), 0);
+            ts::return_shared(registry);
+            ts::return_to_sender(&scenario, admin);
+        };
+
+        // ALICE can now mint a fresh character on the same wallet.
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut registry = ts::take_shared<CharacterRegistry>(&scenario);
+            character::create_character(
+                string::utf8(b"AliceReborn"),
+                4, 6, 5, 5,
+                &mut registry,
+                &clock,
+                ts::ctx(&mut scenario),
+            );
+            assert!(character::registry_has(&registry, ALICE), 1);
+            ts::return_shared(registry);
         };
 
         clock::destroy_for_testing(clock);
@@ -147,7 +239,6 @@ module sui_combats::character_tests {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap(&mut scenario);
 
-        // PUBLISHER (AdminCap holder) grants 200 XP — crosses L2 threshold (100)
         ts::next_tx(&mut scenario, PUBLISHER);
         {
             let admin = ts::take_from_sender<AdminCap>(&scenario);
@@ -156,7 +247,6 @@ module sui_combats::character_tests {
             assert!(character::level(&c) == 2, 0);
             assert!(character::wins(&c) == 1, 1);
             assert!(character::rating(&c) == 1010, 2);
-            // POINTS_PER_LEVEL = 3, granted on level-up to 2
             assert!(character::unallocated_points(&c) == 3, 3);
             assert!(character::xp(&c) == 200, 4);
             ts::return_shared(c);
@@ -172,15 +262,13 @@ module sui_combats::character_tests {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap(&mut scenario);
 
-        // 700 XP crosses L2 (100), L3 (300), L4 (700) — but XP cap blocks single
-        // grants over 1000. 700 is under cap, so this should work.
         ts::next_tx(&mut scenario, PUBLISHER);
         {
             let admin = ts::take_from_sender<AdminCap>(&scenario);
             let mut c = ts::take_shared<Character>(&scenario);
             character::update_after_fight(&admin, &mut c, true, 700, 1000, &clock);
             assert!(character::level(&c) == 4, 0);
-            assert!(character::unallocated_points(&c) == 9, 1); // 3 levels × 3 points
+            assert!(character::unallocated_points(&c) == 9, 1);
             ts::return_shared(c);
             ts::return_to_sender(&scenario, admin);
         };
@@ -199,8 +287,56 @@ module sui_combats::character_tests {
         {
             let admin = ts::take_from_sender<AdminCap>(&scenario);
             let mut c = ts::take_shared<Character>(&scenario);
-            // 1001 > MAX_XP_PER_FIGHT (1000)
             character::update_after_fight(&admin, &mut c, true, 1001, 1010, &clock);
+            ts::return_shared(c);
+            ts::return_to_sender(&scenario, admin);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    // ──────── v5.1 — update_after_fight_draw ────────
+
+    #[test]
+    fun test_update_after_fight_draw_increments_draws() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap(&mut scenario);
+
+        ts::next_tx(&mut scenario, PUBLISHER);
+        {
+            let admin = ts::take_from_sender<AdminCap>(&scenario);
+            let mut c = ts::take_shared<Character>(&scenario);
+            character::update_after_fight_draw(&admin, &mut c, 50, &clock);
+            assert!(character::draws(&c) == 1, 0);
+            assert!(character::wins(&c) == 0, 1);
+            assert!(character::losses(&c) == 0, 2);
+            assert!(character::xp(&c) == 50, 3);
+            // Rating unchanged on draws.
+            assert!(character::rating(&c) == 1000, 4);
+            ts::return_shared(c);
+            ts::return_to_sender(&scenario, admin);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_update_after_fight_draw_can_level_up() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap(&mut scenario);
+
+        // Two draws of 60 XP each = 120 XP; crosses L2 (100).
+        ts::next_tx(&mut scenario, PUBLISHER);
+        {
+            let admin = ts::take_from_sender<AdminCap>(&scenario);
+            let mut c = ts::take_shared<Character>(&scenario);
+            character::update_after_fight_draw(&admin, &mut c, 60, &clock);
+            character::update_after_fight_draw(&admin, &mut c, 60, &clock);
+            assert!(character::draws(&c) == 2, 0);
+            assert!(character::level(&c) == 2, 1);
+            assert!(character::unallocated_points(&c) == 3, 2);
             ts::return_shared(c);
             ts::return_to_sender(&scenario, admin);
         };
@@ -216,7 +352,6 @@ module sui_combats::character_tests {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap(&mut scenario);
 
-        // Grant 3 points via level-up
         ts::next_tx(&mut scenario, PUBLISHER);
         {
             let admin = ts::take_from_sender<AdminCap>(&scenario);
@@ -226,7 +361,6 @@ module sui_combats::character_tests {
             ts::return_to_sender(&scenario, admin);
         };
 
-        // ALICE spends them
         ts::next_tx(&mut scenario, ALICE);
         {
             let mut c = ts::take_shared<Character>(&scenario);
@@ -250,7 +384,6 @@ module sui_combats::character_tests {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap(&mut scenario);
 
-        // Grant points
         ts::next_tx(&mut scenario, PUBLISHER);
         {
             let admin = ts::take_from_sender<AdminCap>(&scenario);
@@ -260,7 +393,6 @@ module sui_combats::character_tests {
             ts::return_to_sender(&scenario, admin);
         };
 
-        // BOB tries to spend ALICE's points
         ts::next_tx(&mut scenario, BOB);
         {
             let mut c = ts::take_shared<Character>(&scenario);
@@ -278,7 +410,6 @@ module sui_combats::character_tests {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap(&mut scenario);
 
-        // No level-up — 0 unallocated
         ts::next_tx(&mut scenario, ALICE);
         {
             let mut c = ts::take_shared<Character>(&scenario);
@@ -330,7 +461,6 @@ module sui_combats::character_tests {
             ts::return_to_sender(&scenario, admin);
         };
 
-        // Advance past expiry
         clock::increment_for_testing(&mut clock, 600_000);
 
         ts::next_tx(&mut scenario, ALICE);
@@ -355,7 +485,6 @@ module sui_combats::character_tests {
             let admin = ts::take_from_sender<AdminCap>(&scenario);
             let mut c = ts::take_shared<Character>(&scenario);
             let now = clock::timestamp_ms(&clock);
-            // 2 hours > MAX_LOCK_MS (1 hour)
             character::set_fight_lock(&admin, &mut c, now + 7_200_000, &clock);
             ts::return_shared(c);
             ts::return_to_sender(&scenario, admin);
