@@ -21,6 +21,10 @@ export const ITEM_TYPES = {
   BELT: 7,
   RING: 8,
   NECKLACE: 9,
+  // v5.1 (2026-05-28 PM) — 3 new wearable types for the 13-slot loadout.
+  PANTS: 10,
+  BRACELETS: 11,
+  PAULDRONS: 12,
 } as const;
 export type ItemType = (typeof ITEM_TYPES)[keyof typeof ITEM_TYPES];
 
@@ -34,6 +38,9 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   7: "Belt",
   8: "Ring",
   9: "Necklace",
+  10: "Pants",
+  11: "Bracelets",
+  12: "Pauldrons",
 };
 
 export const RARITIES = {
@@ -148,6 +155,10 @@ export interface EquipmentSlots {
   ring1: Item | null;
   ring2: Item | null;
   necklace: Item | null;
+  // v5.1 (2026-05-28 PM) — 3 new slots. 13-slot total loadout.
+  pants: Item | null;
+  bracelets: Item | null;
+  pauldrons: Item | null;
 }
 
 export const EQUIPMENT_SLOT_LABELS: Record<keyof EquipmentSlots, string> = {
@@ -161,6 +172,9 @@ export const EQUIPMENT_SLOT_LABELS: Record<keyof EquipmentSlots, string> = {
   ring1: "Ring 1",
   ring2: "Ring 2",
   necklace: "Necklace",
+  pants: "Pants",
+  bracelets: "Bracelets",
+  pauldrons: "Pauldrons",
 };
 
 export const SLOT_TO_ITEM_TYPE: Record<keyof EquipmentSlots, ItemType[]> = {
@@ -174,6 +188,9 @@ export const SLOT_TO_ITEM_TYPE: Record<keyof EquipmentSlots, ItemType[]> = {
   ring1: [ITEM_TYPES.RING],
   ring2: [ITEM_TYPES.RING],
   necklace: [ITEM_TYPES.NECKLACE],
+  pants: [ITEM_TYPES.PANTS],
+  bracelets: [ITEM_TYPES.BRACELETS],
+  pauldrons: [ITEM_TYPES.PAULDRONS],
 };
 
 // ===== ITEMS =====

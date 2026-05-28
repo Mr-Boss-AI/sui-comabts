@@ -61,6 +61,22 @@ export const TREASURY_ADDRESS = required(
 /** TransferPolicy<Item> object id. Required for marketplace buys. */
 export const TRANSFER_POLICY_ID = process.env.NEXT_PUBLIC_TRANSFER_POLICY_ID ?? "";
 
+// v5.1 (2026-05-28 PM) — Shared registry IDs threaded through PTBs that
+// gate via the chain registries. All three required for v5.1 runtime;
+// the builders abort with a clear error if any are missing.
+export const CHARACTER_REGISTRY_ID = process.env.NEXT_PUBLIC_CHARACTER_REGISTRY_ID ?? "";
+export const OPEN_WAGER_REGISTRY_ID = process.env.NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID ?? "";
+export const KIOSK_REGISTRY_ID = process.env.NEXT_PUBLIC_KIOSK_REGISTRY_ID ?? "";
+
+function requireV51Registry(name: string, value: string): string {
+  if (!value) {
+    throw new Error(
+      `[v5.1] ${name} env var is required for this PTB. Set it in frontend/.env.local from deployment.testnet-v5.1.json.`,
+    );
+  }
+  return value;
+}
+
 /** Per-listing fee charged on list_item, in MIST (0.01 SUI). */
 const LISTING_FEE_MIST: bigint = BigInt(10_000_000);
 
@@ -81,7 +97,11 @@ export function computeRoyalty(priceMist: bigint): bigint {
 
 export type EquipSlotKey =
   | "weapon" | "offhand" | "helmet" | "chest" | "gloves"
-  | "boots" | "belt" | "ring_1" | "ring_2" | "necklace";
+  | "boots" | "belt" | "ring_1" | "ring_2" | "necklace"
+  // v5.1 (2026-05-28 PM) — 3 new slots. Chain-side and frontend share the
+  // same snake_case keys here (no underscore-stripping needed since the
+  // names don't conflict with existing JS camelCase).
+  | "pants" | "bracelets" | "pauldrons";
 
 // =============================================================================
 // CHARACTER NFT
@@ -176,7 +196,10 @@ export async function fetchCharacterNFT(
   }
 }
 
-/** Build a transaction that calls create_character on-chain. */
+/** Build a transaction that calls create_character on-chain.
+ * v5.1 — Threads CharacterRegistry (shared) so the chain-side duplicate-mint
+ * guard runs. The aborts with EWalletAlreadyHasCharacter (code 6) if the
+ * wallet already has a Character registered. */
 export function buildMintCharacterTx(
   name: string,
   strength: number,
@@ -184,6 +207,7 @@ export function buildMintCharacterTx(
   intuition: number,
   endurance: number,
 ): Transaction {
+  const registry = requireV51Registry("NEXT_PUBLIC_CHARACTER_REGISTRY_ID", CHARACTER_REGISTRY_ID);
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::character::create_character`,
@@ -193,6 +217,7 @@ export function buildMintCharacterTx(
       tx.pure.u16(dexterity),
       tx.pure.u16(intuition),
       tx.pure.u16(endurance),
+      tx.object(registry),
       tx.object(SUI_CLOCK),
     ],
   });
@@ -431,41 +456,52 @@ export async function fetchKioskItems(
 //  Wager
 // =============================================================================
 
+/** v5.1 — create_wager threads OpenWagerRegistry (shared). Aborts with
+ * EAlreadyHasOpenWager (code 11) if the caller already has an open wager. */
 export function buildCreateWagerTx(stakeAmountMist: bigint): Transaction {
+  const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::create_wager`,
-    arguments: [stakeCoin, tx.object(SUI_CLOCK)],
+    arguments: [stakeCoin, tx.object(registry), tx.object(SUI_CLOCK)],
   });
   return tx;
 }
 
+/** v5.1 — accept_wager threads OpenWagerRegistry (shared, read-only).
+ * Aborts with EAlreadyHasOpenWager (code 11) if the acceptor is themselves
+ * a creator — closes the silent-accept path at the chain layer. */
 export function buildAcceptWagerTx(wagerMatchId: string, stakeAmountMist: bigint): Transaction {
+  const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::accept_wager`,
-    arguments: [tx.object(wagerMatchId), stakeCoin, tx.object(SUI_CLOCK)],
+    arguments: [tx.object(wagerMatchId), stakeCoin, tx.object(registry), tx.object(SUI_CLOCK)],
   });
   return tx;
 }
 
-/** v5 cancel_wager takes a Clock for `settled_at`. */
+/** v5.1 — cancel_wager threads OpenWagerRegistry (shared). Removes the
+ * registry entry on success so the creator can post a fresh wager. */
 export function buildCancelWagerTx(wagerMatchId: string): Transaction {
+  const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::cancel_wager`,
-    arguments: [tx.object(wagerMatchId), tx.object(SUI_CLOCK)],
+    arguments: [tx.object(wagerMatchId), tx.object(registry), tx.object(SUI_CLOCK)],
   });
   return tx;
 }
 
+/** v5.1 — cancel_expired_wager threads OpenWagerRegistry (shared). Anyone-callable. */
 export function buildCancelExpiredWagerTx(wagerMatchId: string): Transaction {
+  const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::cancel_expired_wager`,
-    arguments: [tx.object(wagerMatchId), tx.object(SUI_CLOCK)],
+    arguments: [tx.object(wagerMatchId), tx.object(registry), tx.object(SUI_CLOCK)],
   });
   return tx;
 }
@@ -531,12 +567,16 @@ export function buildSwapEquipmentTx(
 //  Marketplace (Kiosk + listing fee + royalty)
 // =============================================================================
 
-/** Create a per-player Kiosk. Each wallet typically only needs one. */
+/** v5.1 — Create-or-get a per-player Kiosk. Idempotent: if the caller has
+ * a Kiosk already registered, the call returns the existing kiosk_id without
+ * minting a second one (closes the 2026-05-20 phantom-empty-kiosk vector
+ * at the chain layer). Replaces the v5.0 unconditional create_player_kiosk. */
 export function buildCreateKioskTx(): Transaction {
+  const registry = requireV51Registry("NEXT_PUBLIC_KIOSK_REGISTRY_ID", KIOSK_REGISTRY_ID);
   const tx = new Transaction();
   tx.moveCall({
-    target: `${PACKAGE_ID}::marketplace::create_player_kiosk`,
-    arguments: [],
+    target: `${PACKAGE_ID}::marketplace::create_or_get_player_kiosk`,
+    arguments: [tx.object(registry)],
   });
   return tx;
 }

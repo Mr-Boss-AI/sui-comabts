@@ -29,6 +29,10 @@ module sui_combats::item {
     const BELT: u8 = 7;
     const RING: u8 = 8;
     const NECKLACE: u8 = 9;
+    /// v5.1 (2026-05-28 PM) — 3 new wearable types for the 13-slot loadout.
+    const PANTS: u8 = 10;
+    const BRACELETS: u8 = 11;
+    const PAULDRONS: u8 = 12;
 
     // ===== Rarity constants =====
     const COMMON: u8 = 1;
@@ -165,7 +169,7 @@ module sui_combats::item {
         max_damage: u16,
         ctx: &mut TxContext,
     ) {
-        assert!(item_type >= WEAPON && item_type <= NECKLACE, EInvalidItemType);
+        assert!(item_type >= WEAPON && item_type <= PAULDRONS, EInvalidItemType);
         assert!(rarity >= COMMON && rarity <= LEGENDARY, EInvalidRarity);
         assert!(level_req <= MAX_LEVEL_REQ, ELevelReqTooHigh);
         assert!(min_damage <= max_damage, EDamageRangeInvalid);
@@ -299,6 +303,10 @@ module sui_combats::item {
     public fun belt_type(): u8 { BELT }
     public fun ring_type(): u8 { RING }
     public fun necklace_type(): u8 { NECKLACE }
+    /// v5.1 (2026-05-28 PM) — accessors for the 3 new wearable types.
+    public fun pants_type(): u8 { PANTS }
+    public fun bracelets_type(): u8 { BRACELETS }
+    public fun pauldrons_type(): u8 { PAULDRONS }
 
     // v5.1 — slot_type constant accessors
     public fun slot_mainhand(): u8 { SLOT_MAINHAND }

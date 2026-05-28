@@ -61,6 +61,12 @@ function getEquipmentBonuses(equipment: EquipmentSlots): {
     equipment.ring1,
     equipment.ring2,
     equipment.necklace,
+    // v5.1 (2026-05-28 PM) — 3 new slots. Optional-chained so the v5.0
+    // EquipmentSlots shape (without these fields) still aggregates cleanly
+    // during the cutover window.
+    equipment.pants ?? null,
+    equipment.bracelets ?? null,
+    equipment.pauldrons ?? null,
   ];
 
   for (const item of slots) {

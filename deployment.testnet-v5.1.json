@@ -1,23 +1,29 @@
 {
-  "version": "5.1.0",
+  "version": "5.1.0-13slot",
   "network": "testnet",
-  "publishedAt": "2026-05-28",
-  "publishDigest": "DJjfc4tWN3EdXqjJLnfENj79AjNSgmJUgEEM4XSkznkY",
-  "policyDigest": "6z86ExfmM46oTdi8arn2YGqRdhY2X54Th8ENS6KiPtWx",
-  "packageId": "0x7853412fb905e73cf8d2ba3f8377045720069c25b5e656abc926119659641518",
+  "publishedAt": "2026-05-28-PM",
+  "publishDigest": "2eQedAHCjNE9kpkQPVwqdTkA7fa5xy1qeAruRt2mtTPh",
+  "policyDigest": "26drZZUnMkbwbi1kFBSzDifRvE83G1oR3o5iGrzLwA48",
+  "packageId": "0x95c231e5909678609202b5a976c575366280222cdb703e4a7a097043bd712c69",
+
+  "supersedes": {
+    "packageId": "0x7853412fb905e73cf8d2ba3f8377045720069c25b5e656abc926119659641518",
+    "publishDigest": "DJjfc4tWN3EdXqjJLnfENj79AjNSgmJUgEEM4XSkznkY",
+    "reason": "Slot count + Item type enum widened (10 → 13 slots) — requires fresh publish per Sui semantics (no upgrade for struct/enum changes)."
+  },
 
   "shared": {
-    "characterRegistry": "0x357029b4640c877594c812a8a8a11ac97afd2626dcffb7533419ca8eea95ed11",
-    "openWagerRegistry": "0xaeef9b478ffd3073c0fac44e43aba8e2a04c538eac4933bb3c75b75576b1aeab",
-    "kioskRegistry": "0xe0f43186fc5939b4d343336281846ff3c0de8c900d0b946bc4cf889fa43eeb2b",
-    "transferPolicy": "0x33bcf02864363125b107471b7b568e922ec7dd2611fb67b680bf4cba3ec91338"
+    "characterRegistry": "0x6c4fdf3cff4617903fe8bfbd24a9e81f4e3e15f4efbef614ecea1d6056ab2a1a",
+    "openWagerRegistry": "0x3a7f198458af69490d58ac03460be9c123b8d90160d04fdb828d2c3e67d36b7c",
+    "kioskRegistry": "0x4994aa3eae7d6922c7db466c69b1e9d135aa23837be26905eb0179f43ee5d17b",
+    "transferPolicy": "0x6e5319160d84bbc3492725bbbaab2004629886e664aad928f730c83e80cb0654"
   },
 
   "caps": {
-    "adminCap": "0x5c5a7efc22580126b42059a3c48f7bd59ccee9ab310ac66f2d2fdce7e231f939",
-    "upgradeCap": "0x6ab624f4d3e7c7f980769c324c07d9308206225c271a0c41a74a80d55e33f493",
-    "publisher": "0x11070c840810907e29d5302eb6f5c955a71d48c5377d9eb25b3c4007b282fb8e",
-    "transferPolicyCap": "0x129591e7967419d68bbdf0ce720ea17fb8722d887f5e989e6a41ebf8e0f0a666"
+    "adminCap": "0x7796675da7a290085c1b1ed812ed344abff69bd29544d7d10cc5fa28a383576a",
+    "upgradeCap": "0x6216b0c33d01a9976d034b712985eb8f3d1c7886972e591cd470ea2e2e7f07d1",
+    "publisher": "0x3d9e48b7d647f6d8bd1b57622b684f4372a148386c3c6c3f53f7cc17fae4ed6c",
+    "transferPolicyCap": "0x5464653700d6bf22ea6ac4e4da7368520889fcc024f0e97eee1169652fe5f0d8"
   },
 
   "treasury": "0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d",
@@ -31,39 +37,76 @@
     "royalty_rule"
   ],
 
-  "v5.1_changes_vs_v5.0": [
-    "CharacterRegistry shared object — chain-side one-character-per-wallet gate",
-    "OpenWagerRegistry shared object — chain-side one-open-wager-per-wallet gate",
-    "KioskRegistry shared object — chain-side one-kiosk-per-wallet gate",
-    "Character.draws: u32 field — chain-side W/L/D record",
-    "Item.slot_type: u8 field — chain-side enforcement of mainhand/offhand/both_hands trinity",
-    "arena::settle_tie — mutual-KO settlement, 100% refund both sides, no platform fee, emits WagerTied",
-    "character::update_after_fight_draw — bumps draws counter, applies XP, no rating change",
-    "character::burn_character — admin-gated character delete + registry clear",
-    "marketplace::create_or_get_player_kiosk — replaces unconditional create_player_kiosk; idempotent",
-    "item::mint_item_admin rarity stat budgets — sum of all *_bonus + max_damage capped per rarity (Common=20, Uncommon=40, Rare=70, Epic=110, Legendary=160)",
-    "item::mint_item_admin takes slot_type param + validates shape per item_type",
-    "equip_weapon enforces slot_type=mainhand OR both_hands; two-handed requires empty offhand",
-    "equip_offhand blocks both-handed items; blocks offhand when current weapon is two-handed; requires shield to be slot_offhand"
-  ],
-
-  "deferred_to_v5.2": [
-    "sui::random for loot rolls (D1) — trust-bundle item, ~80 lines Move + bonus-distribution logic",
-    "Three new equipment slots (D5) — feature-creep beyond audit scope",
-    "respec_character (D7) — 5 SUI sink + 24h cooldown via DOF, player-facing financial flow",
-    "settle_wager_attested (D8) — dual-sig over fight-outcome hash"
-  ],
-
-  "operational_followups": {
-    "display_setup": "Not done in Phase 2. Need to call display::new<Character> + display::new<Item> via Publisher to create Display objects (mirrors v5.0). Recommend bundling with the v5.1 catalog mint script.",
-    "catalog_mint": "Not done in Phase 2. v5.1 catalog re-mint (22 starter + 9 Lv6-Lv8 items) with new slot_type field needs scripts/mint-v5.1-catalog.ts. Two-handed weapons (Cursed Greatsword, Skullcrusher Maul, Steel Greatsword) get slot_type=2; shields get slot_type=1; everything else slot_type=0.",
-    "wallet_transfers": "After re-mint, transfer NFTs to Mr_Boss + Sx test wallets (same split as v5.0).",
-    "env_update": "When ready to switch the server to v5.1: update server/.env's SUI_PACKAGE_ID, ADMIN_CAP_ID, TRANSFER_POLICY_ID, plus add OPEN_WAGER_REGISTRY_ID, CHARACTER_REGISTRY_ID, KIOSK_REGISTRY_ID. Same for frontend/.env.local. v5.0 server keeps running on v5.0 IDs in the meantime."
+  "slots": {
+    "_comment": "13-slot loadout. v5.0 / v5.1-pre-13 had 10. The 3 new slots are pants (legs lower armor), bracelets (forearm accessory), pauldrons (shoulder armor).",
+    "count": 13,
+    "all": [
+      "weapon",
+      "offhand",
+      "helmet",
+      "chest",
+      "gloves",
+      "boots",
+      "belt",
+      "ring_1",
+      "ring_2",
+      "necklace",
+      "pants",
+      "bracelets",
+      "pauldrons"
+    ],
+    "new_in_v5_1_13slot": [
+      "pants",
+      "bracelets",
+      "pauldrons"
+    ]
   },
 
+  "item_types": {
+    "WEAPON": 1,
+    "SHIELD": 2,
+    "HELMET": 3,
+    "CHEST": 4,
+    "GLOVES": 5,
+    "BOOTS": 6,
+    "BELT": 7,
+    "RING": 8,
+    "NECKLACE": 9,
+    "PANTS": 10,
+    "BRACELETS": 11,
+    "PAULDRONS": 12
+  },
+
+  "v5.1_13slot_changes_vs_v5.1_10slot": [
+    "Item.item_type enum widened: PANTS=10, BRACELETS=11, PAULDRONS=12 added (mint_item_admin shape validation requires slot_type=mainhand for non-weapon non-shield types)",
+    "equipment.move: equip_pants / unequip_pants, equip_bracelets / unequip_bracelets, equip_pauldrons / unequip_pauldrons primitives added — same shape as helmet/chest/gloves/boots/belt (owner + fight-lock + type + level-req + slot-empty checks)",
+    "DOF slot keys added: 'pants', 'bracelets', 'pauldrons' — all string-keyed on Character.id alongside existing 10",
+    "Server combat math updated: getEquipmentBonuses iterates over 13 slots when aggregating bonuses",
+    "Frontend EQUIPMENT_SLOT_KEYS extended from 10 to 13; PTB save_loadout PTB-builder picks them up automatically via the existing iteration",
+    "Move test count: 64 → 71 (added 7 tests: 3 happy-path equip/unequip, 4 abort-path)"
+  ],
+
+  "v5_2_deferred": [
+    "sui::random for loot rolls (D1)",
+    "respec_character + 5 SUI sink + 24h cooldown DOF (D7)",
+    "settle_wager_attested dual-sig settlement (D8)",
+    "Confirm-modal gate for every signAndExecuteTransaction (MAINNET_PREP §D HARD blocker)",
+    "Settlement retry / journal (audit's #1 risk)",
+    "WS message Zod validation + rate-limiter middleware",
+    "Frontend Draw modal + W/L/D counter render",
+    "Empty catch sweep + StatBonuses shape unification"
+  ],
+
   "gas_costs": {
-    "publish_mist": 159253880,
-    "publish_sui": 0.15925388,
-    "setup_policy_mist": "~3M (small)"
+    "publish_sui": 0.16,
+    "policy_setup_sui": 0.003,
+    "treasury_remaining_estimate_sui": 3.14
+  },
+
+  "stat_profiles_for_new_slots": {
+    "_comment": "Recommended stat profiles for catalog mints. Each within the user's rarity stat-budget (Common=20, Uncommon=40, Rare=70, Epic=110, Legendary=160).",
+    "pants": "Legs lower armor — primary: armor + endurance. Secondary: small HP. Profile mirrors boots.",
+    "bracelets": "Forearm accessory — primary: dexterity + crit_chance_bonus. Secondary: small attack_bonus. Lighter than armor slots; light arms enable swift strikes.",
+    "pauldrons": "Shoulder/upper armor — primary: armor + strength. Secondary: small HP. Heavier than helmet, shielding the upper body."
   }
 }

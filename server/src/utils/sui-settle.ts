@@ -280,6 +280,9 @@ async function execAsTreasury(
 /**
  * settle_wager (TREASURY-only). 95% to winner, 5% to TREASURY.
  * v5 takes an extra `clock` arg used for `settled_at`.
+ * v5.1 — threads OpenWagerRegistry as &mut between winner and clock so the
+ * creator's registry entry clears on completion. Backward-compat fallback for
+ * v5.0 env (no registry) preserved during the cutover window.
  */
 export async function settleWagerOnChain(
   wagerMatchId: string,
@@ -287,13 +290,17 @@ export async function settleWagerOnChain(
 ): Promise<{ digest: string }> {
   console.log(`[Wager] Settling ${wagerMatchId} → winner: ${winnerAddress}`);
   const { digest } = await execAsTreasury('Wager.settle', (tx) => {
+    const args: any[] = [
+      tx.object(wagerMatchId),
+      tx.pure.address(winnerAddress),
+    ];
+    if (CONFIG.OPEN_WAGER_REGISTRY_ID) {
+      args.push(tx.object(CONFIG.OPEN_WAGER_REGISTRY_ID));
+    }
+    args.push(tx.object(CLOCK));
     tx.moveCall({
       target: `${PKG()}::arena::settle_wager`,
-      arguments: [
-        tx.object(wagerMatchId),
-        tx.pure.address(winnerAddress),
-        tx.object(CLOCK),
-      ],
+      arguments: args,
     });
   });
   console.log(`[Wager] Settled. Tx: ${digest}`);

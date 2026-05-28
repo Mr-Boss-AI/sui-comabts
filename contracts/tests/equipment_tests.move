@@ -495,6 +495,208 @@ module sui_combats::equipment_tests {
         ts::end(scenario);
     }
 
+    // ──────── v5.1 (2026-05-28 PM) — 3 new slots: pants, bracelets, pauldrons ────────
+
+    /// Helper — mint an item of arbitrary `item_type` and slot_type=mainhand
+    /// (which the contract requires for all non-weapon/non-shield items per v5.1
+    /// shape validation). Transfers to ALICE.
+    fun mint_misc_to_alice(
+        scenario: &mut ts::Scenario,
+        item_type: u8,
+        level_req: u8,
+        rarity: u8,
+        name_bytes: vector<u8>,
+    ) {
+        ts::next_tx(scenario, PUBLISHER);
+        {
+            let admin = ts::take_from_sender<AdminCap>(scenario);
+            item::mint_item_admin(
+                &admin,
+                string::utf8(name_bytes),
+                string::utf8(b"ipfs://misc"),
+                item_type,
+                0, level_req, rarity,
+                item::slot_mainhand(),
+                0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0,
+                0, 0,
+                ts::ctx(scenario),
+            );
+            ts::return_to_sender(scenario, admin);
+        };
+        ts::next_tx(scenario, PUBLISHER);
+        {
+            let it = ts::take_from_sender<Item>(scenario);
+            sui::transfer::public_transfer(it, ALICE);
+        };
+    }
+
+    #[test]
+    fun test_equip_unequip_pants_happy() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::pants_type(), 1, 2, b"Greaves");
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let pants = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_pants(&mut c, pants, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            equipment::unequip_pants(&mut c, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_equip_unequip_bracelets_happy() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, 2, b"Wraps");
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let br = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_bracelets(&mut c, br, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            equipment::unequip_bracelets(&mut c, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_equip_unequip_pauldrons_happy() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::pauldrons_type(), 1, 2, b"Spaulders");
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let p = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_pauldrons(&mut c, p, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            equipment::unequip_pauldrons(&mut c, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0, location = sui_combats::equipment)]  // EWrongItemType
+    fun test_equip_pants_with_helmet_aborts() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::helmet_type(), 1, 2, b"Helm");
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let helm = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_pants(&mut c, helm, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1, location = sui_combats::equipment)]  // ESlotOccupied
+    fun test_equip_bracelets_slot_occupied_aborts() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, 2, b"Br1");
+        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, 2, b"Br2");
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let b1 = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_bracelets(&mut c, b1, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let b2 = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_bracelets(&mut c, b2, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 3, location = sui_combats::equipment)]  // ELevelTooLow
+    fun test_equip_pauldrons_level_too_low_aborts() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        // Level-15 pauldrons; ALICE is level 1.
+        mint_misc_to_alice(&mut scenario, item::pauldrons_type(), 15, 4, b"Epic");
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let p = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_pauldrons(&mut c, p, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 5, location = sui_combats::equipment)]  // EFightLocked
+    fun test_equip_pants_during_fight_lock_aborts() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::pants_type(), 1, 2, b"P");
+
+        ts::next_tx(&mut scenario, PUBLISHER);
+        {
+            let admin = ts::take_from_sender<AdminCap>(&scenario);
+            let mut c = ts::take_shared<Character>(&scenario);
+            let now = clock::timestamp_ms(&clock);
+            character::set_fight_lock(&admin, &mut c, now + 100_000, &clock);
+            ts::return_shared(c);
+            ts::return_to_sender(&scenario, admin);
+        };
+
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let p = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_pants(&mut c, p, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
     #[test]
     fun test_dual_wield_two_mainhand_weapons_happy() {
         let mut scenario = ts::begin(PUBLISHER);

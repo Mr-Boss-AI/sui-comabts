@@ -3,6 +3,8 @@ import type { EquipSlotKey } from "@/lib/sui-contracts";
 
 // Canonical slot order. Also used by the PTB builder to produce a stable
 // moveCall sequence in save transactions (Step 4 will import this).
+// v5.1 (2026-05-28 PM) — 13 slots total. The save_loadout PTB iterates this
+// list, so adding entries here auto-extends the save flow.
 export const EQUIPMENT_SLOT_KEYS: readonly (keyof EquipmentSlots)[] = [
   "weapon",
   "offhand",
@@ -14,6 +16,9 @@ export const EQUIPMENT_SLOT_KEYS: readonly (keyof EquipmentSlots)[] = [
   "ring1",
   "ring2",
   "necklace",
+  "pants",
+  "bracelets",
+  "pauldrons",
 ] as const;
 
 // Empty loadout sentinel — every slot null. Used for initial state and for
@@ -29,6 +34,9 @@ export const EMPTY_EQUIPMENT: EquipmentSlots = {
   ring1: null,
   ring2: null,
   necklace: null,
+  pants: null,
+  bracelets: null,
+  pauldrons: null,
 };
 
 /** Shallow clone of an EquipmentSlots map. Items are shared references;
@@ -46,6 +54,11 @@ export function cloneEquipment(eq: EquipmentSlots): EquipmentSlots {
     ring1: eq.ring1 ?? null,
     ring2: eq.ring2 ?? null,
     necklace: eq.necklace ?? null,
+    // v5.1 — `?? null` fall-through handles wire payloads (e.g. server WS
+    // messages) that pre-date the schema during the v5.0 → v5.1 cutover.
+    pants: eq.pants ?? null,
+    bracelets: eq.bracelets ?? null,
+    pauldrons: eq.pauldrons ?? null,
   };
 }
 
