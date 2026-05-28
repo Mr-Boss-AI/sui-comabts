@@ -101,18 +101,34 @@ const ENOKI_INITIALIZER =
       })
     : null;
 
+// v5.1 (2026-05-28 PM, revised) — session-aware autoConnect.
+//
+// Two-state design driven by sessionStorage:
+//   - First-ever page load in a fresh tab/window OR after an explicit
+//     Disconnect → sessionStorage marker absent → `autoConnect = false`
+//     → user sees the wallet picker. No silent Google re-auth.
+//   - Refresh / navigation during an active session → marker present
+//     → `autoConnect = true` → dapp-kit silently restores the same
+//     wallet using its existing localStorage-persisted "last wallet"
+//     info. Refresh no longer nukes the session.
+//
+// sessionStorage clears automatically when the tab/window closes, so a
+// genuinely fresh start (new tab, browser restart) always lands in the
+// picker. The marker is set/cleared by SessionAutoConnectMarker in
+// `frontend/src/app/client-app.tsx`, which subscribes to
+// `useCurrentAccount()` from inside the DAppKitProvider tree.
+//
+// JWT auth-resume for the WS connection during an active session is
+// unaffected — that's keyed on the server-issued JWT, not on this flag.
+const SESSION_MARKER_KEY = "sui-combats:session-active";
+const hasActiveSession =
+  typeof window !== "undefined" &&
+  window.sessionStorage.getItem(SESSION_MARKER_KEY) === "1";
+
+export const SESSION_MARKER_STORAGE_KEY = SESSION_MARKER_KEY;
+
 export const dAppKit = createDAppKit({
-  // v5.1 (2026-05-28 PM) — UX choice. dapp-kit-core defaults
-  // `autoConnect: true`, which silently re-auths the last-used wallet
-  // (especially Enoki/zkLogin via the persisted session) on every page
-  // load. The user wanted to PICK a login method on each fresh session,
-  // so we disable the silent restore here. The connect-wallet UX still
-  // works: clicking <ConnectButton /> opens the wallet picker; clicking
-  // it while connected exposes a Disconnect option in the dropdown.
-  // JWT auth-resume for the WS connection during an ACTIVE session is
-  // unaffected — that's keyed on the server-issued JWT, not the wallet
-  // adapter's autoConnect.
-  autoConnect: false,
+  autoConnect: hasActiveSession,
   networks: ["testnet", "mainnet"] as const,
   defaultNetwork: "testnet",
   enableBurnerWallet: process.env.NODE_ENV === "development",

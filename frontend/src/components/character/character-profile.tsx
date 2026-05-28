@@ -1177,6 +1177,15 @@ interface CenterInfoCardProps {
   unallocatedPoints: number;
   onAllocateClick: () => void;
   saveControls?: ReactNode;
+  /** v5.1 (2026-05-28 PM) — LIVE pending equipment slice. Was previously
+   * read off of `character.equipment` which is only refreshed when the
+   * server pushes a new character payload (initial load + post-save).
+   * Equip/unequip dispatches update `state.pendingEquipment` immediately;
+   * threading that here makes the PRIMARY ATTRIBUTES bonus numbers
+   * reactive to staged changes — preview before Save Loadout, no refresh
+   * required. `derived` (COMBAT STATS grid) was already reactive via the
+   * parent's useMemo. */
+  equipment: EquipmentSlots;
 }
 
 const ARCHETYPE_TONE: Record<string, "blood" | "steel" | "bronze" | "default"> = {
@@ -1211,6 +1220,8 @@ const STAT_COLORS: Record<"STR" | "DEX" | "INT" | "END", string> = {
   END: "var(--sc-bronze)",
 };
 
+// v5.1 — receives `equipment` so the PRIMARY ATTRIBUTES bonuses recompute
+// reactively from staged equip/unequip changes (see prop comment above).
 function CenterInfoCard({
   character,
   derived,
@@ -1218,6 +1229,7 @@ function CenterInfoCard({
   unallocatedPoints,
   onAllocateClick,
   saveControls,
+  equipment,
 }: CenterInfoCardProps) {
   const xpInLevel = getXpInCurrentLevel(character.level, character.xp);
   const xpSpan = getXpSpanForLevel(character.level);
@@ -1228,11 +1240,13 @@ function CenterInfoCard({
       ? Math.round((character.wins / (character.wins + character.losses)) * 100)
       : 0;
 
-  const eq = (character as unknown as { equipment?: EquipmentSlots }).equipment ?? null;
-  const strBonus = eq ? sumEquipmentStat(eq, "strengthBonus") : 0;
-  const dexBonus = eq ? sumEquipmentStat(eq, "dexterityBonus") : 0;
-  const intBonus = eq ? sumEquipmentStat(eq, "intuitionBonus") : 0;
-  const endBonus = eq ? sumEquipmentStat(eq, "enduranceBonus") : 0;
+  // v5.1 — reactive bonus sum from pending equipment (passed from parent).
+  // Previous code read `character.equipment` which only updates on server
+  // sync; equip/unequip dispatches now reflect immediately in the bars.
+  const strBonus = sumEquipmentStat(equipment, "strengthBonus");
+  const dexBonus = sumEquipmentStat(equipment, "dexterityBonus");
+  const intBonus = sumEquipmentStat(equipment, "intuitionBonus");
+  const endBonus = sumEquipmentStat(equipment, "enduranceBonus");
 
   const statRows: Array<{
     label: "STR" | "DEX" | "INT" | "END";
@@ -1656,6 +1670,7 @@ function StatsColumn({
   onAllocateClick,
   saveControls,
   characterEloDelta,
+  equipment,
 }: {
   character: Character;
   derived: ReturnType<typeof computeDerivedStats>;
@@ -1665,6 +1680,12 @@ function StatsColumn({
   onAllocateClick: () => void;
   saveControls?: ReactNode;
   characterEloDelta?: string;
+  /** v5.1 — Same bug-fix as CenterInfoCard above. Required: pass the
+   * reactive pending equipment slice from the parent so the
+   * PRIMARY ATTRIBUTES bars reflect staged equip/unequip immediately.
+   * StatsColumn is currently unused (kept for back-compat) but the
+   * shape-fix is applied so reinstating it doesn't reintroduce the bug. */
+  equipment: EquipmentSlots;
 }) {
   const winRate =
     character.wins + character.losses > 0
@@ -1675,11 +1696,10 @@ function StatsColumn({
   const xpProgress = getXpProgress(character.level, character.xp);
   const isMaxLevel = character.level >= MAX_LEVEL;
 
-  const eq = (character as unknown as { equipment?: EquipmentSlots }).equipment ?? null;
-  const strBonus = eq ? sumEquipmentStat(eq, "strengthBonus") : 0;
-  const dexBonus = eq ? sumEquipmentStat(eq, "dexterityBonus") : 0;
-  const intBonus = eq ? sumEquipmentStat(eq, "intuitionBonus") : 0;
-  const endBonus = eq ? sumEquipmentStat(eq, "enduranceBonus") : 0;
+  const strBonus = sumEquipmentStat(equipment, "strengthBonus");
+  const dexBonus = sumEquipmentStat(equipment, "dexterityBonus");
+  const intBonus = sumEquipmentStat(equipment, "intuitionBonus");
+  const endBonus = sumEquipmentStat(equipment, "enduranceBonus");
 
   const statRows: Array<{
     label: string;
@@ -2202,6 +2222,7 @@ export function CharacterProfile({
             unallocatedPoints={unallocatedPoints}
             onAllocateClick={() => setShowAllocate(true)}
             saveControls={saveControls}
+            equipment={eq}
           />
 
           {/* RIGHT — Inventory (22% at xl, hides at lg/md/sm and
