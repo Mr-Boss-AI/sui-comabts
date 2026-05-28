@@ -112,6 +112,7 @@ all deferred to v5.2 with reasoning.
 | Frontend Draw modal + W/L/D counter | Type widening + neutral badges across navbar + profile + history | UX completeness (server already records on chain) |
 | Empty `catch {}` sweep | characters.ts, sui-settle.ts, handler.ts, fight-room.ts | Mainnet hygiene |
 | StatBonuses shape unification | Server vs frontend field-name mismatch silently drops 4 stat fields | Mainnet hygiene |
+| Opponent inspector / scout system | Pre-accept preview modal (W/L/D, gear, recent fights) — database-only, no contract change | UX (post-mainnet pre-accept) |
 | Display V2 migration | Hard deadline July 31 2026 | Sui-protocol upgrade |
 
 ---
@@ -177,39 +178,56 @@ should NEVER be committed.
 
 ```
 Welcome back to SUI Combats. v5.1 testnet is LIVE and live-verified.
-Branch feature/v5.1-contracts @ 0ab7677 on origin. Read these in order:
+Branch feature/v5.1-contracts on origin (latest docs commit visible
+in git log; last code change at 0ab7677). Read in order:
 
 1. STATE_OF_PROJECT_2026-05-28.md       (canonical state)
 2. SESSION_HANDOFF_2026-05-28.md        (this doc)
 3. docs/V5.1_RELEASE_NOTES_2026-05-28.md (cut-over protocol + EOD addendum)
 4. deployment.testnet-v5.1.json         (machine-readable IDs)
 
-Then check both servers are up (npm run dev in server/ and frontend/),
-verify /health on :3001 returns ok, and pick ONE of:
+Then bring the runtime up (npm run dev in server/ and frontend/),
+verify /health on :3001 returns ok, and execute the following IN
+ORDER — each step builds on the prior:
 
-(a) Browser-verify the remaining 5 items: mutual-KO settle_tie end-to-end,
-    two-handed weapon blocking with offhand occupied (needs Lv2),
-    OpenWagerRegistry one-wager-per-wallet guard live, Sx wallet on v5.1,
-    full 13-slot single-PTB save_loadout walk.
+STEP 1 — Gear up Sx (the 2nd test wallet).
+    Sx 0x03c33df0…985f has no v5.1 character yet. Mint one, then
+    shop the TREASURY kiosk (52 listings) into a Lv1 loadout that
+    matches a fight matchup against Mr_Boss's Tank build.
+    - Use the picker on the marketplace screen (no special script).
+    - Save loadout, verify all 13 tiles populate, verify PRIMARY
+      ATTRIBUTES bars react live.
 
-(b) Start on v5.2 mainnet-blocker work. Audit ranks:
-    #1 Settlement retry / journal (server, ~300-500 lines + persistence)
-    #2 Confirm-modal gate for every signAndExecuteTransaction (frontend)
-    #3 settle_wager_attested dual-sig (Move + server hash construction)
-    See docs/V5_QA_AUDIT_AND_V5.1_SCOPE_2026-05-28.md §6 for plan.
+STEP 2 — Real geared wager fight, Mr_Boss vs Sx.
+    Open a wager from one wallet; accept from the other. Run the
+    fight to completion. Verify:
+    - Gear bonuses ACTUALLY change combat outcomes (HP / ATK / CRIT
+      / etc. propagate from item stats into the resolver). This is
+      the FIRST end-to-end test that gear matters in a live wager.
+    - settle_wager fires, TREASURY gets 5% platform fee, winner
+      gets the rest (Suiscan-check).
+    - On-chain w/l counter ticks on both characters.
 
-(c) Commit the untracked mint scripts (scripts/mint-ponke-starter-set.ts
-    and scripts/mint-scavenger-lv2-set.ts) if you want the catalog
-    reproducible from the repo. The nft/ asset trees can stay untracked
-    (already pinned on Pinata).
+STEP 3 — Level up both wallets to Lv2 + equip Lv2 gear.
+    - Run more fights (friendly or ranked) until both Mr_Boss and
+      Sx hit Lv2 XP.
+    - Verify allocate_points modal lands cleanly post-fight.
+    - Try equipping any Lv2 item from the Scavenger Uncommon set —
+      should work (was blocked on Lv1 last session).
 
-(d) Address the slot_type-aware picker swap (frontend/src/lib/two-handed-
-    weapons.ts) — drops the v5.0 JS allowlist now that slot_type is on
-    chain. Trivial but should be done while v5.1 is fresh in head.
+STEP 4 — Two-handed weapon blocking test.
+    - Equip a two-handed weapon (slot_type=2; the catalog includes
+      Cursed Greatsword, Skullcrusher Maul, Steel Greatsword if any
+      of them landed in Sx's kit; otherwise mint+transfer one).
+    - Confirm offhand DOF is rejected with EOffhandOccupied (6).
+    - Equip an offhand first, then try to equip a two-handed weapon
+      — confirm EWeaponIsTwoHanded (7) abort.
+    - This exercises the slot_type contract layer in production.
 
-Live runtime has RING_3, not pauldrons. Live wallet test_target is
-Mr_Boss 0xf66978…0f33. TREASURY 0x975f1b…19d4d holds the kiosk and is
-both publisher and admin signer for testnet.
+Live runtime has RING_3, not pauldrons. Live wallet test targets:
+Mr_Boss 0xf66978…0f33 (already geared Tank), Sx 0x03c33df0…985f
+(empty on v5.1, needs Step 1 work). TREASURY 0x975f1b…19d4d holds
+the kiosk and is both publisher + admin signer for testnet.
 ```
 
 ---
