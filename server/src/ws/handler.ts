@@ -954,6 +954,19 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
       sendError(client, 'Minimum wager is 0.1 SUI');
       return;
     }
+    // v5.1 mainnet-blocker — hard cap on wager stake. Bounds blast radius
+    // of a single bug or admin-key compromise. Compare in MIST (BigInt) to
+    // avoid float-point drift on large values.
+    const wagerMist = BigInt(Math.round(wagerAmount * 1_000_000_000));
+    if (wagerMist > CONFIG.MAX_WAGER_SUI_MIST) {
+      const capSui = Number(CONFIG.MAX_WAGER_SUI_MIST) / 1_000_000_000;
+      sendError(client, `Wager exceeds maximum of ${capSui} SUI per match`);
+      console.warn(
+        `[Wager] Rejected over-cap create: caller=${client.walletAddress?.slice(0, 10)} ` +
+        `wagerAmount=${wagerAmount} SUI cap=${capSui} SUI`,
+      );
+      return;
+    }
     if (!wagerMatchId) {
       sendError(client, 'On-chain wager escrow required. Sign the create_wager transaction first.');
       return;

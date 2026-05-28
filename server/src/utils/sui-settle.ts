@@ -308,12 +308,93 @@ export async function adminCancelWagerOnChain(
 ): Promise<{ digest: string }> {
   console.log(`[Wager] Admin-cancelling ${wagerMatchId}`);
   const { digest } = await execAsTreasury('Wager.adminCancel', (tx) => {
+    const args: any[] = [tx.object(wagerMatchId)];
+    // v5.1 — registry arg comes BEFORE clock in admin_cancel_wager.
+    // On v5.0 (no registry env), call with the v5.0 signature.
+    if (CONFIG.OPEN_WAGER_REGISTRY_ID) {
+      args.push(tx.object(CONFIG.OPEN_WAGER_REGISTRY_ID));
+    }
+    args.push(tx.object(CLOCK));
     tx.moveCall({
       target: `${PKG()}::arena::admin_cancel_wager`,
-      arguments: [tx.object(wagerMatchId), tx.object(CLOCK)],
+      arguments: args,
     });
   });
   console.log(`[Wager] Admin-cancelled. Tx: ${digest}`);
+  return { digest };
+}
+
+/**
+ * v5.1 — TREASURY-only mutual-KO settlement. 100% refund to each player, no
+ * platform fee. Emits `WagerTied` (vs `WagerRefunded` for admin-cancel-ACTIVE).
+ *
+ * Routes:
+ *   - If `OPEN_WAGER_REGISTRY_ID` is set (v5.1 env) → calls `settle_tie`.
+ *   - Else (v5.0 env) → falls back to `admin_cancel_wager`. Behaviour is
+ *     functionally identical for ACTIVE wagers (admin_cancel splits 50/50 of
+ *     a 2× stake escrow = stake each, same as settle_tie). Only the event
+ *     type and the absence of platform_fee differ, neither of which affects
+ *     player balances. The v5.0 fallback keeps the testnet safety net alive
+ *     during the cutover window.
+ */
+export async function settleTieOnChain(
+  wagerMatchId: string,
+): Promise<{ digest: string }> {
+  if (!CONFIG.OPEN_WAGER_REGISTRY_ID) {
+    console.log(
+      `[Wager] settle_tie — registry env unset, falling back to admin_cancel_wager for ${wagerMatchId}`,
+    );
+    return adminCancelWagerOnChain(wagerMatchId);
+  }
+  console.log(`[Wager] Settle-tie ${wagerMatchId}`);
+  const { digest } = await execAsTreasury('Wager.settleTie', (tx) => {
+    tx.moveCall({
+      target: `${PKG()}::arena::settle_tie`,
+      arguments: [
+        tx.object(wagerMatchId),
+        tx.object(CONFIG.OPEN_WAGER_REGISTRY_ID),
+        tx.object(CLOCK),
+      ],
+    });
+  });
+  console.log(`[Wager] Settle-tie complete. Tx: ${digest}`);
+  return { digest };
+}
+
+/**
+ * v5.1 — Persist draw outcome to the Character NFT. Increments `draws`,
+ * applies XP, no rating change. Falls back to legacy `update_after_fight`
+ * with `won=false` when running against a v5.0 package (where the field
+ * doesn't exist). On v5.0 this means draws are recorded as losses on chain,
+ * which is the existing behaviour — acceptable until v5.1 cutover.
+ */
+export async function updateCharacterDrawOnChain(
+  characterObjectId: string,
+  xpGained: number,
+): Promise<{ digest: string }> {
+  const isV51 = !!CONFIG.CHARACTER_REGISTRY_ID; // proxy signal for v5.1 env
+  if (!isV51) {
+    console.log(
+      `[Character] update_after_fight_draw — v5.1 env unset, falling back to update_after_fight(won=false) for ${characterObjectId}`,
+    );
+    // Cap xpGained to MAX_XP_PER_FIGHT (1000) — chain enforces it too.
+    const cappedXp = Math.min(xpGained, 1000);
+    await updateCharacterOnChain(characterObjectId, false, cappedXp, 0);
+    return { digest: '(v5.0-fallback)' };
+  }
+  console.log(`[Character] Update-draw on-chain: ${characterObjectId} (xp=${xpGained})`);
+  const { digest } = await execAsTreasury('Character.updateAfterFightDraw', (tx) => {
+    tx.moveCall({
+      target: `${PKG()}::character::update_after_fight_draw`,
+      arguments: [
+        tx.object(CONFIG.ADMIN_CAP_ID),
+        tx.object(characterObjectId),
+        tx.pure.u64(xpGained),
+        tx.object(CLOCK),
+      ],
+    });
+  });
+  console.log(`[Character] Update-draw complete. Tx: ${digest}`);
   return { digest };
 }
 

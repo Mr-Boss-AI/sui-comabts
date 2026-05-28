@@ -29,6 +29,14 @@ export const CONFIG = {
   TRANSFER_POLICY_ID: optional('TRANSFER_POLICY_ID'),
   // TransferPolicyCap<Item> object id. Optional — only the publisher needs it.
   TRANSFER_POLICY_CAP_ID: optional('TRANSFER_POLICY_CAP_ID'),
+
+  // v5.1 — Shared registry object IDs. Optional during the v5.0 → v5.1
+  // transition (server gates v5.1 PTB construction on their presence). On
+  // v5.1, all three must be set; the server's startup sanity check warns if
+  // SUI_PACKAGE_ID looks like a v5.1 deploy but registries are unset.
+  CHARACTER_REGISTRY_ID: optional('CHARACTER_REGISTRY_ID'),
+  OPEN_WAGER_REGISTRY_ID: optional('OPEN_WAGER_REGISTRY_ID'),
+  KIOSK_REGISTRY_ID: optional('KIOSK_REGISTRY_ID'),
   // Publisher wallet address (matches the hardcoded TREASURY in arena.move).
   // Used for sanity check + log lines. Required.
   PLATFORM_TREASURY: required('PLATFORM_TREASURY'),
@@ -36,6 +44,14 @@ export const CONFIG = {
   SUI_TREASURY_PRIVATE_KEY: required('SUI_TREASURY_PRIVATE_KEY'),
 
   WAGER_ACCEPT_TIMEOUT_MS: 30_000,
+  // v5.1 mainnet-blocker — hard cap on wager stake to bound the blast radius
+  // of a single bug or admin-key compromise. 100 SUI on testnet is generous
+  // for QA; tune down on mainnet via env.
+  MAX_WAGER_SUI_MIST: BigInt(optional('MAX_WAGER_SUI_MIST', '100000000000')),  // 100 SUI default
+  // v5.1 mainnet-blocker — per-wallet WS message rate limit (msgs / minute).
+  // Defends chat, queue_fight, create_wager from spam / DoS. Configurable;
+  // increase for tournament events.
+  WS_MSG_RATE_LIMIT_PER_MIN: parseInt(optional('WS_MSG_RATE_LIMIT_PER_MIN', '120'), 10),
   // Fight-lock duration set on fight start. Must be < chain's MAX_LOCK_MS (1 hour).
   FIGHT_LOCK_DURATION_MS: 10 * 60 * 1000,
 

@@ -88,14 +88,33 @@ export function humanizeChainError(
  * Silent on success. The `ctxLabel` (e.g. `"accept_wager"`) is included
  * in the thrown message so the call-site is obvious in the catch block.
  *
- * Recognised failure shapes (in priority order):
- *   1. `effects.status.status !== "success"` (success-shaped wrapper, abort)
- *   2. `result.$kind === "FailedTransaction"` (top-level failure wrapper)
- *   3. `result.FailedTransaction.error` (legacy / wallet-specific)
+ * **v5.1 SDK 2.16 shape (canonical):**
+ * `simulateTransaction` and `signAndExecuteTransaction` return a discriminated
+ * union typed as `SimulateTransactionResult<Include>` in
+ * `@mysten/sui/dist/cjs/client/types.d.ts:350-362`:
  *
- * Treats any `result.$kind === "Transaction"` without an embedded
- * `FailedTransaction` as success — matches the post-Phase-A SDK shape
- * we get from `CurrentAccountSigner.signAndExecuteTransaction`.
+ *   { $kind: 'Transaction',        Transaction:        Transaction<Include>, FailedTransaction?: never, commandResults }
+ * | { $kind: 'FailedTransaction',  FailedTransaction: Transaction<Include>, Transaction?: never,        commandResults }
+ *
+ * Where the inner `Transaction<Include>` has shape
+ * `{ digest, signatures, status: ExecutionStatus, effects?: TransactionEffects, ... }`
+ * — `status` lives at the top of the inner Transaction, NOT at `.effects.status`.
+ * `.effects` is only present when `include: { effects: true }` was passed.
+ *
+ * This function reads in the following priority order:
+ *   1. `result.$kind === "FailedTransaction"` → ABORT (read error from
+ *      FailedTransaction.status or .error)
+ *   2. `result.$kind === "Transaction"` → SUCCESS short-circuit (the type
+ *      union guarantees the inner status is success-flavoured)
+ *   3. Legacy / non-discriminated shapes (pre-2.16 SDK or wallet-specific):
+ *      try `.effects.status`, `.Transaction.effects.status`, `.error`, `.message`.
+ *      These paths exist as a safety net only — current SDK never hits them.
+ *
+ * 2026-05-27 incident note: pre-hardening, the function fell through the
+ * legacy paths when the SDK shape changed in 2.16, accidentally landing on
+ * the `$kind === "Transaction"` short-circuit at the end. Behaviourally
+ * correct (success → silent) but logically reading the wrong field. This
+ * version reads the canonical 2.16 discriminator first.
  */
 export function assertTxSucceeded(
   result: unknown,
@@ -107,13 +126,57 @@ export function assertTxSucceeded(
     throw new Error(`${ctxLabel} returned no result`);
   }
 
+  // v5.1 canonical 2.16 path — discriminator first.
+  if (r.$kind === "FailedTransaction") {
+    const failed = r.FailedTransaction;
+    const innerStatus = failed?.status;
+    const errStr: string =
+      (innerStatus && typeof innerStatus.error === "string" && innerStatus.error) ||
+      (typeof failed?.error === "string" && failed.error) ||
+      (typeof failed?.errorMessage === "string" && failed.errorMessage) ||
+      (typeof failed?.cause === "string" && failed.cause) ||
+      "";
+    console.error(`[Tx:${ctxLabel}] Aborted (\\$kind=FailedTransaction). Raw:`, r);
+    const humanized = humanizeChainError(errStr, abortCodes);
+    throw new Error(
+      humanized
+        ? `${ctxLabel} failed: ${humanized}`
+        : errStr
+          ? `${ctxLabel} failed: ${errStr}`
+          : `${ctxLabel} aborted on-chain (see console for raw result)`,
+    );
+  }
+  if (r.$kind === "Transaction") {
+    // Discriminated success — type union guarantees no FailedTransaction sibling.
+    // Defence-in-depth: if the inner Transaction.status exists and reads
+    // "failure", treat it as abort. Per the SDK type, this branch shouldn't
+    // be reachable, but we guard against future shape drift.
+    const innerStatus = r.Transaction?.status;
+    if (innerStatus && innerStatus.status === "failure") {
+      const errStr: string =
+        (typeof innerStatus.error === "string" && innerStatus.error) || "";
+      console.error(`[Tx:${ctxLabel}] Aborted (Transaction.status=failure). Raw:`, r);
+      const humanized = humanizeChainError(errStr, abortCodes);
+      throw new Error(
+        humanized
+          ? `${ctxLabel} failed: ${humanized}`
+          : errStr
+            ? `${ctxLabel} failed: ${errStr}`
+            : `${ctxLabel} aborted on-chain (see console for raw result)`,
+      );
+    }
+    return;
+  }
+
+  // ── Legacy / pre-2.16 path (kept as safety net) ──────────────────────────
+  // Some wallet implementations historically returned a non-discriminated
+  // shape with effects.status directly. Read both possible nesting levels
+  // (.effects.status and .Transaction.effects.status) so a regression in a
+  // single wallet doesn't blind-fail.
   const txData = r.Transaction || r;
   const status = txData?.effects?.status || r.effects?.status;
 
-  // Happy path — explicit success in the effects, or a Transaction wrapper
-  // with no FailedTransaction sibling.
   if (status && (status.status === "success" || status === "success")) return;
-  if (r.$kind === "Transaction" && !r.FailedTransaction) return;
 
   const errStr: string =
     (status && typeof status.error === "string" && status.error) ||
@@ -124,7 +187,7 @@ export function assertTxSucceeded(
     (typeof r.message === "string" && r.message) ||
     "";
 
-  console.error(`[Tx:${ctxLabel}] Aborted. Raw result:`, r);
+  console.error(`[Tx:${ctxLabel}] Aborted (legacy-shape path). Raw:`, r);
   const humanized = humanizeChainError(errStr, abortCodes);
   throw new Error(
     humanized

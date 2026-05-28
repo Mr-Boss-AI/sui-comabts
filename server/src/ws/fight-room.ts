@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { settleWagerOnChain } from '../utils/sui-settle';
-import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain } from '../utils/sui-settle';
+import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain, settleTieOnChain, updateCharacterDrawOnChain, adminCancelWagerOnChain } from '../utils/sui-settle';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import {
   applyXp,
@@ -726,7 +726,14 @@ function finishFight(
       }
     })();
   } else if (draw) {
-    // Draw: both get small XP, no rating change
+    // v5.1 — Mutual-KO outcome. (1) Server local XP bump + history record;
+    // (2) on-chain `update_after_fight_draw` for both Characters so the
+    // `draws: u32` counter increments (falls back to update_after_fight
+    // with won=false on v5.0 env); (3) for wager fights, `settle_tie` on
+    // the WagerMatch (falls back to admin_cancel_wager on v5.0 env).
+    // Pre-v5.1 the draw branch did NONE of the on-chain work — every
+    // tied wager stranded the escrow (incident 2026-05-28 wager
+    // 0xf2f3982266…).
     const charA = getCharacterById(fight.playerA.characterId);
     const charB = getCharacterById(fight.playerB.characterId);
     if (charA) {
@@ -738,13 +745,27 @@ function finishFight(
         type: fight.type,
         opponentName: charB?.name || 'Unknown',
         opponentWallet: fight.playerB.walletAddress,
-        result: 'loss',
+        // v5.1 — server-side history records 'draw' (frontend widens the
+        // FightHistoryEntry.result type from 'win' | 'loss' to include 'draw'
+        // and renders the neutral badge). On v5.0 frontends, the value will
+        // round-trip through any unknown-result fallback.
+        result: 'draw' as any,
         ratingChange: 0,
         xpGained: xp,
         lootGained: null,
         turns: fight.turn,
         timestamp: Date.now(),
       });
+      // v5.1 — On-chain draw recording. Fire-and-forget; failures log but
+      // don't break the user-visible flow (server cache already updated).
+      if (charA.onChainObjectId) {
+        updateCharacterDrawOnChain(charA.onChainObjectId, xp).catch((err) => {
+          console.error(
+            '[Character] update_after_fight_draw (A) failed:',
+            err?.message || err,
+          );
+        });
+      }
     }
     if (charB) {
       const xp = calculateXpReward(fight.type, false, charB.rating, charB.rating);
@@ -755,12 +776,41 @@ function finishFight(
         type: fight.type,
         opponentName: charA?.name || 'Unknown',
         opponentWallet: fight.playerA.walletAddress,
-        result: 'loss',
+        result: 'draw' as any,
         ratingChange: 0,
         xpGained: xp,
         lootGained: null,
         turns: fight.turn,
         timestamp: Date.now(),
+      });
+      if (charB.onChainObjectId) {
+        updateCharacterDrawOnChain(charB.onChainObjectId, xp).catch((err) => {
+          console.error(
+            '[Character] update_after_fight_draw (B) failed:',
+            err?.message || err,
+          );
+        });
+      }
+    }
+
+    // v5.1 — Settle the wager on chain. 100% refund both sides via
+    // settle_tie (or admin_cancel fallback on v5.0). Pre-v5.1 this was the
+    // missing piece that stranded the escrow.
+    if (fight.type === 'wager' && fight.wagerMatchId) {
+      console.log(`[Wager] Draw — settling tie on chain for ${fight.wagerMatchId}`);
+      settleTieOnChain(fight.wagerMatchId).catch((err) => {
+        console.error(
+          `[Wager] settle_tie failed for ${fight.wagerMatchId}:`,
+          err?.message || err,
+        );
+        // Last-resort safety net: try admin_cancel_wager. Same outcome for
+        // ACTIVE wagers (50/50 split = stake each).
+        adminCancelWagerOnChain(fight.wagerMatchId!).catch((fallbackErr) => {
+          console.error(
+            `[Wager] admin_cancel fallback ALSO failed for ${fight.wagerMatchId}:`,
+            fallbackErr?.message || fallbackErr,
+          );
+        });
       });
     }
   }
