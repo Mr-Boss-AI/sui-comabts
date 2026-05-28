@@ -133,7 +133,7 @@ export function MiniEquipmentFrame({
         }}
       >
         <SlotTile slot="helmet" item={equipment.helmet} size={bigSize} emptyLabel="Helmet" />
-        <SlotTile slot={null} item={null} future futureLabel="Shoulders" size={bigSize} />
+        <SlotTile slot="pauldrons" item={equipment.pauldrons} size={bigSize} emptyLabel="Pauldrons" />
         <SlotTile slot="weapon" item={equipment.weapon} size={bigSize} emptyLabel="Weapon" />
         <SlotTile slot="chest" item={equipment.chest} size={bigSize} emptyLabel="Chest" />
         <SlotTile
@@ -186,11 +186,11 @@ export function MiniEquipmentFrame({
         >
           <SlotTile slot="ring1" item={equipment.ring1} size={ringSlotSize} />
           <SlotTile slot="ring2" item={equipment.ring2} size={ringSlotSize} />
-          <SlotTile slot={null} item={null} future futureLabel="Ring 3" size={ringSlotSize} />
+          <SlotTile slot="bracelets" item={equipment.bracelets} size={ringSlotSize} emptyLabel="Bracelets" />
         </div>
         <SlotTile slot="gloves" item={equipment.gloves} size={bigSize} emptyLabel="Gloves" />
         <SlotTile slot="offhand" item={equipment.offhand} size={bigSize} emptyLabel="Off-hand" />
-        <SlotTile slot={null} item={null} future futureLabel="Pants" size={bigSize} />
+        <SlotTile slot="pants" item={equipment.pants} size={bigSize} emptyLabel="Pants" />
         <SlotTile slot="boots" item={equipment.boots} size={bigSize} emptyLabel="Boots" />
       </div>
     </div>
