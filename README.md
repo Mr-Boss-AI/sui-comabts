@@ -9,16 +9,22 @@ the winner.
 Inspired by the Russian browser MMORPG *combats.ru / oldbk.ru*
 (Бойцовский Клуб). First open-source RPG combat framework for Sui.
 
-> **Status (2026-05-04):** v5 testnet hardened — Bucket 2 closed.
-> Branch `feature/v5-redeploy`. Mainnet deploy gated on the v5.1
-> republish bundle (player-signed settlement, `CharacterRegistry`,
-> `OpenWagerRegistry`, `slot_type` Item field, `burn_character`,
-> draws counter, on-chain loot mint). Latest comprehensive snapshot
-> (bug ledger, parking lot, what's-NOT-in-the-codebase, full commit
-> log) lives in [`STATE_OF_PROJECT_2026-05-04.md`](STATE_OF_PROJECT_2026-05-04.md);
-> high-level state in [`STATUS.md`](STATUS.md); deploy protocol in
-> [`MAINNET_PREP.md`](MAINNET_PREP.md); session-by-session
-> [`CHANGELOG.md`](CHANGELOG.md).
+> **Status (2026-05-28):** v5.1 contracts LIVE on testnet — package
+> `0x7853412fb905e73cf8d2ba3f8377045720069c25b5e656abc926119659641518`.
+> Bundle includes: CharacterRegistry, OpenWagerRegistry, KioskRegistry,
+> `settle_tie` (mutual-KO 100% refund), `draws: u32` counter on
+> Character, `slot_type: u8` on Item (chain-side two-handed enforcement),
+> rarity stat-budget enforcement, `burn_character`, `create_or_get_player_kiosk`.
+> Move tests 64/64 PASS. Branch `feature/v5.1-contracts`. v5.0 testnet
+> (package `0xa7dc2dab…`) keeps running unchanged until cut-over (the
+> dev servers point at v5.0 in their `.env`s; cut-over protocol in
+> [`docs/V5.1_RELEASE_NOTES_2026-05-28.md`](docs/V5.1_RELEASE_NOTES_2026-05-28.md)).
+> Deferred to v5.2 (trust + content bundle): `sui::random` for loot,
+> `respec_character`, `settle_wager_attested` (dual-sig), three new slots.
+> Latest QA + scope audit: [`docs/V5_QA_AUDIT_AND_V5.1_SCOPE_2026-05-28.md`](docs/V5_QA_AUDIT_AND_V5.1_SCOPE_2026-05-28.md);
+> per-phase overnight journal: [`docs/V5.1_OVERNIGHT_LOG_2026-05-28.md`](docs/V5.1_OVERNIGHT_LOG_2026-05-28.md);
+> deploy protocol: [`MAINNET_PREP.md`](MAINNET_PREP.md);
+> session changelog: [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
