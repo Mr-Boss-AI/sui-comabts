@@ -42,6 +42,23 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   11: "Bracelets",
 };
 
+// v5.1 — slot_type primitive. Mirrors contracts/sources/item.move SLOT_*
+// constants. The chain stamps slot_type on every minted Item and consumes
+// it in equipment.move equip_weapon / equip_offhand to enforce the
+// shield-vs-dual-wield-vs-two-handed trinity. The frontend reads the
+// chain field directly (via fetchOwnedItems / fetchKioskItems / server
+// WS payloads sanitized through utils/wire-sanitize.ts) so picker and
+// loadout-save logic never need a hardcoded name allowlist again.
+export const SLOT_TYPES = {
+  /** Single-handed mainhand weapon. Goes in the weapon slot only. */
+  MAINHAND: 0,
+  /** Off-hand item (shield, off-hand weapon for dual-wield). Goes in offhand only. */
+  OFFHAND: 1,
+  /** Two-handed weapon. Goes in the weapon slot AND requires the offhand slot empty. */
+  BOTH_HANDS: 2,
+} as const;
+export type SlotType = (typeof SLOT_TYPES)[keyof typeof SLOT_TYPES];
+
 export const RARITIES = {
   COMMON: 1,
   UNCOMMON: 2,
@@ -201,6 +218,14 @@ export interface Item {
   classReq: number;
   levelReq: number;
   rarity: Rarity;
+  /** v5.1 — chain `Item.slot_type` (`SLOT_TYPES.MAINHAND` | `OFFHAND` |
+   *  `BOTH_HANDS`). Optional because legacy server-only NPC items have no
+   *  chain representation and therefore no slot_type — undefined is
+   *  treated as MAINHAND for compatibility, which is the only sane
+   *  default for non-weapon armor pieces anyway. Populated by every
+   *  chain hydrator (lib/sui-contracts.ts) and by the server wire
+   *  sanitizer for wire-borne items. */
+  slotType?: SlotType;
   statBonuses: StatBonuses;
   minDamage: number;
   maxDamage: number;

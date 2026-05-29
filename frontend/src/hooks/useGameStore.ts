@@ -94,6 +94,14 @@ export interface GameState {
   // wager lock that didn't register with the server.
   errorSticky: boolean;
 
+  // v5.1 — Educational center-screen modal for the two-handed-weapon
+  // conflict. Fires only when the user *attempts* an invalid action
+  // (staging an off-hand while a 2H weapon is equipped); the correct
+  // unequip-first flow never sets this. Self-extinguishing: as players
+  // learn the rule, the popup naturally stops appearing — no
+  // localStorage "seen-it" flag needed.
+  twoHandedConflictModalOpen: boolean;
+
   // Bump to force GameProvider to re-fetch on-chain items + character NFT.
   // Incremented after every successful on-chain equip/unequip so the UI reconverges
   // with chain truth (especially important: equipped items become DOFs and should
@@ -225,6 +233,7 @@ export const initialGameState: GameState = {
   errorMessage: null,
   errorTimestamp: null,
   errorSticky: false,
+  twoHandedConflictModalOpen: false,
   onChainRefreshTrigger: 0,
   opponentDisconnect: null,
   levelUpEvent: null,
@@ -298,6 +307,8 @@ export type GameAction =
   | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
   | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
   | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
+  | { type: "SHOW_TWO_HANDED_CONFLICT_MODAL" }
+  | { type: "HIDE_TWO_HANDED_CONFLICT_MODAL" }
   | { type: "SET_AUTH_PHASE"; phase: AuthPhase }
   | { type: "SET_OPPONENT_DISCONNECT"; payload: GameState["opponentDisconnect"] }
   | { type: "SET_LEVEL_UP_EVENT"; payload: GameState["levelUpEvent"] }
@@ -557,6 +568,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         errorTimestamp: action.message ? Date.now() : null,
         errorSticky: !!(action.message && action.sticky),
       };
+    case "SHOW_TWO_HANDED_CONFLICT_MODAL":
+      if (state.twoHandedConflictModalOpen) return state;
+      return { ...state, twoHandedConflictModalOpen: true };
+    case "HIDE_TWO_HANDED_CONFLICT_MODAL":
+      if (!state.twoHandedConflictModalOpen) return state;
+      return { ...state, twoHandedConflictModalOpen: false };
     case "SET_AUTH_PHASE":
       if (state.authPhase === action.phase) return state;
       return { ...state, authPhase: action.phase };

@@ -549,6 +549,11 @@ async function fetchItemNft(itemId: string): Promise<Item> {
     itemType: Number(fields.item_type ?? 1) as ItemType,
     rarity: Number(fields.rarity ?? 1) as Rarity,
     levelReq: Number(fields.level_req ?? 1),
+    // v5.1 — chain Item.slot_type. Carried through to the frontend so the
+    // marketplace browser can render the two-handed badge and so a 2H
+    // weapon bought into a kiosk still type-matches when the player
+    // retrieves and equips it.
+    slotType: Number(fields.slot_type ?? 0),
     statBonuses: {
       strength: Number(fields.strength_bonus ?? 0),
       dexterity: Number(fields.dexterity_bonus ?? 0),
@@ -694,6 +699,10 @@ export function listingToWire(l: ServerMarketplaceListing): Record<string, unkno
       rarity: l.item.rarity,
       classReq: 0,
       levelReq: l.item.levelReq,
+      // v5.1 — slot_type carried into the marketplace wire payload so a
+      // 2H weapon listing renders the badge on the marketplace browser
+      // and stays correctly typed when purchased into the buyer's kiosk.
+      slotType: l.item.slotType ?? 0,
       minDamage: l.item.minDamage ?? 0,
       maxDamage: l.item.maxDamage ?? 0,
       statBonuses: {

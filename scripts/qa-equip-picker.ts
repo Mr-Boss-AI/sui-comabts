@@ -21,10 +21,11 @@
  */
 import {
   buildSlotPickerEntries,
+  getEquipTargetsForItem,
   type PickerEntry,
 } from '../frontend/src/lib/equipment-picker';
 import type { EquipmentSlots, Item, ItemType, Rarity } from '../frontend/src/types/game';
-import { ITEM_TYPES } from '../frontend/src/types/game';
+import { ITEM_TYPES, SLOT_TYPES } from '../frontend/src/types/game';
 
 let passes = 0;
 let failures = 0;
@@ -316,12 +317,15 @@ function main(): void {
     weapon: null, offhand: null, helmet: null, chest: null, gloves: null,
     boots: null, belt: null, ring1: null, ring2: null, necklace: null,
   };
-  const greatsword = mkItem({ id: '0xCursed', name: 'Cursed Greatsword', itemType: WEAPON, levelReq: 5 });
-  const maul       = mkItem({ id: '0xMaul',   name: 'Skullcrusher Maul', itemType: WEAPON, levelReq: 6 });
-  const steelGS    = mkItem({ id: '0xSteel',  name: 'Steel Greatsword',  itemType: WEAPON, levelReq: 5 });
-  const oneHand    = mkItem({ id: '0x1H',     name: 'Longsword',         itemType: WEAPON, levelReq: 1 });
-  const buckler    = mkItem({ id: '0xBuck',   name: 'Wooden Buckler',    itemType: SHIELD, levelReq: 1 });
-  const dirk       = mkItem({ id: '0xDirk',   name: 'Parrying Dirk',     itemType: WEAPON, levelReq: 1 });
+  // 2026-05-29 — these used to be identified as 2H by name (TWO_HANDED_NAMES
+  // allowlist, now deleted). v5.1 mints stamp slot_type on chain and the
+  // frontend reads it directly; the gauntlet now mirrors that.
+  const greatsword = mkItem({ id: '0xCursed', name: 'Cursed Greatsword', itemType: WEAPON, levelReq: 5, slotType: SLOT_TYPES.BOTH_HANDS });
+  const maul       = mkItem({ id: '0xMaul',   name: 'Skullcrusher Maul', itemType: WEAPON, levelReq: 6, slotType: SLOT_TYPES.BOTH_HANDS });
+  const steelGS    = mkItem({ id: '0xSteel',  name: 'Steel Greatsword',  itemType: WEAPON, levelReq: 5, slotType: SLOT_TYPES.BOTH_HANDS });
+  const oneHand    = mkItem({ id: '0x1H',     name: 'Longsword',         itemType: WEAPON, levelReq: 1, slotType: SLOT_TYPES.MAINHAND });
+  const buckler    = mkItem({ id: '0xBuck',   name: 'Wooden Buckler',    itemType: SHIELD, levelReq: 1, slotType: SLOT_TYPES.OFFHAND });
+  const dirk       = mkItem({ id: '0xDirk',   name: 'Parrying Dirk',     itemType: WEAPON, levelReq: 1, slotType: SLOT_TYPES.MAINHAND });
 
   // a) weapon picker, no pendingEquipment passed → backward-compat: 2H rule ignored.
   const noPending = buildSlotPickerEntries('weapon', [greatsword, oneHand], [], new Set(), 9);
@@ -433,6 +437,56 @@ function main(): void {
     mkItem({ id: '0xHelm', name: 'A Helmet', itemType: HELMET, levelReq: 1 }),
   ], [], new Set(), 9, { ...EMPTY_EQ, weapon: maul });
   eq(helmetPick[0].locked, false, 'helmet slot ignores 2H weapon in `weapon` slot');
+
+  // ===========================================================================
+  // 12.5 — getEquipTargetsForItem: inverse picker for the "EQUIP TO:" panel.
+  //
+  // The 2026-05-29 Nail Plank report turned up a second offhand surface:
+  // the inventory item-detail panel showed "EQUIP TO: Weapon and
+  // Off-hand" for a two-handed weapon. SLOT_TO_ITEM_TYPE.offhand
+  // includes WEAPON (dual-wield is a real config), but a 2H weapon must
+  // never offer the offhand row. This block pins that.
+  // ===========================================================================
+  console.log('\n[12.5] getEquipTargetsForItem — inverse picker / "EQUIP TO" panel');
+
+  // a) Single-hand weapon → weapon + offhand (dual-wield eligible).
+  const tgt1H = getEquipTargetsForItem(oneHand);
+  deepEq([...tgt1H].sort(), ['offhand', 'weapon'], '1H Longsword → [weapon, offhand]');
+
+  // b) Two-handed weapon → weapon only. THIS is the Nail Plank fix.
+  const tgtMaul = getEquipTargetsForItem(maul);
+  deepEq(tgtMaul, ['weapon'], '2H Skullcrusher Maul → [weapon] only (no offhand)');
+  const tgtCursed = getEquipTargetsForItem(greatsword);
+  deepEq(tgtCursed, ['weapon'], '2H Cursed Greatsword → [weapon] only');
+  const tgtSteel = getEquipTargetsForItem(steelGS);
+  deepEq(tgtSteel, ['weapon'], '2H Steel Greatsword → [weapon] only');
+
+  // c) Nail Plank case — a 2H weapon with a name NOT in any old allowlist.
+  const nailPlank = mkItem({
+    id: '0xNail', name: 'Nail Plank',
+    itemType: WEAPON, levelReq: 3, slotType: SLOT_TYPES.BOTH_HANDS,
+  });
+  deepEq(getEquipTargetsForItem(nailPlank), ['weapon'],
+    'Nail Plank (2H, name never on the old allowlist) → [weapon] only');
+
+  // d) Shield → offhand only (unaffected by 2H rule).
+  deepEq(getEquipTargetsForItem(buckler), ['offhand'], 'Shield → [offhand] only');
+
+  // e) Legacy NPC weapon (no slotType set) → both rows, matching pre-v5.1
+  //    behavior. NPC loot never includes 2H weapons by construction.
+  const npcSword = mkItem({
+    id: 'npc-1', name: 'NPC Sword',
+    itemType: WEAPON, levelReq: 1, /* slotType intentionally omitted */
+  });
+  deepEq([...getEquipTargetsForItem(npcSword)].sort(), ['offhand', 'weapon'],
+    'Legacy NPC weapon (slotType undefined) → [weapon, offhand]');
+
+  // f) Non-weapon items unaffected — pin a few representative slots.
+  const helmet = mkItem({ id: '0xH', name: 'Helm', itemType: HELMET, levelReq: 1 });
+  const ring = mkItem({ id: '0xR', name: 'Ring', itemType: RING, levelReq: 1 });
+  deepEq(getEquipTargetsForItem(helmet), ['helmet'], 'Helmet → [helmet]');
+  deepEq([...getEquipTargetsForItem(ring)].sort(), ['ring1', 'ring2', 'ring3'].sort(),
+    'Ring → [ring1, ring2, ring3]');
 
   // ===========================================================================
   // 13 — large input perf sanity (1000 items resolve in <100 ms locally)

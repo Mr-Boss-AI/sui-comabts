@@ -11,7 +11,6 @@ import { ListItemModal } from "@/components/marketplace/list-item-modal";
 import {
   ITEM_TYPES,
   RARITY_LABELS,
-  SLOT_TO_ITEM_TYPE,
   EQUIPMENT_SLOT_LABELS,
   type ItemType,
   type Rarity,
@@ -285,16 +284,12 @@ function FilterIconToggle({
   );
 }
 
-// Item type -> compatible equipment slots
-function getSlotsForItem(item: Item): (keyof EquipmentSlots)[] {
-  const slots: (keyof EquipmentSlots)[] = [];
-  for (const [slot, types] of Object.entries(SLOT_TO_ITEM_TYPE)) {
-    if (types.includes(item.itemType)) {
-      slots.push(slot as keyof EquipmentSlots);
-    }
-  }
-  return slots;
-}
+// Item type -> compatible equipment slots. Implementation lives in
+// lib/equipment-picker.ts (slot_type-aware: filters out the offhand row
+// for two-handed weapons so the "EQUIP TO:" panel doesn't offer a
+// chain-illegal target). Re-exported via this local alias to minimize
+// churn in the JSX below.
+import { getEquipTargetsForItem as getSlotsForItem } from "@/lib/equipment-picker";
 
 export function Inventory() {
   const { state, dispatch } = useGame();

@@ -27,6 +27,7 @@ import { MyKioskPanel } from "@/components/marketplace/my-kiosk-panel";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorToast } from "@/components/ui/error-toast";
 import { LevelUpModal } from "@/components/character/level-up-modal";
+import { TwoHandedConflictModal } from "@/components/character/two-handed-conflict-modal";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 
@@ -325,6 +326,7 @@ export function GameScreen() {
       <Navbar />
       <ErrorToast />
       <LevelUpModal />
+      <TwoHandedConflictModal />
       <div
         style={{
           width: "100%",

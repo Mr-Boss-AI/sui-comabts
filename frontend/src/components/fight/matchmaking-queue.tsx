@@ -13,7 +13,7 @@ import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/li
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager, canAcceptWagerWithBalance } from "@/lib/wager-accept-gate";
-import { assertTxSucceeded, extractTxDigest } from "@/lib/tx-result";
+import { assertTxSucceeded, extractTxDigest, humanizeChainError } from "@/lib/tx-result";
 import { ARENA_ABORT_CODES } from "@/lib/arena-aborts";
 import { simulateWagerTx } from "@/lib/wager-preflight";
 import { verifyServerHasCharacter } from "@/lib/character-presence-check";
@@ -411,7 +411,13 @@ export function MatchmakingQueue() {
         }
       } catch (err: any) {
         console.error("[Wager] create_wager failed:", err);
-        dispatch({ type: "SET_ERROR", message: err?.message || "Wallet transaction rejected" });
+        // dapp-kit 2.16 throws raw MoveAbort strings; humanize via the
+        // arena map (same reason as the saveLoadout catch — the
+        // assertTxSucceeded path with the map only fires when the SDK
+        // resolves with $kind=FailedTransaction, which 2.16 does not).
+        const raw = String(err?.message || "");
+        const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
+        dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet transaction rejected" });
       } finally {
         setSigning(false);
       }
@@ -572,7 +578,9 @@ export function MatchmakingQueue() {
       });
     } catch (err: any) {
       console.error("[Wager] accept_wager failed:", err);
-      dispatch({ type: "SET_ERROR", message: err?.message || "Wallet transaction rejected" });
+      const raw = String(err?.message || "");
+      const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
+      dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet transaction rejected" });
     } finally {
       setSigning(false);
     }
@@ -628,7 +636,9 @@ export function MatchmakingQueue() {
       });
     } catch (err: any) {
       console.error("[Wager] cancel_wager failed:", err);
-      dispatch({ type: "SET_ERROR", message: err?.message || "Wallet cancel rejected" });
+      const raw = String(err?.message || "");
+      const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
+      dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet cancel rejected" });
     } finally {
       setSigning(false);
     }

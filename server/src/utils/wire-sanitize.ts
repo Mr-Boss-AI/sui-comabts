@@ -51,6 +51,13 @@ export function sanitizeItem(item: any): unknown {
     rarity: item.rarity,
     classReq: item.classReq ?? 0,
     levelReq: item.levelReq,
+    // v5.1 — chain slot_type carried across the wire. Frontend
+    // lib/two-handed-weapons.ts reads this to detect two-handed weapons
+    // without a name allowlist. Legacy items (server-only NPC loot) lack
+    // the field; treat undefined as MAINHAND=0 so the sanitizer always
+    // emits a concrete number rather than `undefined`, which downstream
+    // JSON consumers handle more cleanly.
+    slotType: item.slotType ?? 0,
     minDamage: item.minDamage ?? 0,
     maxDamage: item.maxDamage ?? 0,
     statBonuses: {

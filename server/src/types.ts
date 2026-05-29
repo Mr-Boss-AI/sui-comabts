@@ -72,6 +72,13 @@ export interface Item {
   itemType: ItemType;
   rarity: Rarity;
   levelReq: number;
+  /** v5.1 — chain `Item.slot_type`. 0=mainhand, 1=offhand, 2=both_hands.
+   *  Mirrors `item.move SLOT_*` constants and is carried through the wire
+   *  via utils/wire-sanitize.ts. Optional because legacy NPC loot generated
+   *  in `game/loot.ts` predates chain enforcement — `undefined` is treated
+   *  as MAINHAND by the frontend, which is the only sane default for
+   *  non-weapon armor pieces. New on-chain items always populate this. */
+  slotType?: number;
   statBonuses: StatBonuses;
   minDamage?: number;
   maxDamage?: number;

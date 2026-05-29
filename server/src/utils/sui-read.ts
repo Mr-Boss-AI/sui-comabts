@@ -41,6 +41,11 @@ function parseItemFromContent(
     itemType: Number(fields.item_type ?? 1) as ItemType,
     rarity: Number(fields.rarity ?? 1) as Rarity,
     levelReq: Number(fields.level_req ?? 1),
+    // v5.1 — chain Item.slot_type. Drives two-handed enforcement on the
+    // frontend (lib/two-handed-weapons.ts reads this; no more hardcoded
+    // name allowlist). Defaults to 0 (mainhand) for armor/jewellery rows
+    // where the chain stamps slot_type = SLOT_MAINHAND by convention.
+    slotType: Number(fields.slot_type ?? 0),
     statBonuses: {
       strength: Number(fields.strength_bonus ?? 0),
       dexterity: Number(fields.dexterity_bonus ?? 0),

@@ -275,6 +275,11 @@ export async function fetchOwnedItems(
         classReq: Number(json.class_req ?? 0),
         levelReq: Number(json.level_req ?? 1),
         rarity: Number(json.rarity ?? 1) as Item["rarity"],
+        // v5.1 — chain Item.slot_type. Drives picker / loadout-save 2H
+        // enforcement (lib/two-handed-weapons.ts). Defaults to 0
+        // (MAINHAND) for chain reads that somehow lack the field, which
+        // matches the pre-v5.1 implicit shape.
+        slotType: Number(json.slot_type ?? 0) as Item["slotType"],
         statBonuses: {
           strengthBonus: Number(json.strength_bonus ?? 0),
           dexterityBonus: Number(json.dexterity_bonus ?? 0),
@@ -420,6 +425,10 @@ export async function fetchKioskItems(
             classReq: Number(json.class_req ?? 0),
             levelReq: Number(json.level_req ?? 1),
             rarity: Number(json.rarity ?? 1) as Item["rarity"],
+            // v5.1 — slot_type carried for kiosk items too (a 2H weapon
+            // listed in a kiosk needs the badge AND must still type as
+            // 2H when the buyer retrieves it).
+            slotType: Number(json.slot_type ?? 0) as Item["slotType"],
             statBonuses: {
               strengthBonus: Number(json.strength_bonus ?? 0),
               dexterityBonus: Number(json.dexterity_bonus ?? 0),

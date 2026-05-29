@@ -10,26 +10,10 @@ import {
   isOnChainItem,
   EMPTY_EQUIPMENT,
 } from "@/lib/loadout";
-import { evaluateTwoHandedConflict } from "@/lib/two-handed-weapons";
-import {
-  assertTxSucceeded,
-  humanizeChainError,
-  type AbortCodeMap,
-} from "@/lib/tx-result";
+import { classifyStageEquip } from "@/lib/two-handed-weapons";
+import { assertTxSucceeded, humanizeChainError } from "@/lib/tx-result";
+import { EQUIPMENT_ABORT_CODES } from "@/lib/equipment-aborts";
 import type { EquipmentSlots, Item } from "@/types/game";
-
-// Maps equipment.move abort codes to user-facing strings. These codes are
-// defined in contracts/sources/equipment.move — keep this table in sync with
-// the Move constants if they ever renumber.
-const EQUIPMENT_ABORT_CODES: AbortCodeMap = {
-  0: "Wrong item type for this slot",
-  1: "Slot already occupied",
-  2: "Slot is empty — nothing to unequip",
-  3: "Character level too low for this item",
-  4: "Not your character",
-  5: "Character is locked in an active fight",
-  6: "Deprecated function (v1)",
-};
 
 /**
  * Staging-first equipment hook. Per LOADOUT_DESIGN.md D1=PTB-of-primitives,
@@ -69,21 +53,35 @@ export function useEquipmentActions() {
     slot: keyof EquipmentSlots,
     _currentSlotItem: Item | null = null,
   ): void {
-    // Two-handed weapon gate (Bug 2 Path A, 2026-05-04). The picker
-    // already greys out conflicting candidates with a locked + reason
-    // UX — this is defence in depth against keyboard / programmatic
-    // paths that bypass the disabled card. Same shape as the
-    // canAcceptWager guard in handleAcceptWager (Fix A, silent-accept).
-    const twoHanded = evaluateTwoHandedConflict({
-      slot,
-      candidate: item,
-      pending,
-    });
-    if (twoHanded.conflict) {
+    // Two-handed weapon gate. The picker layer normally prevents
+    // conflicting attempts (offhand row stripped for 2H weapons in the
+    // inventory panel; locked rows in the slot picker; disabled
+    // offhand SlotTile when a 2H is equipped). This branch is
+    // defence-in-depth for keyboard / programmatic paths AND the place
+    // where the educational popup is wired.
+    //
+    // The classifier returns one of three outcomes:
+    //   - auto_clear: equipping a 2H over an occupied off-hand — silently
+    //     stage the off-hand clear + toast notice (correct user action,
+    //     no popup)
+    //   - block_and_explain: an off-hand attempt that conflicts with a
+    //     2H weapon — refuse the stage AND open the educational modal
+    //     so the player learns the rule
+    //   - ok: no concern, proceed
+    const decision = classifyStageEquip({ slot, candidate: item, pending });
+    if (decision === "auto_clear") {
+      // Stage the off-hand clear FIRST so the subsequent STAGE_EQUIP
+      // sees a consistent pending state.
+      dispatch({ type: "STAGE_UNEQUIP", slot: "offhand" });
       dispatch({
         type: "SET_ERROR",
-        message: twoHanded.reason ?? "Two-handed conflict — adjust your loadout first.",
+        message: "Off-hand removed — two-handed weapon equipped.",
       });
+    } else if (decision === "block_and_explain") {
+      // Fire the educational center modal. Self-extinguishing — players
+      // who learn the rule (unequip first, then equip) never reach
+      // this branch again.
+      dispatch({ type: "SHOW_TWO_HANDED_CONFLICT_MODAL" });
       return;
     }
 
@@ -141,11 +139,13 @@ export function useEquipmentActions() {
       return false;
     }
 
-    const { tx, changedSlots, skippedNonChainSlots } = buildSaveLoadoutTx(
-      characterObjectId,
-      committed,
-      pending,
-    );
+    const {
+      tx,
+      changedSlots,
+      skippedNonChainSlots,
+      reconciledPending,
+      offhandAutoCleared,
+    } = buildSaveLoadoutTx(characterObjectId, committed, pending);
 
     // If the only dirty slots are NPC-item slots there is nothing to sign —
     // those were already reconciled via WS at the time of staging (or will
@@ -166,10 +166,23 @@ export function useEquipmentActions() {
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
       assertTxSucceeded(result, "save_loadout", EQUIPMENT_ABORT_CODES);
 
-      // PTB committed atomically on chain → pending IS chain truth. Rebase
-      // committed to pending so `isDirty` clears. A subsequent server-driven
-      // DOF re-hydration (handleAuth) will reconcile if anything drifts.
-      dispatch({ type: "COMMIT_SAVED", committed: pending });
+      // PTB committed atomically on chain → reconciledPending IS chain
+      // truth (not the original pending — buildSaveLoadoutTx may have
+      // auto-cleared the offhand to satisfy the 2H invariant). Rebase
+      // committed to it so `isDirty` clears and the UI reflects what
+      // actually shipped to chain. A subsequent server-driven DOF
+      // re-hydration (handleAuth) will reconcile if anything drifts.
+      dispatch({ type: "COMMIT_SAVED", committed: reconciledPending });
+
+      // Non-blocking notice if the build dropped the offhand to honour
+      // the 2H rule. We surface it via SET_ERROR (the toast channel) but
+      // word it as a notice rather than a failure — the save succeeded.
+      if (offhandAutoCleared) {
+        dispatch({
+          type: "SET_ERROR",
+          message: "Off-hand removed — two-handed weapon equipped.",
+        });
+      }
 
       // Give fullnode indexing a beat to propagate before refreshing owned
       // items (so the just-equipped NFTs drop out of wallet listings). The
@@ -184,7 +197,15 @@ export function useEquipmentActions() {
       return true;
     } catch (err: any) {
       const raw = String(err?.message || "");
-      const humanized = humanizeChainError(raw);
+      // dapp-kit 2.16 throws Error directly on MoveAbort (rather than
+      // resolving with $kind=FailedTransaction), so assertTxSucceeded —
+      // which holds the EQUIPMENT_ABORT_CODES map — never runs for those
+      // aborts. Re-humanizing here MUST pass the map too, otherwise the
+      // codes-6/7/8/9 friendly strings would only show on the
+      // never-taken FailedTransaction path. Verified empirically
+      // 2026-05-29: SDK threw "abort code: 6 … 'equipment::equip_weapon'"
+      // and the catch is the only humanizer that actually fires.
+      const humanized = humanizeChainError(raw, EQUIPMENT_ABORT_CODES);
       console.warn("[Loadout] save rejected:", humanized || raw);
       dispatch({
         type: "SET_ERROR",

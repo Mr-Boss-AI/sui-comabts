@@ -32,8 +32,68 @@
  * at the top, what they're working toward at the bottom.
  */
 import type { EquipmentSlots, Item } from "../types/game";
-import { SLOT_TO_ITEM_TYPE } from "../types/game";
-import { evaluateTwoHandedConflict } from "./two-handed-weapons";
+import { ITEM_TYPES, SLOT_TO_ITEM_TYPE, SLOT_TYPES } from "../types/game";
+import { evaluateTwoHandedConflict, isTwoHanded } from "./two-handed-weapons";
+
+/**
+ * The inverse of `buildSlotPickerEntries`: given an Item, return every
+ * slot the item is legally allowed to occupy. Drives the "EQUIP TO:"
+ * panel in the inventory item-detail view.
+ *
+ * Per-item-type the answer comes from `SLOT_TO_ITEM_TYPE` — e.g. a
+ * shield can go in `offhand`, a helmet can go in `helmet`. The wrinkle
+ * is **weapons**: `SLOT_TO_ITEM_TYPE.offhand` includes WEAPON because
+ * dual-wield is a real configuration, but a **two-handed** weapon must
+ * never present `offhand` as an equip target. The chain rejects it
+ * (`equipment.move::equip_offhand` asserts `slot_type != BOTH_HANDS`
+ * → `EItemNotOffhand=9`), and surfacing the choice teaches the user a
+ * lie — "you can put your maul in your off-hand" is wrong before the
+ * click, not just after the save.
+ *
+ * The rule per weapon `slot_type`:
+ *   - MAINHAND → both `weapon` and `offhand` (single-hand → dual-wield-eligible)
+ *   - BOTH_HANDS → `weapon` only
+ *   - OFFHAND → `offhand` only (defence — chain mint validation forbids
+ *     a WEAPON with slot_type=OFFHAND but we mirror the constraint)
+ *   - undefined (legacy server-only NPC items) → both `weapon` and
+ *     `offhand`, matching the pre-v5.1 implicit shape so existing NPC
+ *     loot keeps working.
+ */
+export function getEquipTargetsForItem(
+  item: Pick<Item, "itemType" | "slotType">,
+): Array<keyof EquipmentSlots> {
+  const slots: Array<keyof EquipmentSlots> = [];
+  for (const [slot, types] of Object.entries(SLOT_TO_ITEM_TYPE)) {
+    if (!types.includes(item.itemType)) continue;
+    const slotKey = slot as keyof EquipmentSlots;
+
+    // v5.1 — weapon-specific filter. Non-weapon item_types fall through
+    // to the default include below (a shield only ever matches the
+    // offhand row, jewellery only its own slot, etc.).
+    if (item.itemType === ITEM_TYPES.WEAPON) {
+      if (slotKey === "offhand") {
+        // Two-handed weapon — never offer the offhand row.
+        if (isTwoHanded(item)) continue;
+        // Defence — a WEAPON with slot_type=OFFHAND shouldn't exist
+        // (item.move::mint_item_admin rejects it with
+        // EWeaponSlotTypeInvalid=7), but if one ever did, only show
+        // offhand.
+        if (item.slotType === SLOT_TYPES.OFFHAND) {
+          // offhand-only weapon — push offhand, but ALSO skip the
+          // weapon-row push below by short-circuiting the outer loop.
+        }
+      }
+      if (slotKey === "weapon" && item.slotType === SLOT_TYPES.OFFHAND) {
+        // Mirror of the above: an OFFHAND-typed weapon must not show
+        // the weapon row either.
+        continue;
+      }
+    }
+
+    slots.push(slotKey);
+  }
+  return slots;
+}
 
 export interface PickerEntry {
   item: Item;

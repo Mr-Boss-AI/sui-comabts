@@ -46,6 +46,7 @@ import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { computeDerivedStats, getArchetype, getArchetypeColor } from "@/lib/combat";
 import { effectiveUnallocatedPoints } from "@/lib/stat-points";
 import { buildSlotPickerEntries } from "@/lib/equipment-picker";
+import { isTwoHanded } from "@/lib/two-handed-weapons";
 import { MAX_LEVEL, getXpInCurrentLevel, getXpProgress, getXpSpanForLevel } from "@/types/game";
 import { RARITY_COLORS, EQUIPMENT_SLOT_LABELS } from "@/types/game";
 import type { Character, EquipmentSlots, Item, Rarity } from "@/types/game";
@@ -95,6 +96,14 @@ export interface SlotTileProps {
   isDirty?: boolean;
   onClick?: () => void;
   emptyLabel?: string;
+  /** v5.1 — visually lock the tile (no hover, no click, dimmed) AND
+   *  swap the tooltip to `disabledReason`. Used by the offhand slot
+   *  when the pending weapon is two-handed: chain rejects equipping an
+   *  offhand under a 2H weapon (EWeaponIsTwoHanded=7), so we render the
+   *  slot as unavailable rather than letting the user spend a click on
+   *  a save-time abort. */
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 /**
@@ -123,6 +132,8 @@ export function SlotTile({
   isDirty,
   onClick,
   emptyLabel,
+  disabled,
+  disabledReason,
 }: SlotTileProps) {
   const w = typeof size === "number" ? size : size.w;
   const h = typeof size === "number" ? size : size.h;
@@ -132,33 +143,37 @@ export function SlotTile({
     "inset 0 1px 0 rgba(255,255,255,.05), inset 0 -1px 0 rgba(0,0,0,.55), 1px 1px 0 rgba(0,0,0,.6)";
   const SHADOW_DIRTY = "0 0 0 1px var(--sc-bronze)";
 
+  const inert = future || disabled;
   const title = future
     ? `${futureLabel ?? "Slot"} — unlocks in v5.1 contract bundle`
-    : item
-      ? `${item.name} (click to manage)`
-      : slot
-        ? `${EQUIPMENT_SLOT_LABELS[slot]} (click to equip)`
-        : "Empty slot";
+    : disabled
+      ? disabledReason ?? "Slot unavailable"
+      : item
+        ? `${item.name} (click to manage)`
+        : slot
+          ? `${EQUIPMENT_SLOT_LABELS[slot]} (click to equip)`
+          : "Empty slot";
 
   const filled = item != null;
 
   return (
     <button
       type="button"
-      onClick={future ? undefined : onClick}
+      onClick={inert ? undefined : onClick}
       title={title}
       aria-label={title}
+      aria-disabled={disabled || undefined}
       style={{
         width: w,
         height: h,
         padding: 0,
-        cursor: future ? "not-allowed" : "pointer",
+        cursor: inert ? "not-allowed" : "pointer",
         background: future ? "var(--sc-page)" : "var(--sc-panel-2)",
         border: filled
           ? `2px solid ${rarityColor}`
           : "1px solid var(--sc-rim-2)",
         borderRadius: 2,
-        opacity: future ? 0.45 : 1,
+        opacity: future ? 0.45 : disabled ? 0.4 : 1,
         boxShadow: isDirty ? SHADOW_DIRTY : SHADOW_EMPTY,
         position: "relative",
         overflow: "hidden",
@@ -171,7 +186,7 @@ export function SlotTile({
         color: "var(--sc-ash)",
       }}
       onMouseEnter={(e) => {
-        if (future) return;
+        if (inert) return;
         e.currentTarget.style.transform = "translateY(-1px)";
         if (!item) e.currentTarget.style.borderColor = "var(--sc-bronze)";
       }}
@@ -964,6 +979,14 @@ function EquipmentFrame({
 
   const bigSize = { w: bigSlotW, h: bigSlotH };
 
+  // v5.1 — Lock the off-hand slot when a two-handed weapon is equipped.
+  // Mirrors the chain rule (equipment.move::equip_offhand asserts the
+  // current weapon is not two-handed → EWeaponIsTwoHanded=7) so the user
+  // is prevented from staging an illegal pending state in the first
+  // place rather than seeing a save-time abort. `isTwoHanded` reads
+  // chain `Item.slot_type` directly — no name allowlist.
+  const offhandLocked = eq.weapon != null && isTwoHanded(eq.weapon);
+
   return (
     <div style={{ width: "100%", maxWidth: 520 }}>
       <FrameTitle
@@ -1121,6 +1144,8 @@ function EquipmentFrame({
             isDirty={dirtySlots.has("offhand")}
             onClick={() => onSlot("offhand")}
             emptyLabel="Off-hand"
+            disabled={offhandLocked}
+            disabledReason="Two-handed weapon equipped — off-hand unavailable."
           />
           <SlotTile
             slot="pants"
