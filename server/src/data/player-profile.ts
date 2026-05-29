@@ -23,7 +23,8 @@
 
 import { getCharacterByWallet, restoreCharacterFromDb } from './characters';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
-import type { Character, EquipmentSlots, Item } from '../types';
+import { sanitizeEquipment } from '../utils/wire-sanitize';
+import type { Character, EquipmentSlots } from '../types';
 
 /** Wire shape returned to the frontend. Mirrors `Character` minus
  *  inventory + sensitive bits, plus a denormalised win-rate. */
@@ -69,24 +70,15 @@ export function characterToProfileWire(
     winRate: Math.round(winRate * 1000) / 1000, // 3 decimals
     stats: { ...character.stats },
     unallocatedPoints: character.unallocatedPoints,
-    equipment: cloneEquipment(character.equipment),
+    // Wire-shape translation lives in utils/wire-sanitize.ts. The previous
+    // private `cloneEquipment` only walked the 10-slot v5.0 list AND only
+    // shallow-cloned items (preserving server-shape statBonuses keys),
+    // which silently zeroed every equipped-stat bonus in the Tavern scout
+    // modal and dropped ring3/pants/bracelets entirely. The shared
+    // sanitizer is the same translator handler.ts uses for character_state.
+    equipment: sanitizeEquipment(character.equipment as unknown as Record<string, unknown>) as unknown as EquipmentSlots,
     onChainObjectId: character.onChainObjectId ?? undefined,
     fresh,
-  };
-}
-
-function cloneEquipment(eq: EquipmentSlots): EquipmentSlots {
-  return {
-    weapon: eq.weapon ? ({ ...eq.weapon } as Item) : null,
-    offhand: eq.offhand ? ({ ...eq.offhand } as Item) : null,
-    helmet: eq.helmet ? ({ ...eq.helmet } as Item) : null,
-    chest: eq.chest ? ({ ...eq.chest } as Item) : null,
-    gloves: eq.gloves ? ({ ...eq.gloves } as Item) : null,
-    boots: eq.boots ? ({ ...eq.boots } as Item) : null,
-    belt: eq.belt ? ({ ...eq.belt } as Item) : null,
-    ring1: eq.ring1 ? ({ ...eq.ring1 } as Item) : null,
-    ring2: eq.ring2 ? ({ ...eq.ring2 } as Item) : null,
-    necklace: eq.necklace ? ({ ...eq.necklace } as Item) : null,
   };
 }
 

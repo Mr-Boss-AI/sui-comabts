@@ -264,7 +264,12 @@ export default function GameProvider({
           dispatch({ type: "SET_FIGHT_QUEUE", fightType: null });
           // Re-fetch server character data (updated XP, wins, losses, rating)
           socket.send({ type: "get_character" });
-          if (msg.fight.winner === walletAddress) {
+          // Three-state — server sends `winner: null` on a mutual-KO
+          // draw (fight-room.ts:820). Skip the sting on draw so it
+          // doesn't fall through to the defeat audio.
+          if (msg.fight.winner == null) {
+            // draw — no sound
+          } else if (msg.fight.winner === walletAddress) {
             playSoundIf("victory");
           } else {
             playSoundIf("defeat");

@@ -19,10 +19,34 @@ export function FightResultModal({
   myAddress,
   onClose,
 }: FightResultModalProps) {
-  const won = fight.winner === myAddress;
+  // Three-state outcome. The server emits `fight.winner = null` (literal)
+  // on a mutual-KO draw — verified against fight-room.ts:820–880, which
+  // assigns `fightPayload.winner = winnerWallet || null`. Treat both null
+  // and undefined as draw defensively. Win/loss branches are unchanged.
+  const outcome: "win" | "loss" | "draw" =
+    fight.winner == null
+      ? "draw"
+      : fight.winner === myAddress
+        ? "win"
+        : "loss";
+  const isDraw = outcome === "draw";
+  const won = outcome === "win";
+
+  const modalTitle = isDraw ? "Draw" : won ? "Victory!" : "Defeat";
+  const bigText = isDraw ? "DRAW" : won ? "YOU WIN" : "YOU LOSE";
+  const bigColor = isDraw
+    ? "var(--sc-parchment)"
+    : won
+      ? "var(--rarity-uncommon)"
+      : "var(--sc-blood)";
+  const bigShadow = isDraw
+    ? "3px 3px 0 #000"
+    : won
+      ? "3px 3px 0 #000, 0 0 24px rgba(74,156,74,.4)"
+      : "3px 3px 0 #000, 0 0 24px rgba(181,61,44,.4)";
 
   return (
-    <Modal open onClose={onClose} title={won ? "Victory!" : "Defeat"}>
+    <Modal open onClose={onClose} title={modalTitle}>
       <div
         style={{
           textAlign: "center",
@@ -38,14 +62,12 @@ export function FightResultModal({
             fontFamily: "var(--font-display)",
             fontSize: 56,
             lineHeight: 1.05,
-            color: won ? "var(--rarity-uncommon)" : "var(--sc-blood)",
+            color: bigColor,
             letterSpacing: "0.02em",
-            textShadow: won
-              ? "3px 3px 0 #000, 0 0 24px rgba(74,156,74,.4)"
-              : "3px 3px 0 #000, 0 0 24px rgba(181,61,44,.4)",
+            textShadow: bigShadow,
           }}
         >
-          {won ? "YOU WIN" : "YOU LOSE"}
+          {bigText}
         </div>
 
         <div style={{ color: "var(--fg-3)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
@@ -73,7 +95,13 @@ export function FightResultModal({
               style={{
                 fontWeight: 800,
                 fontFamily: "var(--font-mono)",
-                color: loot.ratingChange >= 0 ? "var(--rarity-uncommon)" : "var(--sc-blood)",
+                // Draw: neutral so a green +0 doesn't read as "you gained".
+                // Win/loss: unchanged ternary.
+                color: isDraw
+                  ? "var(--sc-parchment)"
+                  : loot.ratingChange >= 0
+                    ? "var(--rarity-uncommon)"
+                    : "var(--sc-blood)",
               }}
             >
               {loot.ratingChange >= 0 ? "+" : ""}
@@ -83,16 +111,32 @@ export function FightResultModal({
           {fight.wagerAmount && fight.wagerAmount > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
               <span style={{ color: "var(--fg-3)" }}>Wager</span>
-              <span
-                style={{
-                  fontWeight: 800,
-                  fontFamily: "var(--font-mono)",
-                  color: won ? "var(--sc-bronze)" : "var(--sc-blood)",
-                }}
-              >
-                {won ? "+" : "-"}
-                {fight.wagerAmount} SUI
-              </span>
+              {isDraw ? (
+                // Mutual-KO refund via arena::settle_tie — 100% of the
+                // stake returns to each side (verified on chain via the
+                // WagerTied event's `refund_each` field). Render as a
+                // refund, never with a minus sign.
+                <span
+                  style={{
+                    fontWeight: 800,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--sc-bronze)",
+                  }}
+                >
+                  Refunded · {fight.wagerAmount} SUI returned
+                </span>
+              ) : (
+                <span
+                  style={{
+                    fontWeight: 800,
+                    fontFamily: "var(--font-mono)",
+                    color: won ? "var(--sc-bronze)" : "var(--sc-blood)",
+                  }}
+                >
+                  {won ? "+" : "-"}
+                  {fight.wagerAmount} SUI
+                </span>
+              )}
             </div>
           )}
         </div>

@@ -70,6 +70,7 @@ function WagerLobbyCard({
   isOwn,
   onAccept,
   onCancel,
+  onInspect,
   signing,
   disableAccept = false,
   disableReason,
@@ -78,6 +79,11 @@ function WagerLobbyCard({
   isOwn: boolean;
   onAccept: () => void;
   onCancel: () => void;
+  /** When set, clicking anywhere on the card (other than the Accept /
+   *  Cancel buttons) opens the Tavern player-profile modal for the wager
+   *  creator. Lets a player scout an opponent's gear/build before
+   *  signing accept_wager. */
+  onInspect?: () => void;
   signing: boolean;
   /** When true, the Accept button is hard-disabled regardless of `signing`.
    *  Set by the parent when the caller has their own open wager — closes the
@@ -89,10 +95,25 @@ function WagerLobbyCard({
   const archetype = getArchetypeLabel(entry.creatorStats);
   const color = getArchetypeColor(archetype);
   const acceptBlocked = disableAccept || signing;
+  const inspectable = !!onInspect;
 
   return (
     <div
       className="p-3 transition-all"
+      role={inspectable ? "button" : undefined}
+      tabIndex={inspectable ? 0 : undefined}
+      onClick={inspectable ? onInspect : undefined}
+      onKeyDown={
+        inspectable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onInspect?.();
+              }
+            }
+          : undefined
+      }
+      title={inspectable ? `Inspect ${entry.creatorName}'s build` : undefined}
       style={{
         border: isOwn
           ? "2px solid var(--sc-bronze)"
@@ -102,6 +123,7 @@ function WagerLobbyCard({
         borderRadius: "var(--r-card)",
         boxShadow: isOwn ? "var(--sh-plate-sm)" : "var(--rim-top), var(--rim-bottom)",
         fontFamily: "var(--font-ui)",
+        cursor: inspectable ? "pointer" : undefined,
       }}
     >
       <div className="flex items-center justify-between gap-3">
@@ -120,13 +142,24 @@ function WagerLobbyCard({
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-amber-400 font-bold text-sm">{entry.wagerAmount} SUI</span>
           {isOwn ? (
-            <Button variant="danger" size="sm" onClick={onCancel} disabled={signing}>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancel();
+              }}
+              disabled={signing}
+            >
               Cancel
             </Button>
           ) : (
             <Button
               size="sm"
-              onClick={onAccept}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAccept();
+              }}
               disabled={acceptBlocked}
               title={disableAccept ? disableReason : undefined}
             >
@@ -1093,6 +1126,15 @@ export function MatchmakingQueue() {
                           isOwn={isOwn}
                           onAccept={() => handleAcceptWager(entry)}
                           onCancel={() => handleCancelWager(entry)}
+                          onInspect={
+                            isOwn
+                              ? undefined
+                              : () =>
+                                  dispatch({
+                                    type: "OPEN_PROFILE",
+                                    walletAddress: entry.creatorWallet,
+                                  })
+                          }
                           signing={signing}
                           disableAccept={disableAccept}
                           disableReason={disableReason}

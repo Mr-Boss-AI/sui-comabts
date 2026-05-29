@@ -53,6 +53,7 @@ import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAll
 import { decideAcceptOutcome } from './wager-accept-gate';
 import { evaluateServerBusy } from './busy-state';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
+import { sanitizeEquipment } from '../utils/wire-sanitize';
 import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
   createFight,
@@ -1752,60 +1753,11 @@ function handleAllocatePoints(client: ConnectedClient, msg: ClientMessage): void
 
 // === Utilities ===
 
-/**
- * Translate a server-shape Item into the shape the frontend expects.
- *
- * The two layers use different keys for stat bonuses:
- *   server  →  { armor, hp, defense, damage, critBonus, strength, ... }
- *   frontend → { armorBonus, hpBonus, defenseBonus, attackBonus, critChanceBonus, ... }
- *
- * Before Phase 0.5 this divergence was invisible because the frontend read
- * on-chain items from its own wallet fetch (already in frontend shape) and
- * ignored `character.equipment`. Now that the server hydrates DOFs into
- * `character.equipment`, we have to emit the frontend shape on the wire.
- */
-function sanitizeItem(item: any): unknown {
-  if (!item) return null;
-  const s = item.statBonuses || {};
-  return {
-    id: item.id,
-    name: item.name,
-    imageUrl: item.imageUrl ?? undefined,
-    itemType: item.itemType,
-    rarity: item.rarity,
-    classReq: item.classReq ?? 0,
-    levelReq: item.levelReq,
-    minDamage: item.minDamage ?? 0,
-    maxDamage: item.maxDamage ?? 0,
-    statBonuses: {
-      strengthBonus: s.strength || 0,
-      dexterityBonus: s.dexterity || 0,
-      intuitionBonus: s.intuition || 0,
-      enduranceBonus: s.endurance || 0,
-      hpBonus: s.hp || 0,
-      armorBonus: s.armor || 0,
-      defenseBonus: s.defense || 0,
-      attackBonus: s.damage || 0,
-      critChanceBonus: s.critBonus || 0,
-      // TODO(loadout-cleanup): server StatBonuses type is missing these 4
-      // fields. On-chain items have them but they're dropped here. Unify
-      // server/frontend stat shape as part of mainnet prep. Tracked in
-      // MAINNET_PREP.md.
-      critMultiplierBonus: 0,
-      evasionBonus: 0,
-      antiCritBonus: 0,
-      antiEvasionBonus: 0,
-    },
-  };
-}
-
-function sanitizeEquipment(equipment: Record<string, any>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [slot, item] of Object.entries(equipment)) {
-    out[slot] = sanitizeItem(item);
-  }
-  return out;
-}
+// sanitizeItem / sanitizeEquipment moved to utils/wire-sanitize.ts so the
+// Tavern scout-modal path in data/player-profile.ts can reuse the same
+// translator without re-importing handler.ts (which would close a cycle
+// via ws/tavern-handlers.ts). The 13-slot guarantee — every wire payload
+// carries exactly the v5.1 slot keys — also lives there.
 
 function sanitizeCharacter(character: any): Record<string, any> {
   const unallocatedPoints = character.unallocatedPoints || 0;
