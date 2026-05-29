@@ -1,27 +1,27 @@
-# SUI Combats — State of the Project, 2026-05-29 (v5.1 testnet hammered — two-wallet QA pass complete)
+# SUI Combats — State of the Project, 2026-05-29 (EOD final — v5.1 testnet two-wallet QA + two-handed system complete)
 
-> **v5.1 IS LIVE on testnet** and has now been hammered with a
-> two-wallet, dual-signing-path QA session. Branch `feature/v5.1-contracts`
-> @ `0ab7677` on origin (unchanged from 2026-05-28) **+ three
-> uncommitted working-tree fixes** that were live-verified today.
+> **v5.1 IS LIVE on testnet** and has now been hammered with two
+> consecutive multi-session two-wallet, dual-signing-path QA passes
+> across 2026-05-28/29. Branch `feature/v5.1-contracts` @ `57027bd` on
+> origin (pushed 2026-05-29 EOD with explicit user authorization).
 > Package `0x308645f3…3717` unchanged. **Mainline `main` stays at
 > `08ff991` (v4-era) until v5.2 + external audit clears.**
 >
-> This doc supersedes [`STATE_OF_PROJECT_2026-05-28.md`](STATE_OF_PROJECT_2026-05-28.md)
-> as canonical state. The 2026-05-28 doc remains as history.
+> This doc supersedes [`docs/archive/STATE_OF_PROJECT_2026-05-28.md`](docs/archive/STATE_OF_PROJECT_2026-05-28.md)
+> as canonical state. Previous days remain in `docs/archive/`.
 
 ---
 
-## 🚨 UNCOMMITTED working-tree fixes (commit next session, no merge)
+## ✅ COMMITTED & PUSHED THIS SESSION
 
-| Fix | Files | Status |
-|---|---|---|
-| Scout-modal equipped stats + 13 slots | `server/src/utils/wire-sanitize.ts` (new) · `server/src/ws/handler.ts` · `server/src/data/player-profile.ts` | ✅ live-verified |
-| Arena wager-card clickable scouting | `frontend/src/components/fight/matchmaking-queue.tsx` | ✅ live-verified |
-| Mutual-KO DRAW modal + sound | `frontend/src/components/fight/fight-result-modal.tsx` · `frontend/src/app/game-provider.tsx` | ✅ live-verified |
+| Commit | Scope |
+|---|---|
+| **`b606a97`** *(AM)* | The three working-tree fixes that the 2026-05-28 EOD handoff flagged as uncommitted: server scout-modal sanitizer + 13-slot fix, arena wager-card clickable scouting, mutual-KO draw modal + sound. |
+| **`57027bd`** *(PM)* | Complete two-handed weapon system — `slot_type` plumbed chain→frontend (`TWO_HANDED_NAMES` allowlist deleted), abort humanizer at all call sites, inverse picker excludes off-hand for 2H, `buildSaveLoadoutTx` auto-clear + unequip-before-equip ordering, educational popup on wrong-order, slot lock + tooltip. 146/146 tests across 5 gauntlets. Docs: [`docs/V5.1_TWO_HANDED_FLOW.md`](docs/V5.1_TWO_HANDED_FLOW.md). |
 
-Server `tsc --noEmit` clean. Frontend `tsc --noEmit` clean. Next-session
-action: commit to `feature/v5.1-contracts`, no merge to `main`.
+Server `tsc --noEmit` clean. Frontend `tsc --noEmit` clean. Working
+tree carries only pre-existing untracked files (`.obsidian/`, NFT
+asset dirs, mint scripts, `.env` backup) — none session-relevant.
 
 ---
 
@@ -29,19 +29,20 @@ action: commit to `feature/v5.1-contracts`, no merge to `main`.
 
 | Field | Value |
 |---|---|
-| Phase | **v5.1 testnet hammered + flagship paths live-verified.** Next phase: v5.2 trust + content (`sui::random`, `respec`, `settle_wager_attested`) + audit prep |
+| Phase | **v5.1 testnet COMPLETE — every chain rule live-exercised including the two-handed-weapon slot_type contract.** Next phase: v5.2 trust + content (`sui::random`, `respec`, `settle_wager_attested`) + external audit prep |
 | Branch | `feature/v5.1-contracts` |
-| HEAD on origin | `0ab7677` (unchanged today; 3 fixes uncommitted in working tree) |
+| HEAD on origin | **`57027bd`** *(pushed 2026-05-29 EOD with user authorization)* |
 | Mainline | `main` untouched at `08ff991` (v4-era — standing rule, no merge until v5.2 + audit) |
 | v5.1 package id | `0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717` |
 | Move tests | **71 / 71 PASS** (unchanged) |
-| Server `tsc --noEmit` | clean (after today's fixes) |
-| Frontend `tsc --noEmit` | clean (after today's fixes) |
+| Frontend QA gauntlets | **146 / 146 PASS** across 5 two-handed gauntlets (slot-type, equipment-aborts, two-handed-loadout, stage-classifier, equip-picker) |
+| Server `tsc --noEmit` | clean |
+| Frontend `tsc --noEmit` | clean |
 | Backend `:3001` `/health` | ok |
 | Frontend `:3000` HTTP | 200 |
 | Test wallets | Mr_Boss (Slush) `0x06d6cb67…9624` Lv2, geared Tank · Sx (zkLogin) `0x03c33df0…985f` Lv2, full Lv1 Ponke loadout |
-| TREASURY | `0x975f1b34…19d4d` — ~comfortable, paid ~0.000887 SUI gas on mutual-KO settle today |
-| Marketplace | 26 Lv1 Ponke originally; ~13 sold to Sx today via zkLogin gasless buy |
+| TREASURY | `0x975f1b34…19d4d` — comfortable; ~0.000887 SUI gas on mutual-KO settle |
+| Marketplace | 52 originally minted (26 Lv1 Ponke + 26 Lv2 Scavenger); **23 active listings** = remainder after multi-session buys (chain-verified via `kioskListed` set, NOT a bug) |
 
 ---
 
@@ -50,18 +51,35 @@ action: commit to `feature/v5.1-contracts`, no merge to `main`.
 **Chain state — unchanged.** Same v5.1 package, same registries, same
 Display objects, same kiosk. No new contract publish, no migration.
 
-**Server state — three changed files, all uncommitted.** The wire-shape
-translator was extracted to a shared util so the Tavern scout-modal
-path matches `character_state`'s translator. See *Today's fixes* below.
+**Server state — committed.** The `wire-sanitize.ts` extraction from
+the AM session is on origin (commit `b606a97`). The PM two-handed work
+added `Item.slotType` to the server type + every hydrator (`sui-read`
+`parseItemFromContent`, `marketplace::fetchItemNft`,
+`wire-sanitize::sanitizeItem`, `marketplace::listingToWire`). Server
+must be restarted on deploy — `ts-node` doesn't watch (see
+[`docs/V5.1_TWO_HANDED_FLOW.md`](docs/V5.1_TWO_HANDED_FLOW.md) for the
+exact failure mode this caused live during development).
 
-**Frontend state — three changed files, all uncommitted.** Draw modal
-+ sound branch landed. Arena wager-card became a clickable scout entry
-point.
+**Frontend state — committed.** Two-handed system shipped end-to-end:
+new `lib/equipment-aborts.ts`, full rewrite of `lib/two-handed-weapons.ts`
+(deletes `TWO_HANDED_NAMES`, adds `classifyStageEquip`), rewrite of
+`lib/loadout-tx.ts` (cross-slot invariant + two-phase PTB), new
+`getEquipTargetsForItem` in `equipment-picker.ts`, new
+`TwoHandedConflictModal` mounted in `game-screen.tsx`, off-hand
+`SlotTile` lock in `character-profile.tsx`, abort-map plumbed through
+catch blocks in `useEquipmentActions` AND all three wager paths in
+`matchmaking-queue.tsx`. New `slotType` field on the frontend `Item`
+type + every chain hydrator (`fetchOwnedItems`, `fetchKioskItems`).
 
-**Live-verified set expanded significantly.** Everything the
-2026-05-28 handoff listed as "NOT yet verified in browser" except
-two-handed weapon blocking is now ✅. Plus a v4-era regression
-(`allocate_points`) was confirmed fixed across both signing paths.
+**Live-verified set — every v5.1 chain rule now ✅.** The 2026-05-28
+handoff listed two-handed weapon blocking as the last unproven rule.
+That box is now ticked: both `EOffhandOccupied (6)` and
+`EWeaponIsTwoHanded (7)` paths fire as designed; the frontend
+intercepts before the abort in 99% of cases via the layered picker +
+slot-lock + classifier + auto-reconcile; the abort humanizer covers
+the remaining 1%. Plus: Market/Kiosk 12-point gauntlet PASSED (live,
+chain-verified); `allocate_points` confirmed fixed across both signing
+paths; mutual-KO `settle_tie` chain-verified end-to-end.
 
 ---
 
@@ -183,25 +201,36 @@ navbar/profile/history is still a separate backlog item.
 
 | | Reason |
 |---|---|
-| Two-handed weapon blocking | The last untested v5.1 chain rule. Equip a slot_type=2 weapon (Nail Plank etc.) — chain MUST abort `EOffhandOccupied (6)` if offhand populated, and `EWeaponIsTwoHanded (7)` if offhand-equip is attempted while a 2H weapon is held |
-| More weapon variety in combat | This session used only the Lv1 Ponke starter set; broader weapon-class behaviour (range, 2H, dual-wield) unverified end-to-end |
-| Lv2 Scavenger Uncommon equip walk | Both wallets are now Lv2; level-gate flip + Uncommon rarity stat-budget rendering pending |
+| More weapon variety in combat math | Two-handed equip path is now closed end-to-end; broader weapon-class damage / offhand-bonus rolls in combat resolution still need a multi-class sweep |
+| Lv2 Scavenger Uncommon combat math | Equip walk verified; combat math with budget≤40 stat-budget items still pending |
 | Full 13-slot single-PTB `save_loadout` (all 13 dirty) | Tested with 2-PTB walks and a few slot edits; full-13-dirty single PTB still pending |
-| W/L/D counter render in navbar / profile / history (`draws` value) | Modal-layer closed today; counter UI surfaces still v5.2 backlog |
+| W/L/D counter render in navbar / profile / history (`draws` value) | Modal-layer closed; counter UI surfaces still v5.2 backlog |
 
 ---
 
 ## Test suite state
 
-| | v5.0 baseline | v5.1 current | Δ |
+| | v5.0 baseline | 2026-05-29 EOD | Δ |
 |---|---|---|---|
 | Move unit tests | 35 | **71** PASS | +36 (unchanged from 2026-05-28) |
-| Frontend gauntlets | 2,307+ | unchanged | 0 |
+| Frontend gauntlets — two-handed | n/a | **146 / 146 PASS** across 5 gauntlets | +5 gauntlets, +146 assertions |
+| Frontend gauntlets — other (pre-existing) | 2,307+ | unchanged | 0 |
 
-No new tests today. The fixes shipped today were closed against live
-browser QA + chain-read verification rather than new unit tests;
-adding a draw-branch gauntlet and a `sanitizeEquipment` gauntlet
-remains an open hygiene item.
+The 5 new gauntlets shipped today (`qa-slot-type`,
+`qa-equipment-aborts`, `qa-two-handed-loadout`,
+`qa-two-handed-stage-classifier`, plus the extended `qa-equip-picker`
+block [12.5]) pin every layer of the two-handed contract. Run all five
+from `server/`:
+
+```bash
+cd server
+for q in slot-type equipment-aborts two-handed-loadout two-handed-stage-classifier equip-picker; do
+  npx tsx ../scripts/qa-$q.ts || break
+done
+```
+
+Open hygiene items: draw-branch gauntlet and `sanitizeEquipment`
+gauntlet still pending.
 
 ---
 
@@ -212,10 +241,11 @@ remains an open hygiene item.
 | Phase 2 — design redesign | ✅ shipped earlier |
 | Phase A — Sui-latest integration | ✅ shipped (zkLogin Lv1 buy + equip + wager + allocate live today) |
 | Phase 3 — v5.1 contracts | ✅ **shipped on testnet 2026-05-28** |
-| Two-wallet wager live | ✅ **closed today** (was ⏳ yesterday) |
-| Mutual-KO `settle_tie` live | ✅ **closed today** (was ⏳ yesterday — chain-verified end-to-end) |
-| Frontend draw modal | ✅ **closed today** (was v5.2 backlog) |
-| Two-handed weapon block live | ⏳ remaining v5.1 chain rule — next-session step 1 |
+| Two-wallet wager live | ✅ closed 2026-05-29 AM |
+| Mutual-KO `settle_tie` live | ✅ closed 2026-05-29 AM (chain-verified end-to-end) |
+| Frontend draw modal | ✅ closed 2026-05-29 AM (was v5.2 backlog) |
+| **Two-handed weapon block live** | ✅ **closed 2026-05-29 PM — full layered system shipped, 146/146 tests, live-verified** |
+| **Market / Kiosk 12-point gauntlet (list/buy/cancel/royalty/withdraw/cross-wallet/own-listing-hidden)** | ✅ **closed 2026-05-29 — chain-verified** |
 | **#1 mainnet blocker — settlement retry / journal** | ❌ DEFERRED to v5.2 |
 | **#2 mainnet blocker — confirm-modal gate** | ❌ DEFERRED to v5.2 |
 | **#3 mainnet blocker — `settle_wager_attested`** | ❌ DEFERRED to v5.2 |
@@ -237,19 +267,17 @@ v5.2 server/frontend work, not contract work.
 
 ---
 
-## Files touched on this branch (since `feature/phase-2-design`)
+## Files touched on this branch (since 2026-05-28)
 
-Same as 2026-05-28 plus **three uncommitted today**:
+All committed on origin `feature/v5.1-contracts`. See
+[`docs/archive/STATE_OF_PROJECT_2026-05-28.md`](docs/archive/STATE_OF_PROJECT_2026-05-28.md)
+for files committed before 2026-05-29.
 
-### Server — uncommitted ⚠
+### 2026-05-29 AM commit `b606a97` (fix: draw modal, scout sanitizer, wager-card scouting)
 ```
 server/src/utils/wire-sanitize.ts          — NEW (extract: sanitizeItem + sanitizeEquipment, 13-slot guaranteed)
-server/src/ws/handler.ts                   — uses shared util (inline defs removed)
+server/src/ws/handler.ts                   — uses shared util
 server/src/data/player-profile.ts          — broken cloneEquipment deleted; uses sanitizeEquipment
-```
-
-### Frontend — uncommitted ⚠
-```
 frontend/src/components/fight/matchmaking-queue.tsx
                                            — WagerLobbyCard clickable scout (role=button, kbd, stopPropagation)
 frontend/src/components/fight/fight-result-modal.tsx
@@ -257,16 +285,52 @@ frontend/src/components/fight/fight-result-modal.tsx
 frontend/src/app/game-provider.tsx         — fight_end skips sound on winner == null
 ```
 
-All committed-prior files from 2026-05-28 STATE remain in place — see
-`STATE_OF_PROJECT_2026-05-28.md` for the full catalogue.
+### 2026-05-29 PM commit `57027bd` (feat: complete two-handed weapon system)
+```
+contracts (unchanged — chain Item.slot_type was already shipped 2026-05-28)
+
+server/src/types.ts                        — Item.slotType?: number
+server/src/utils/sui-read.ts               — parseItemFromContent reads slot_type
+server/src/data/marketplace.ts             — fetchItemNft + listingToWire carry slotType
+server/src/utils/wire-sanitize.ts          — sanitizeItem carries slotType
+
+frontend/src/types/game.ts                 — SLOT_TYPES constant + Item.slotType?: SlotType
+frontend/src/lib/sui-contracts.ts          — fetchOwnedItems + fetchKioskItems read slot_type
+frontend/src/lib/two-handed-weapons.ts     — REWRITTEN: slot_type-based; TWO_HANDED_NAMES deleted; classifyStageEquip helper
+frontend/src/lib/equipment-aborts.ts       — NEW: EQUIPMENT_ABORT_CODES (codes 0..9 mapped)
+frontend/src/lib/equipment-picker.ts       — getEquipTargetsForItem (inverse picker) added
+frontend/src/lib/loadout-tx.ts             — REWRITTEN: cross-slot invariant + two-phase PTB
+frontend/src/hooks/useEquipmentActions.ts  — classifyStageEquip wired; catch-block humanizer takes the map
+frontend/src/hooks/useGameStore.ts         — twoHandedConflictModalOpen state + actions
+frontend/src/components/character/character-profile.tsx
+                                           — SlotTile.disabled prop; offhand locks when 2H equipped
+frontend/src/components/character/two-handed-conflict-modal.tsx
+                                           — NEW: educational center modal
+frontend/src/components/items/inventory.tsx
+                                           — uses getEquipTargetsForItem; SLOT_TO_ITEM_TYPE import dropped
+frontend/src/components/fight/matchmaking-queue.tsx
+                                           — wager catch blocks pass ARENA_ABORT_CODES to humanizer
+frontend/src/components/layout/game-screen.tsx
+                                           — TwoHandedConflictModal mounted next to ErrorToast / LevelUpModal
+
+scripts/qa-slot-type.ts                    — NEW (11 assertions)
+scripts/qa-equipment-aborts.ts             — NEW (19 assertions)
+scripts/qa-two-handed-loadout.ts           — NEW (19 assertions)
+scripts/qa-two-handed-stage-classifier.ts  — NEW (10 assertions)
+scripts/qa-equip-picker.ts                 — fixtures updated to set slotType; block [12.5] added (+9 assertions)
+
+docs/V5.1_TWO_HANDED_FLOW.md               — NEW: end-to-end flow doc
+```
 
 ---
 
 ## Commit ladder on `feature/v5.1-contracts`
 
-Unchanged from 2026-05-28 — no new commits today.
-
 ```
+57027bd  feat(v5.1): complete two-handed weapon system (frontend) ← HEAD on origin (pushed 2026-05-29 EOD)
+b606a97  fix(v5.1): draw modal, scout sanitizer, wager-card scouting (2026-05-29 AM)
+536bb1f  docs(v5.1): patch SESSION_HANDOFF — add opponent inspector, prescriptive opener
+a35a9ae  docs(v5.1): end-of-session handoff — STATE_OF_PROJECT, SESSION_HANDOFF, archive
 0ab7677  fix(v5.1): live-reactive loadout stats + session-aware autoConnect
 fb5cd8b  feat(v5.1-final): drop pauldrons, add ring_3; fresh republish + UX
 b881d6b  fix(v5.1-13slot): render pants / bracelets / pauldrons in doll panels
@@ -279,9 +343,6 @@ a82933e  chore(v5.1-13slot): mint script + QA checklist for fresh cut-over
 fe8bfe9  chore(v5.0): wager-accept finality fix + diagnostic logging + v5.1 backlog
                                                    ← branch point on `feature/phase-2-design`
 ```
-
-Six files modified in the working tree, zero commits. Next session
-opens with a commit pass.
 
 ---
 

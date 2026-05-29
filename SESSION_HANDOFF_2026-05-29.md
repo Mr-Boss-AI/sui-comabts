@@ -1,34 +1,64 @@
-# Session Handoff — 2026-05-29 (EOD)
+# Session Handoff — 2026-05-29 (EOD, final)
 
 > **Single-page entry point for the next session.**
-> Branch `feature/v5.1-contracts` — same head on origin as last session
-> (`0ab7677`) **plus three working, locally-uncommitted fixes**. See the
-> bright red callout below before doing anything else.
-> Mainline `main` UNTOUCHED at `08ff991` (v4-era) per standing rule.
-> This handoff supersedes [`SESSION_HANDOFF_2026-05-28.md`](SESSION_HANDOFF_2026-05-28.md) as the live entry point.
+> Branch `feature/v5.1-contracts` at HEAD `57027bd` on origin (pushed
+> 2026-05-29 EOD with explicit user authorization). Mainline `main`
+> UNTOUCHED at `08ff991` (v4-era) per standing rule.
+> This handoff supersedes
+> [`docs/archive/SESSION_HANDOFF_2026-05-28.md`](docs/archive/SESSION_HANDOFF_2026-05-28.md)
+> as the live entry point.
 
 ---
 
-## 🚨 UNCOMMITTED — START NEXT SESSION HERE
+## ✅ COMMITTED & PUSHED THIS SESSION
 
-Three fixes landed in the working tree today, were live-verified in
-browser by the user, and are **NOT yet committed**. They are the first
-action of the next session — commit them to `feature/v5.1-contracts`
-(no merge to `main`).
+Two commits landed on `feature/v5.1-contracts` and are now on origin.
+**Both** were live-verified in browser by the user before push.
 
-| Fix | Files |
+| Commit | What it ships |
 |---|---|
-| (1) Scout-modal equipped stats + 13 slots | `server/src/utils/wire-sanitize.ts` (new), `server/src/ws/handler.ts`, `server/src/data/player-profile.ts` |
-| (2) Arena wager-card scouting (clickable) | `frontend/src/components/fight/matchmaking-queue.tsx` |
-| (3) Mutual-KO draw modal + sound | `frontend/src/components/fight/fight-result-modal.tsx`, `frontend/src/app/game-provider.tsx` |
+| **`b606a97`** *(AM — fix: draw modal, scout sanitizer, wager-card scouting)* | The three working-tree fixes that the 2026-05-28 EOD handoff flagged as uncommitted: server scout-modal sanitizer + 13-slot fix, arena wager-card clickable scouting, mutual-KO draw modal + sound. |
+| **`57027bd`** *(PM — feat: complete two-handed weapon system)* | The complete two-handed-weapon epic. See [next section](#two-handed-weapon-system--complete) for the full breakdown. |
 
-Server `tsc --noEmit` clean. Frontend `tsc --noEmit` clean. Backend +
-frontend re-tested live after each fix. Details: see *What was FIXED
-this session* below.
+`main` stays at `08ff991`. No merge to `main` until v5.2 + external audit.
 
-**Rule reminder (re-state to self before acting):** no commit, no push,
-no merge to `main` without explicit signal from the user. Fix-as-we-go,
-no deferrals.
+---
+
+## Two-handed weapon system — COMPLETE
+
+The last v5.1 chain rule that wasn't live-exercised in the 2026-05-28
+handoff (`EOffhandOccupied=6` / `EWeaponIsTwoHanded=7`) is now closed
+end-to-end. Documentation:
+[`docs/V5.1_TWO_HANDED_FLOW.md`](docs/V5.1_TWO_HANDED_FLOW.md).
+
+| Layer | What shipped |
+|---|---|
+| Chain data | `Item.slot_type: u8` plumbed chain → frontend through every hydration path. The pre-v5.1 `TWO_HANDED_NAMES` hardcoded allowlist is **deleted** — adding a new 2H weapon now requires only the chain mint. |
+| Abort humanizer | Equipment codes 6 / 7 / 8 / 9 mapped to plain-English copy in `lib/equipment-aborts.ts`. Catch blocks in `useEquipmentActions.saveLoadout` AND all three wager paths in `matchmaking-queue.tsx` now pass the abort map (dapp-kit 2.16 throws on `MoveAbort` rather than resolving `FailedTransaction`, so the catch path is where humanization actually fires). |
+| Picker — inverse panel | `getEquipTargetsForItem` excludes the off-hand row for any weapon with `slot_type === BOTH_HANDS`. The inventory item-detail "EQUIP TO:" panel for a 2H weapon now shows Weapon only. |
+| Picker — per-slot | `evaluateTwoHandedConflict` reads `slotType` instead of a name set; offers the case-1 informational tooltip and the case-2/3 hard locks. |
+| Save-time PTB | `buildSaveLoadoutTx` reconciles `pending.offhand → null` when `pending.weapon` is 2H (returns `offhandAutoCleared: true`) AND emits all `unequip_*` commands before any `equip_*` so the cross-slot `EOffhandOccupied` check passes during a 1H+shield → 2H swap in one save. |
+| Stage-time UX | `classifyStageEquip` returns one of three outcomes — `auto_clear` (silent + toast), `block_and_explain` (open educational modal), `ok` (proceed). Self-extinguishing: correct-order flows always return `ok`, so the modal stops firing as the player learns. |
+| UI — passive | Off-hand `SlotTile` disabled + tooltip when `pending.weapon` is 2H. |
+| UI — educational | Center modal `TwoHandedConflictModal` fires only on the `block_and_explain` path. Mounted in `game-screen.tsx` next to `ErrorToast` and `LevelUpModal`. |
+
+### Tests — 146 / 146 PASS across 5 gauntlets
+
+```
+qa-slot-type.ts                       11/11   slot_type-based detection, TWO_HANDED_NAMES gone
+qa-equipment-aborts.ts                19/19   codes 6/7/8/9 + dapp-kit-2.16 no-map regression contract
+qa-two-handed-loadout.ts              19/19   buildSaveLoadoutTx invariant + ordering (5 scenarios)
+qa-two-handed-stage-classifier.ts     10/10   modal trigger contract (correct-order ⇒ no modal)
+qa-equip-picker.ts                    87/87   slot picker + inverse-picker block [12.5]
+```
+
+Run all five from `server/`:
+```bash
+cd server
+for q in slot-type equipment-aborts two-handed-loadout two-handed-stage-classifier equip-picker; do
+  npx tsx ../scripts/qa-$q.ts || break
+done
+```
 
 ---
 
@@ -149,7 +179,7 @@ live as items equip/unequip on both wallets.
 
 ---
 
-## What was FIXED this session (uncommitted)
+## What was FIXED this session (now committed in `b606a97`)
 
 ### (1) Scout modal — base stats + missing v5.1 slots
 
@@ -230,13 +260,28 @@ Live re-test after fix: both tabs of a separate test fight showed DRAW
 
 ---
 
+## What ALSO landed today — Market/Kiosk gauntlet (live, chain-verified)
+
+The 12-point Market/Kiosk gauntlet was walked end-to-end against the
+live v5.1 testnet kiosk and passed on every point — list, buy, cancel,
+royalty, withdraw, cross-wallet purchase, own-listing hidden from the
+seller's marketplace browser, kiosk-stuck retrieval. Suiscan confirmed
+each tx.
+
+**Listing count 23 (live) vs 52 (mint) explained.** The 26 Lv1 Ponke +
+26 Lv2 Scavenger sets minted into the TREASURY kiosk are the
+original 52. Across QA sessions items have been bought by Mr_Boss and
+Sx (gasless via zkLogin in many cases). 23 active listings = the
+remainder. NOT a bug — exactly matches the chain `kioskListed` set.
+
+---
+
 ## What was NOT verified in browser (carry-forward)
 
 | | Reason |
 |---|---|
-| Two-handed weapon blocking | Hadn't equipped a two-handed weapon yet; Lv2 Scavenger Uncommon catalog has candidates (`Nail Plank` slot_type=2). Chain enforces `EOffhandOccupied (6)` / `EWeaponIsTwoHanded (7)` — the last v5.1 chain rule not yet live-exercised |
-| More weapon variety in combat | All fights this session used the Lv1 Ponke starter set; broader weapon class behaviour (range, two-handed, etc.) unverified |
-| Lv2 "Scavenger" Uncommon items | Now that both wallets are Lv2 these are equippable — level-gate flip + Uncommon rarity stat-budget rendering both pending |
+| More weapon variety in combat | All fights so far used Lv1 Ponke / a single 2H trial; broader weapon-class damage-roll behavior unverified |
+| Lv2 "Scavenger" Uncommon items in combat | Both wallets are Lv2 with full catalog access; equip-walk verified, combat math with Uncommon stat-budget items unverified |
 | Full 13-slot save_loadout single-PTB walk | Tested 2-PTB walks (zkLogin) and a few slot edits; full 13-dirty single PTB still pending |
 
 ---
@@ -245,44 +290,41 @@ Live re-test after fix: both tabs of a separate test fight showed DRAW
 
 ```
 Welcome back to SUI Combats. v5.1 testnet still live, branch
-feature/v5.1-contracts. THREE FIXES from 2026-05-29 are in the working
-tree and NOT yet committed — commit them first to feature/v5.1-contracts
-(no merge to main):
+feature/v5.1-contracts @ origin 57027bd (pushed 2026-05-29 EOD).
+Working tree clean except pre-existing untracked items (.obsidian/,
+nft asset dirs, mint scripts, .env backup). main untouched at
+08ff991. No new commit needed to start — pick up testing.
 
-  (a) server/src/utils/wire-sanitize.ts (new)
-      server/src/ws/handler.ts (uses shared util)
-      server/src/data/player-profile.ts (uses shared util)
-      → scout-modal stat + 13-slot fix
+Two-handed weapon system is COMPLETE and live-verified. The last v5.1
+chain rule is closed; all 5 gauntlets green (146/146). The Market/
+Kiosk 12-point gauntlet PASSED. allocate_points verified on both
+signing paths. Mutual-KO settle_tie chain-verified end-to-end.
 
-  (b) frontend/src/components/fight/matchmaking-queue.tsx
-      → Arena wager-card clickable scout
+Bring runtime up:
+  cd server && npm run dev    # :3001 (ts-node, no watcher)
+  cd frontend && npm run dev  # :3000 (Next 16 Turbopack)
 
-  (c) frontend/src/components/fight/fight-result-modal.tsx
-      frontend/src/app/game-provider.tsx
-      → mutual-KO draw modal + sound
+Suggested next focus — pick whichever serves the v5.2 prep best:
 
-Server tsc and frontend tsc are both clean. All three were live-
-verified in browser. After committing, bring runtime up (npm run dev in
-server/ and frontend/) and run STEP 1-3:
+STEP 1 — Combat with more weapon variety
+    Walk a friendly/wager fight per weapon class (1H + shield,
+    dual-wield, 2H). Confirm damage rolls + offhand bonuses propagate.
+    Catch any resolver edge cases under the new slot_type-aware loadouts.
 
-STEP 1 — Two-handed weapon blocking (the last untested v5.1 chain rule)
-    Equip Nail Plank (slot_type=2) — chain MUST abort with
-    EOffhandOccupied (6) if offhand is already populated. Then equip
-    a one-handed weapon + shield, then try Nail Plank — must abort
-    EWeaponIsTwoHanded (7). This exercises the slot_type contract layer
-    in production.
+STEP 2 — Lv2 Scavenger Uncommon combat
+    Both wallets are Lv2 with full Uncommon access. Verify combat
+    math with budget≤40 stat-budget items: damage scaling, evasion
+    rolls, the rarity-budget invariant in practice.
 
-STEP 2 — Combat with more weapon variety
-    Re-run a friendly/wager fight with each available weapon class
-    (1H + shield, dual-wield, 2H). Confirm damage rolls + offhand
-    bonuses propagate. Catch any resolver edge cases.
+STEP 3 — Full 13-slot save_loadout single-PTB walk
+    Stage 13 dirty slots in one save. Confirm the PTB ordering rule
+    (unequips-before-equips) holds at full width. Useful gas-budget
+    check too — SAVE_LOADOUT_GAS_BUDGET = 200M MIST.
 
-STEP 3 — Lv2 Scavenger Uncommon equip walk
-    Both Mr_Boss and Sx are now Lv2. Equip one of each Uncommon item
-    type. Confirm:
-      - Level-gate flips correctly (was blocking at Lv1 last session)
-      - Rarity stat-budget bars render the Uncommon tier (budget ≤40)
-      - 13-slot doll panel still consistent
+STEP 4 — v5.2 scope kick-off
+    Open the v5.2 backlog (see STATE_OF_PROJECT_2026-05-29.md
+    "v5.2 backlog status delta"). sui::random, respec,
+    settle_wager_attested are the main contract-side items.
 
 Live wallets:
   Mr_Boss (Slush)   0x06d6cb677518cc70884df24541d91d7a1d2ca5db2d8628a69568172652239624
