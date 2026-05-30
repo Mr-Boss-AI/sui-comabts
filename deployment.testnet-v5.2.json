@@ -34,18 +34,56 @@
   },
 
   "transferPolicy": {
-    "_status": "PENDING — TransferPolicy<Item> not yet created by the publish itself. Requires separate PTB using the Publisher cap to (a) create the policy, (b) add the royalty rule via royalty_rule::add_to_policy, and (c) transfer the resulting TransferPolicyCap to TREASURY. v5.1 had this at 0x0483cd85…13f69f; v5.2 needs its own because TransferPolicy is typed by the new package's Item type.",
+    "policy": "0x7d2aa5d31544d16b28998a7bfdce112c2bd02be79da7f9fbbd34e63d41de568d",
+    "policyCap": "0x93efafa2f2038476b209af420efb00f1fd7c12054290249c2707c67639359f1d",
+    "setupDigest": "GP76N2VK2dKe36fC3RZf68DJULjKRVpA1VmsX7mxNeGC",
+    "setupAt": "2026-05-30",
+    "policyType": "0x2::transfer_policy::TransferPolicy<0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f::item::Item>",
+    "policyCapType": "0x2::transfer_policy::TransferPolicyCap<0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f::item::Item>",
+    "policyOwner": "Shared (initial_shared_version 882946457)",
+    "policyCapOwner": "AddressOwner (TREASURY 0x975f1b34…19d4d)",
+    "royaltyRule": {
+      "module": "0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f::royalty_rule",
+      "amount_bp": 250,
+      "min_amount_mist": 1000,
+      "_note": "Royalty owed per sale = paid_price * 250 / 10_000 (2.5%), floor 1000 MIST. Same rate/floor as v5.1 — pulled from marketplace.move::ROYALTY_BPS / ROYALTY_MIN_MIST constants. Setup via marketplace::setup_transfer_policy(publisher) which is a single helper that creates policy + cap + adds the rule + shares + transfers cap to sender."
+    },
     "_v51_reference": {
       "transferPolicy": "0x0483cd855318921a330ff2d8967fb925382d76c7360a29a5d2bbf676bd13f69f",
-      "transferPolicyCap": "0xee5a808c9aa22daf8c57420fa06e9ae0073b0d6a22e55a8be7c84da3f6ed31c8"
+      "transferPolicyCap": "0xee5a808c9aa22daf8c57420fa06e9ae0073b0d6a22e55a8be7c84da3f6ed31c8",
+      "_note": "v5.1 policy/cap remain live for v5.1 Items only — typed to the v5.1 package's Item. v5.2 catalog will use the v5.2 objects above."
     }
   },
 
   "display": {
-    "_status": "PENDING — Display<Character> and Display<Item> not yet created. Requires separate PTBs using the Publisher cap. v5.1 had these at 0x94a85532…fc0885 (character) and 0x32bdda84…a5aa658 (item).",
+    "character": "0x9c8fc218e52a7bab1a95aa2bbbfbf9199243523cc8cd94d7e5cecb1db2b07b8b",
+    "item": "0x8b75f8f6d90be38f41ddd4105b73e8f3857ad53d510e140b18bd46c1580fa88e",
+    "characterDigest": "6QJmXSmDpYLLqhB5QNXhdmcr7BzM1vcJU32PLnLvmScZ",
+    "itemDigest": "5L7AshLPQjcwHSkNAVxTBJWSExhRg1mG1EnGaquU3ZXW",
+    "setupAt": "2026-05-30",
+    "characterType": "0x2::display::Display<0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f::character::Character>",
+    "itemType": "0x2::display::Display<0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f::item::Item>",
+    "characterOwner": "AddressOwner (TREASURY)",
+    "itemOwner": "AddressOwner (TREASURY)",
+    "fields": {
+      "character": {
+        "name": "{name}",
+        "description": "SUI Combats — Lv{level} fighter, {wins}W / {losses}L / {draws}D, {rating} ELO",
+        "image_url": "https://gateway.pinata.cloud/ipfs/bafybeiarz5gk3selzpjclugdl2odmvdtbtvi7gtky65m7chkyjymci3yfy/character.png",
+        "link": "https://testnet.suivision.xyz/object/{id}"
+      },
+      "item": {
+        "name": "{name}",
+        "description": "SUI Combats item — Lv{level_req}+ required.",
+        "image_url": "{image_url}",
+        "link": "https://testnet.suivision.xyz/object/{id}"
+      },
+      "_note": "Same 4-field schema as v5.1 (name/description/image_url/link). Character template references v5.1's wins/losses/draws/rating placeholders — v5.2 chain Character struct still exposes those fields unchanged. Item template uses the per-item image_url field directly so each NFT carries its own Pinata URL from mint."
+    },
     "_v51_reference": {
       "character": "0x94a855326a01a91e247a8062d9c475eddf5770829f52d7dbfceef535a5fc0885",
-      "item": "0x32bdda84dd589ed21e804171b924cc5b3676f97b35b55dff2d064d035a5aa658"
+      "item": "0x32bdda84dd589ed21e804171b924cc5b3676f97b35b55dff2d064d035a5aa658",
+      "_note": "v5.1 Display objects still apply to v5.1 NFTs only. v5.2 NFTs (Characters minted under v5.2, Items in v5.2 kiosk) will render via the v5.2 Display objects above."
     }
   },
 
@@ -61,14 +99,21 @@
   ],
 
   "gas": {
-    "computationCostMist": 1680000,
-    "storageCostMist": 184953600,
-    "storageRebateMist": 978120,
-    "nonRefundableStorageFeeMist": 9880,
-    "netCostMist": 185655480,
-    "netCostSui": 0.18565548,
-    "treasuryBalanceBeforeSui": 2.35,
-    "treasuryBalanceAfterSui": 2.17,
+    "publish": {
+      "computationCostMist": 1680000,
+      "storageCostMist": 184953600,
+      "storageRebateMist": 978120,
+      "nonRefundableStorageFeeMist": 9880,
+      "netCostMist": 185655480,
+      "netCostSui": 0.18565548
+    },
+    "postPublishSetup": {
+      "_note": "Three PTBs: setup_transfer_policy + Display<Character> + Display<Item>. Total approx based on treasury delta.",
+      "netCostSui": 0.0167
+    },
+    "treasuryBalanceBeforePublishSui": 2.35,
+    "treasuryBalanceAfterPublishSui": 2.17,
+    "treasuryBalanceAfterSetupSui": 2.15,
     "gasObjectId": "0x75914b66cebc3094cbe5e6039514153897892700241f7b18b8a31d423fdddea1"
   },
 
@@ -192,11 +237,12 @@
   },
 
   "pendingPostPublish": [
-    "Create TransferPolicy<Item> + add royalty_rule + transfer TransferPolicyCap to TREASURY (separate PTB; ~0.003 SUI based on v5.1)",
-    "Create Display<Character> + Display<Item> using the Publisher cap (separate PTBs; ~0.006 SUI based on v5.1)",
-    "Wire frontend + server config to new package id + new shared object ids + new caps (STEP 3, gated on user direction)",
-    "Mint v5.2 catalog into TREASURY kiosk OR migrate / re-list from v5.1 kiosk",
-    "Two-wallet live QA against v5.2 testnet — flagship paths from STATE_OF_PROJECT (full wager cycle, mutual-KO settle_tie, level-bracket abort copy, creator approval flow, reclaim_stalled_wager dry-run)"
+    "✅ DONE 2026-05-30 — TransferPolicy<Item> + royalty rule (digest GP76N2VK2dKe36fC3RZf68DJULjKRVpA1VmsX7mxNeGC)",
+    "✅ DONE 2026-05-30 — Display<Character> (digest 6QJmXSmDpYLLqhB5QNXhdmcr7BzM1vcJU32PLnLvmScZ)",
+    "✅ DONE 2026-05-30 — Display<Item> (digest 5L7AshLPQjcwHSkNAVxTBJWSExhRg1mG1EnGaquU3ZXW)",
+    "PENDING — Wire frontend + server config to new package id + new shared object ids + new caps (next step, gated on user direction)",
+    "PENDING — Mint v5.2 catalog into TREASURY kiosk OR migrate / re-list from v5.1 kiosk",
+    "PENDING — Two-wallet live QA against v5.2 testnet — flagship paths from STATE_OF_PROJECT (full wager cycle, mutual-KO settle_tie, level-bracket abort copy, creator approval flow, reclaim_stalled_wager dry-run)"
   ],
 
   "rollback": {
