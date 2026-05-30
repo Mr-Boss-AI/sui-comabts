@@ -145,6 +145,12 @@ export interface Character {
   equipment: EquipmentSlots;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter mirrored from the on-chain
+   *  `Character.draws: u32`. Server hydrates this via `fields.draws`
+   *  during chain reads and carries it on every `character_data` WS
+   *  payload alongside `wins` / `losses`. Renders as the D in W/L/D
+   *  across the ladder, profile, and scout modal. */
+  draws: number;
   rating: number;
   walletAddress: string;
   /** Server-pinned canonical chain Character NFT id. The server resolves
@@ -344,6 +350,9 @@ export interface LeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter from chain `Character.draws`.
+   *  Renders as the D in the ladder W/L/D column. */
+  draws: number;
   /** Bucket 3 Hall of Fame — optional stat block used by the build
    *  classifier (Crit / Evasion / Tank / Hybrid). Returns 'hybrid'
    *  when missing so older server builds stay compatible. */

@@ -73,6 +73,7 @@ app.get('/api/character/:walletAddress', (req, res) => {
       gold: character.gold,
       wins: character.wins,
       losses: character.losses,
+      draws: character.draws,
       rating: character.rating,
     },
   });
@@ -309,6 +310,7 @@ app.post('/api/admin/repin-character', async (req, res) => {
     Number(fields.unallocated_points ?? 0),
     Number(fields.wins ?? 0),
     Number(fields.losses ?? 0),
+    Number(fields.draws ?? 0),
     Number(fields.rating ?? 1000),
     characterId,
   );
@@ -339,6 +341,7 @@ app.post('/api/admin/repin-character', async (req, res) => {
           equipment: restored.character.equipment,
           wins: restored.character.wins,
           losses: restored.character.losses,
+          draws: restored.character.draws,
           rating: restored.character.rating,
         },
       }));

@@ -36,8 +36,19 @@ export interface PlayerProfileWire {
   rating: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter mirrored from chain Character.draws. */
+  draws: number;
+  /** Sum of wins + losses + draws. Draws ARE counted as fights — a
+   *  mutual KO is still a chain-recorded combat. */
   totalFights: number;
-  winRate: number; // 0..1
+  /** Win rate as a fraction in `[0, 1]`. Convention: **draws excluded
+   *  from the denominator** (`wins / (wins + losses)`). A character
+   *  with only draws renders 0% — they've not yet won a decisive
+   *  fight. This matches the MMO/PvP "decided fights only" semantic;
+   *  see `lib/hall-of-fame-display.ts` for the matching frontend
+   *  helper. The D in the W/L/D record carries the draw count
+   *  separately so the percentage isn't lying. */
+  winRate: number;
   stats: {
     strength: number;
     dexterity: number;
@@ -56,8 +67,13 @@ export function characterToProfileWire(
   character: Character,
   fresh: boolean,
 ): PlayerProfileWire {
-  const totalFights = character.wins + character.losses;
-  const winRate = totalFights === 0 ? 0 : character.wins / totalFights;
+  // Draws ARE fights (mutual KO is a real chain-recorded combat) — they
+  // contribute to totalFights. But they DON'T enter the winRate
+  // denominator — see PlayerProfileWire.winRate docs above. Decided
+  // fights only.
+  const decidedFights = character.wins + character.losses;
+  const totalFights = decidedFights + character.draws;
+  const winRate = decidedFights === 0 ? 0 : character.wins / decidedFights;
   return {
     walletAddress: character.walletAddress,
     name: character.name,
@@ -66,6 +82,7 @@ export function characterToProfileWire(
     rating: character.rating,
     wins: character.wins,
     losses: character.losses,
+    draws: character.draws,
     totalFights,
     winRate: Math.round(winRate * 1000) / 1000, // 3 decimals
     stats: { ...character.stats },

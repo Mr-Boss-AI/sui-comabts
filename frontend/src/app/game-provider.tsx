@@ -727,6 +727,7 @@ export default function GameProvider({
             unallocatedPoints: nft.unallocatedPoints,
             wins: nft.wins,
             losses: nft.losses,
+            draws: nft.draws,
             rating: nft.rating,
           });
           // Phase stays "chain_check_pending" — LoadingScreen continues

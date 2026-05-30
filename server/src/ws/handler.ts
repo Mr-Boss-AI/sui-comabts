@@ -810,6 +810,7 @@ async function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessag
   const unallocatedPoints = Number(msg.unallocatedPoints) || 0;
   const wins = Number(msg.wins) || 0;
   const losses = Number(msg.losses) || 0;
+  const draws = Number(msg.draws) || 0;
   const rating = Number(msg.rating) || 1000;
   // Frontend's `fetchCharacterNFT` already resolved the canonical chain id —
   // pin it now so every later admin call (update_after_fight, set_fight_lock,
@@ -823,7 +824,7 @@ async function handleRestoreCharacter(client: ConnectedClient, msg: ClientMessag
     client.walletAddress,
     name,
     { strength, dexterity, intuition, endurance },
-    level, xp, unallocatedPoints, wins, losses, rating,
+    level, xp, unallocatedPoints, wins, losses, draws, rating,
     onChainObjectId,
   );
 
@@ -1218,6 +1219,7 @@ function handleGetLeaderboard(client: ConnectedClient): void {
     rating: e.rating,
     wins: e.wins,
     losses: e.losses,
+    draws: e.draws,
     stats: e.stats,
   }));
   send(client, {
@@ -1790,6 +1792,7 @@ function sanitizeCharacter(character: any): Record<string, any> {
     equipment: sanitizeEquipment(character.equipment),
     wins: character.wins,
     losses: character.losses,
+    draws: character.draws,
     rating: character.rating,
   };
 }

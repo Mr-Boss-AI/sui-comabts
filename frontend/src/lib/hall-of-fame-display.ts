@@ -48,12 +48,37 @@ export function paginateEntries(
   };
 }
 
-/** Formats wins/losses into an integer percentage. Mirrors the
- *  existing leaderboard.tsx behaviour: 0% when no fights. */
-export function formatWinRatePct(wins: number, losses: number): number {
-  const total = wins + losses;
-  if (total <= 0) return 0;
-  return Math.round((wins / total) * 100);
+/**
+ * Win-rate as an integer percentage.
+ *
+ * **Draw convention: draws are EXCLUDED from the denominator** —
+ * `wins / (wins + losses)`, ignoring D. Rationale:
+ *   - Standard MMO/PvP semantic — "out of decided fights, how often
+ *     did you win?" — the question players intuitively ask.
+ *   - The D column already surfaces draws separately, so excluding
+ *     them from the percentage doesn't hide information.
+ *   - Chess-style "score percentage" (draws = 0.5) would make a
+ *     player with 0W / 0L / 10D read as 50%, which over-states
+ *     performance — they haven't actually won anything.
+ *
+ * Returns 0% when there are no decided fights (any combination of W,
+ * L, D where W + L = 0). Mirrors the existing 0% behavior for
+ * brand-new characters.
+ *
+ * The `draws` parameter is accepted for symmetry with the W/L/D
+ * render path even though it doesn't influence the result — keeps
+ * call sites uniformly shaped and makes the convention obvious from
+ * the call. Server-side mirror lives in
+ * `server/src/data/player-profile.ts::characterToProfileWire`.
+ */
+export function formatWinRatePct(
+  wins: number,
+  losses: number,
+  _draws: number = 0,
+): number {
+  const decided = wins + losses;
+  if (decided <= 0) return 0;
+  return Math.round((wins / decided) * 100);
 }
 
 /** Rank color class — gold for #1, silver for #2, bronze for #3, dim

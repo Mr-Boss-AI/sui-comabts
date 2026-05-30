@@ -100,6 +100,7 @@ function entry(
   losses: number,
   stats?: CharacterStats,
   walletAddress?: string,
+  draws: number = 0,
 ): LeaderboardEntry {
   return {
     rank,
@@ -109,6 +110,7 @@ function entry(
     rating,
     wins,
     losses,
+    draws,
     stats,
   };
 }
@@ -428,15 +430,77 @@ function main(): void {
   eq(PAGE_SIZE, 20, 'PAGE_SIZE constant is 20 per design');
 
   // ===========================================================================
-  // [15] formatWinRatePct — display rounding
+  // [15] formatWinRatePct — display rounding (no draws — back-compat)
   // ===========================================================================
-  console.log('\n[15] formatWinRatePct');
+  console.log('\n[15] formatWinRatePct (no draws — back-compat)');
   eq(formatWinRatePct(0, 0), 0, '0/0 → 0%');
   eq(formatWinRatePct(1, 1), 50, '1/2 → 50%');
   eq(formatWinRatePct(7, 3), 70, '7/10 → 70%');
   eq(formatWinRatePct(2, 1), 67, '2/3 → 67% (rounded)');
   eq(formatWinRatePct(1, 2), 33, '1/3 → 33% (rounded)');
   eq(formatWinRatePct(10, 0), 100, '10/10 → 100%');
+
+  // ===========================================================================
+  // [15.5] formatWinRatePct — draws excluded from denominator (v5.1)
+  //
+  // Convention: draws are NOT decided fights and do not affect win%.
+  // The D column on the ladder surfaces draws separately. See JSDoc on
+  // lib/hall-of-fame-display.ts::formatWinRatePct for the rationale.
+  // Pinned here so a future refactor can't silently switch to chess-style
+  // "draws as half" without flipping this gauntlet.
+  // ===========================================================================
+  console.log('\n[15.5] formatWinRatePct — draws excluded from denominator');
+  eq(formatWinRatePct(3, 0, 1), 100,
+    '3W 0L 1D → 100% (the draw doesn\'t pull the percentage down)');
+  eq(formatWinRatePct(7, 3, 5), 70,
+    '7W 3L 5D → 70% (same as 7/10; D ignored)');
+  eq(formatWinRatePct(0, 0, 10), 0,
+    '0W 0L 10D → 0% (no decided fights → no rate to compute)');
+  eq(formatWinRatePct(5, 5, 0), 50,
+    '5W 5L 0D → 50% (sanity: 0 draws behaves like the old signature)');
+  eq(formatWinRatePct(5, 5, 100), 50,
+    '5W 5L 100D → 50% (draw count cannot move the needle)');
+  // Mr_Boss + Sx live state after the 2026-05-29 mutual KO: each has
+  // exactly one draw and a small win/loss history. Pin a concrete case
+  // so the live render contract stays asserted.
+  eq(formatWinRatePct(2, 1, 1), 67,
+    'Mr_Boss-shaped: 2W 1L 1D → 67% (decided = 3, win = 2)');
+
+  // ===========================================================================
+  // [15.6] LeaderboardEntry render contract — W/L/D + winPct
+  //
+  // Pin that an entry with non-zero draws renders consistently across
+  // the ladder column + the win% column. The ladder rows in
+  // components/social/leaderboard.tsx read `entry.wins`,
+  // `entry.losses`, `entry.draws` and pass them to formatWinRatePct in
+  // the win% cell. Failure here means the wire payload OR the render
+  // path lost the draws value.
+  // ===========================================================================
+  console.log('\n[15.6] LeaderboardEntry render contract (W/L/D + win%)');
+  {
+    const entry: LeaderboardEntry = {
+      rank: 1, walletAddress: '0xabc', name: 'Mr_Boss',
+      rating: 1050, wins: 2, losses: 1, draws: 1, level: 4,
+    };
+    eq(entry.draws, 1, 'entry carries draws on the wire');
+    eq(formatWinRatePct(entry.wins, entry.losses, entry.draws), 67,
+      'entry with draws renders 67% win rate');
+    // Format the W/L/D triple the way the LadderRow does:
+    const rendered = `${entry.wins} / ${entry.losses} / ${entry.draws}`;
+    eq(rendered, '2 / 1 / 1',
+      'LadderRow W/L/D column renders as "W / L / D"');
+  }
+  // Zero-draws case stays back-compat:
+  {
+    const entry: LeaderboardEntry = {
+      rank: 2, walletAddress: '0xdef', name: 'Sx',
+      rating: 1000, wins: 5, losses: 5, draws: 0, level: 3,
+    };
+    eq(`${entry.wins} / ${entry.losses} / ${entry.draws}`, '5 / 5 / 0',
+      'zero-draws entry still renders the D column (just "0")');
+    eq(formatWinRatePct(entry.wins, entry.losses, entry.draws), 50,
+      'zero-draws entry win% matches old behavior');
+  }
 
   // ===========================================================================
   // [16] rankColor — gold/silver/bronze/dim
@@ -593,6 +657,7 @@ function main(): void {
     rating: 1000,
     wins: 1,
     losses: 0,
+    draws: 0,
   };
   eq(classifyBuild(legacyEntry.stats), 'hybrid', 'missing stats → hybrid');
   const legacyHybrid = filterEntries([legacyEntry], {

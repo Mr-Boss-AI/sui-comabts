@@ -118,6 +118,8 @@ export interface OnChainCharacter {
   unallocatedPoints: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter from chain `Character.draws: u32`. */
+  draws: number;
   rating: number;
   loadoutVersion: number;
 }
@@ -186,6 +188,7 @@ export async function fetchCharacterNFT(
       unallocatedPoints: Number(json.unallocated_points ?? 0),
       wins: Number(json.wins ?? 0),
       losses: Number(json.losses ?? 0),
+      draws: Number(json.draws ?? 0),
       rating: Number(json.rating ?? 1000),
       loadoutVersion: Number(json.loadout_version ?? 0),
     };

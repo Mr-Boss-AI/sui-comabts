@@ -10,9 +10,11 @@ import { getAllCharacters } from './characters';
 export function getLeaderboard(limit: number = 100): LeaderboardEntry[] {
   const allChars = getAllCharacters();
 
-  // Sort by rating descending, then by wins descending as tiebreaker
+  // Sort by rating descending, then by wins descending as tiebreaker.
+  // Filter counts draws as fights too — a character that's only drawn
+  // still has shown up to the arena and deserves a ladder slot.
   const sorted = allChars
-    .filter((c) => c.wins + c.losses > 0) // Only show players who have fought
+    .filter((c) => c.wins + c.losses + c.draws > 0)
     .sort((a, b) => {
       if (b.rating !== a.rating) return b.rating - a.rating;
       if (b.wins !== a.wins) return b.wins - a.wins;
@@ -27,6 +29,7 @@ export function getLeaderboard(limit: number = 100): LeaderboardEntry[] {
     rating: char.rating,
     wins: char.wins,
     losses: char.losses,
+    draws: char.draws,
     level: char.level,
     stats: { ...char.stats },
   }));

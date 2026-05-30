@@ -135,6 +135,11 @@ export interface Character {
   gold: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter. Chain-side `Character.draws: u32`
+   *  is the source of truth; this field mirrors it so wire payloads
+   *  (and the in-memory leaderboard) can render W/L/D consistently.
+   *  Incremented by `update_after_fight_draw` admin entry; initial 0. */
+  draws: number;
   rating: number;
   unallocatedPoints: number;
   fightHistory: string[];
@@ -270,6 +275,8 @@ export interface LeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter mirrored from chain Character.draws. */
+  draws: number;
   level: number;
   /** Bucket 3 Hall of Fame — used by the frontend's build classifier
    *  (Crit / Evasion / Tank / Hybrid). Optional so the wire stays

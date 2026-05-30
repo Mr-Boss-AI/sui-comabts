@@ -1260,6 +1260,9 @@ function CenterInfoCard({
   const xpSpan = getXpSpanForLevel(character.level);
   const xpProgress = getXpProgress(character.level, character.xp);
   const isMaxLevel = character.level >= MAX_LEVEL;
+  // Draws excluded from the win% denominator — same convention as
+  // lib/hall-of-fame-display.ts::formatWinRatePct. See JSDoc there
+  // for the rationale ("decided fights only").
   const winRate =
     character.wins + character.losses > 0
       ? Math.round((character.wins / (character.wins + character.losses)) * 100)
@@ -1454,7 +1457,7 @@ function CenterInfoCard({
             letterSpacing: 0,
           }}
         >
-          {character.wins}W · {character.losses}L · {winRate}%
+          {character.wins}W · {character.losses}L · {character.draws}D · {winRate}%
         </span>
       </div>
 
@@ -1712,6 +1715,7 @@ function StatsColumn({
    * shape-fix is applied so reinstating it doesn't reintroduce the bug. */
   equipment: EquipmentSlots;
 }) {
+  // Draws excluded from win% denominator — see formatWinRatePct JSDoc.
   const winRate =
     character.wins + character.losses > 0
       ? Math.round((character.wins / (character.wins + character.losses)) * 100)
@@ -1778,7 +1782,7 @@ function StatsColumn({
                   fontWeight: 700,
                 }}
               >
-                {character.wins}W · {character.losses}L · {winRate}%
+                {character.wins}W · {character.losses}L · {character.draws}D · {winRate}%
               </span>
             </div>
           </div>

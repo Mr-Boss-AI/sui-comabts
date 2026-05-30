@@ -275,6 +275,13 @@ export function PlayerProfileModal() {
                 <span style={{ color: "var(--sc-blood)", fontWeight: 800 }}>
                   {profile.losses}
                 </span>
+                <span style={{ color: "var(--sc-rim-2)", margin: "0 6px" }}>·</span>
+                {/* v5.1 — Draws in neutral parchment (no win-green / loss-red).
+                    Matches the FightResultModal DRAW treatment + the ladder
+                    W/L/D column. */}
+                <span style={{ color: "var(--sc-parchment)", fontWeight: 800 }}>
+                  {profile.draws}
+                </span>
               </div>
               <div style={{ marginTop: 3 }}>
                 {profile.totalFights} fight{profile.totalFights === 1 ? "" : "s"}

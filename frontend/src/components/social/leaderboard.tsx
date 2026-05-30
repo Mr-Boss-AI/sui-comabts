@@ -66,7 +66,13 @@ const COLUMN_LABELS: Record<SortKey, string> = {
   rank: "#",
   level: "Lv",
   rating: "ELO",
-  wins: "W",
+  // v5.1 — combined W/L/D column. Sort key `wins` is the primary anchor
+  // (the column is sorted by W asc/desc); the L and D are shown
+  // alongside for full record visibility. The column header reads
+  // "W/L/D" but the SortKey vocabulary doesn't include `draws` because
+  // sorting by draws alone has no useful order (mutual KOs are
+  // recorded but aren't a meaningful "best player" axis on their own).
+  wins: "W/L/D",
   losses: "L",
   winRate: "Win%",
 };
@@ -384,7 +390,7 @@ export function Leaderboard() {
                         textTransform: "uppercase",
                       }}
                     >
-                      W / L
+                      W / L / D
                     </th>
                     <SortHeader column="winRate" sort={sort} onClick={clickHeader} align="right" />
                   </tr>
@@ -446,7 +452,7 @@ function LadderRow({
   isMe: boolean;
   onClick: () => void;
 }) {
-  const winPct = formatWinRatePct(entry.wins, entry.losses);
+  const winPct = formatWinRatePct(entry.wins, entry.losses, entry.draws);
   const build = classifyBuild(entry.stats);
   return (
     <tr
@@ -575,6 +581,11 @@ function LadderRow({
         <span style={{ color: "var(--rarity-uncommon)" }}>{entry.wins}</span>
         <span style={{ color: "var(--sc-rim-2)", margin: "0 4px" }}>/</span>
         <span style={{ color: "var(--sc-blood)" }}>{entry.losses}</span>
+        <span style={{ color: "var(--sc-rim-2)", margin: "0 4px" }}>/</span>
+        {/* v5.1 — Draws render in neutral parchment, matching the
+            FightResultModal "DRAW" treatment (no win-green, no
+            loss-red). A mutual KO isn't a defeat or a victory. */}
+        <span style={{ color: "var(--sc-parchment)" }}>{entry.draws}</span>
       </td>
       <td
         style={{

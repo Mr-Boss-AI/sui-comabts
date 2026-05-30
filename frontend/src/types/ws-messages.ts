@@ -46,6 +46,8 @@ export type ClientMessage =
       unallocatedPoints: number;
       wins: number;
       losses: number;
+      /** v5.1 — mirror of chain Character.draws (mutual-KO counter). */
+      draws: number;
       rating: number;
     }
   | { type: "get_character" }
@@ -348,7 +350,13 @@ export interface PlayerProfileWire {
   rating: number;
   wins: number;
   losses: number;
+  /** v5.1 — mirror of chain Character.draws (mutual-KO counter). */
+  draws: number;
+  /** Sum of wins + losses + draws. Draws ARE counted as fights. */
   totalFights: number;
+  /** Win rate as `[0, 1]`. **Draws excluded from denominator** —
+   *  `wins / (wins + losses)`. See lib/hall-of-fame-display.ts JSDoc
+   *  for the rationale (MMO/PvP "decided fights only" convention). */
   winRate: number;
   stats: {
     strength: number;

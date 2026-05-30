@@ -28,6 +28,10 @@ export interface DbCharacter {
   rating: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter mirrored from chain Character.draws.
+   *  Optional on the row type so legacy persisted rows still hydrate;
+   *  read path defaults to 0 when absent. */
+  draws?: number;
   unallocated_points?: number;
   /**
    * The on-chain Character NFT object ID this server-side record was hydrated
@@ -60,6 +64,7 @@ export async function dbSaveCharacter(char: Character): Promise<void> {
     rating: char.rating,
     wins: char.wins,
     losses: char.losses,
+    draws: char.draws,
     unallocated_points: char.unallocatedPoints,
     onchain_character_id: char.onChainObjectId ?? null,
     created_at: new Date(char.createdAt).toISOString(),

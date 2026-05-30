@@ -42,13 +42,15 @@ export const DEFAULT_DIR: Record<SortKey, SortDir> = {
   winRate: "desc",
 };
 
-/** Win-rate as a number in [0, 1]. Players with no fights count as 0.
- *  Pure — used by the comparator AND by the table renderer to avoid
- *  drift between display and sort order. */
+/** Win-rate as a number in [0, 1]. Players with no DECIDED fights
+ *  count as 0 (draws excluded from the denominator — same convention
+ *  as `formatWinRatePct` in hall-of-fame-display.ts; see the JSDoc
+ *  there for the rationale). Pure — used by the comparator AND by
+ *  the table renderer to avoid drift between display and sort order. */
 export function winRateFor(entry: LeaderboardEntry): number {
-  const total = entry.wins + entry.losses;
-  if (total <= 0) return 0;
-  return entry.wins / total;
+  const decided = entry.wins + entry.losses;
+  if (decided <= 0) return 0;
+  return entry.wins / decided;
 }
 
 /** Extract the sort field as a number. Stable across all entries. */
