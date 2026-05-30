@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
+/* Phase 2: tokens live in styles/design-tokens-v2.css (imported by
+   app/layout.tsx so they apply to the entire tree). The legacy
+   --background / --foreground pair is kept as a Tailwind-theme bridge
+   pointing at the new gunmetal canvas + parchment text. */
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
+  --background: #0a0d12;
+  --foreground: #e8e2d4;
 }
 
 /* dapp-kit: force light-theme inside wallet modal so text is readable.
@@ -24,15 +28,16 @@ mysten-dapp-kit-connect-button {
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Bridge the v2 font tokens into Tailwind's font-* utilities so
+     `font-sans` / `font-mono` / `font-display` reach the right family. */
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
-}
+/* Body inherits gunmetal background + parchment text from
+   design-tokens-v2.css; layout.tsx sets them as inline styles so they
+   apply pre-hydration even before this stylesheet parses. */
 
 /* Scrollbar styling */
 .scrollbar-thin::-webkit-scrollbar {

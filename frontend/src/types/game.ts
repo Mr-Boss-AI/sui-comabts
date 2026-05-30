@@ -21,6 +21,10 @@ export const ITEM_TYPES = {
   BELT: 7,
   RING: 8,
   NECKLACE: 9,
+  // v5.1 (2026-05-28 PM, final) — 2 new wearable types for the 13-slot
+  // loadout. (Third v5.1 slot is ring_3, which reuses RING=8.)
+  PANTS: 10,
+  BRACELETS: 11,
 } as const;
 export type ItemType = (typeof ITEM_TYPES)[keyof typeof ITEM_TYPES];
 
@@ -34,7 +38,26 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   7: "Belt",
   8: "Ring",
   9: "Necklace",
+  10: "Pants",
+  11: "Bracelets",
 };
+
+// v5.1 — slot_type primitive. Mirrors contracts/sources/item.move SLOT_*
+// constants. The chain stamps slot_type on every minted Item and consumes
+// it in equipment.move equip_weapon / equip_offhand to enforce the
+// shield-vs-dual-wield-vs-two-handed trinity. The frontend reads the
+// chain field directly (via fetchOwnedItems / fetchKioskItems / server
+// WS payloads sanitized through utils/wire-sanitize.ts) so picker and
+// loadout-save logic never need a hardcoded name allowlist again.
+export const SLOT_TYPES = {
+  /** Single-handed mainhand weapon. Goes in the weapon slot only. */
+  MAINHAND: 0,
+  /** Off-hand item (shield, off-hand weapon for dual-wield). Goes in offhand only. */
+  OFFHAND: 1,
+  /** Two-handed weapon. Goes in the weapon slot AND requires the offhand slot empty. */
+  BOTH_HANDS: 2,
+} as const;
+export type SlotType = (typeof SLOT_TYPES)[keyof typeof SLOT_TYPES];
 
 export const RARITIES = {
   COMMON: 1,
@@ -122,8 +145,24 @@ export interface Character {
   equipment: EquipmentSlots;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter mirrored from the on-chain
+   *  `Character.draws: u32`. Server hydrates this via `fields.draws`
+   *  during chain reads and carries it on every `character_data` WS
+   *  payload alongside `wins` / `losses`. Renders as the D in W/L/D
+   *  across the ladder, profile, and scout modal. */
+  draws: number;
   rating: number;
   walletAddress: string;
+  /** Server-pinned canonical chain Character NFT id. The server resolves
+   *  this once at auth/restore time and uses it for every admin call
+   *  (update_after_fight, set_fight_lock, DOF reads). The frontend uses
+   *  it to bypass the descending CharacterCreated event scan in
+   *  `fetchCharacterNFT` for wallets that have minted multiple Characters
+   *  — without this, the frontend would read chain state from the WRONG
+   *  NFT (the newest event), producing permanent server/chain
+   *  disagreement (BUG E, 2026-05-02 retest #2). null when the server
+   *  hasn't yet pinned an id for legacy records. */
+  onChainObjectId?: string | null;
 }
 
 // ===== EQUIPMENT =====
@@ -137,7 +176,11 @@ export interface EquipmentSlots {
   belt: Item | null;
   ring1: Item | null;
   ring2: Item | null;
+  ring3: Item | null;
   necklace: Item | null;
+  // v5.1 (2026-05-28 PM, final) — 3 new slots: ring_3, pants, bracelets.
+  pants: Item | null;
+  bracelets: Item | null;
 }
 
 export const EQUIPMENT_SLOT_LABELS: Record<keyof EquipmentSlots, string> = {
@@ -150,7 +193,10 @@ export const EQUIPMENT_SLOT_LABELS: Record<keyof EquipmentSlots, string> = {
   belt: "Belt",
   ring1: "Ring 1",
   ring2: "Ring 2",
+  ring3: "Ring 3",
   necklace: "Necklace",
+  pants: "Pants",
+  bracelets: "Bracelets",
 };
 
 export const SLOT_TO_ITEM_TYPE: Record<keyof EquipmentSlots, ItemType[]> = {
@@ -163,7 +209,10 @@ export const SLOT_TO_ITEM_TYPE: Record<keyof EquipmentSlots, ItemType[]> = {
   belt: [ITEM_TYPES.BELT],
   ring1: [ITEM_TYPES.RING],
   ring2: [ITEM_TYPES.RING],
+  ring3: [ITEM_TYPES.RING],
   necklace: [ITEM_TYPES.NECKLACE],
+  pants: [ITEM_TYPES.PANTS],
+  bracelets: [ITEM_TYPES.BRACELETS],
 };
 
 // ===== ITEMS =====
@@ -175,11 +224,35 @@ export interface Item {
   classReq: number;
   levelReq: number;
   rarity: Rarity;
+  /** v5.1 — chain `Item.slot_type` (`SLOT_TYPES.MAINHAND` | `OFFHAND` |
+   *  `BOTH_HANDS`). Optional because legacy server-only NPC items have no
+   *  chain representation and therefore no slot_type — undefined is
+   *  treated as MAINHAND for compatibility, which is the only sane
+   *  default for non-weapon armor pieces anyway. Populated by every
+   *  chain hydrator (lib/sui-contracts.ts) and by the server wire
+   *  sanitizer for wire-borne items. */
+  slotType?: SlotType;
   statBonuses: StatBonuses;
   minDamage: number;
   maxDamage: number;
   price?: number;
+  /** True iff the NFT is currently a dynamic-object-field of a Kiosk
+   *  (either listed for sale OR placed-but-unlisted). Set by
+   *  `fetchKioskItems` in `lib/sui-contracts.ts`. */
   inKiosk?: boolean;
+  /** True iff the NFT is currently listed for sale on the marketplace.
+   *  Computed at render time by cross-referencing
+   *  `state.marketplaceListings`. Implies `inKiosk: true`. When
+   *  `inKiosk && !kioskListed` the item is "stuck" — placed in a kiosk
+   *  but not for sale — and the user can pull it back to their wallet
+   *  via the Retrieve action. */
+  kioskListed?: boolean;
+  /** Kiosk shared-object ID that physically holds this item, when
+   *  `inKiosk` is true. Required to address the correct kiosk when a
+   *  wallet owns more than one — e.g. the post-orphan-bug repair
+   *  flow where Retrieve / Delist must target the kiosk containing
+   *  the item, not the wallet's "primary" cap. */
+  kioskId?: string;
 }
 
 // ===== FIGHT =====
@@ -225,6 +298,11 @@ export interface FightState {
   winner?: string;
   wagerAmount?: number;
   turnDeadline?: number;
+  /** True while the server has paused the turn timer (one or more
+   *  players in the reconnect-grace window). The client mirrors this
+   *  flag into the TurnTimer's `paused` prop. */
+  turnPaused?: boolean;
+  turnPausedRemainingMs?: number | null;
 }
 
 // ===== CHAT =====
@@ -241,6 +319,14 @@ export interface ChatMessage {
 // ===== PRESENCE =====
 export type PlayerStatus = "online" | "in_fight" | "in_marketplace" | "idle";
 
+export type TavernRoom =
+  | "tavern"
+  | "character"
+  | "arena"
+  | "marketplace"
+  | "hall_of_fame"
+  | "fight";
+
 export interface OnlinePlayer {
   walletAddress: string;
   name: string;
@@ -248,6 +334,11 @@ export interface OnlinePlayer {
   rating: number;
   status: PlayerStatus;
   fightId?: string;
+  /** Bucket 3 — which surface the player is currently in. Driven by
+   *  the server's presence service; updated via `enter_room` WS
+   *  messages. Used by the player sidebar to render a small badge
+   *  ("⚒ Crafting" / "🛒 Shopping" / etc.). */
+  currentRoom?: TavernRoom;
 }
 
 // ===== LEADERBOARD =====
@@ -259,15 +350,27 @@ export interface LeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter from chain `Character.draws`.
+   *  Renders as the D in the ladder W/L/D column. */
+  draws: number;
+  /** Bucket 3 Hall of Fame — optional stat block used by the build
+   *  classifier (Crit / Evasion / Tank / Hybrid). Returns 'hybrid'
+   *  when missing so older server builds stay compatible. */
+  stats?: CharacterStats;
 }
 
 // ===== MARKETPLACE =====
 export interface MarketplaceListing {
   id: string;
   item: Item;
+  /** Sui Kiosk shared-object ID — required for buy / delist tx PTBs. */
+  kioskId: string;
   seller: string;
   sellerName: string;
+  /** Price in SUI (display-friendly). For exact arithmetic, use priceMist. */
   price: number;
+  /** Raw price in MIST as a decimal string (BigInt-safe). */
+  priceMist: string;
   listedAt: number;
 }
 
@@ -290,30 +393,77 @@ export interface LootBoxResult {
   item?: Item;
 }
 
-// ===== XP TABLE (Fibonacci-brutal) =====
-// XP needed to reach the next level (cumulative thresholds)
-const LEVEL_XP = [0, 8, 21, 55, 144, 377, 987, 2584];
-export const XP_TABLE: Record<number, number> = {
-  1: 0,
-  2: 8,
-  3: 29,
-  4: 84,
-  5: 228,
-  6: 605,
-  7: 1592,
-  8: 4176,
-};
+// ===== XP TABLE =====
+// CUMULATIVE XP required to BE at each level. Mirrors `character.move::xp_for_level`
+// exactly — chain is the source of truth (GDD §9.1). Index = level - 1.
+//   L1=0, L2=100, L3=300, L4=700, L5=1500, L6=3000, L7=6000, L8=12000,
+//   L9=25000, L10=50000, L11=80000, L12=120000, L13=170000, L14=250000,
+//   L15=350000, L16=430000, L17=550000, L18=700000, L19=850000, L20=1000000.
+export const MAX_LEVEL = 20;
 
+const LEVEL_XP_CUMULATIVE: readonly number[] = [
+  0,           // L1
+  100,         // L2
+  300,         // L3
+  700,         // L4
+  1_500,       // L5
+  3_000,       // L6
+  6_000,       // L7
+  12_000,      // L8
+  25_000,      // L9
+  50_000,      // L10
+  80_000,      // L11
+  120_000,     // L12
+  170_000,     // L13
+  250_000,     // L14
+  350_000,     // L15
+  430_000,     // L16
+  550_000,     // L17
+  700_000,     // L18
+  850_000,     // L19
+  1_000_000,   // L20
+];
+
+/** Cumulative XP threshold for `level`. Returns 0 below 1, the table value
+ * elsewhere, and Infinity past MAX_LEVEL so the bar never goes "above" max. */
+export function xpThresholdForLevel(level: number): number {
+  if (level <= 1) return 0;
+  if (level > MAX_LEVEL) return Number.POSITIVE_INFINITY;
+  return LEVEL_XP_CUMULATIVE[level - 1] ?? Number.POSITIVE_INFINITY;
+}
+
+/** Cumulative XP required to reach the level after `level`. `null` at MAX. */
 export function getXpForNextLevel(level: number): number | null {
-  if (level >= 8) return null;
-  return LEVEL_XP[level] || null;
+  if (level >= MAX_LEVEL) return null;
+  return xpThresholdForLevel(level + 1);
 }
 
+/** Progress 0..1 within the current level's XP band. Always returns 1 at MAX. */
 export function getXpProgress(level: number, xp: number): number {
-  const needed = LEVEL_XP[level];
-  if (!needed) return 1;
-  return Math.min(1, xp / needed);
+  if (level >= MAX_LEVEL) return 1;
+  const floor = xpThresholdForLevel(level);
+  const ceiling = xpThresholdForLevel(level + 1);
+  const span = ceiling - floor;
+  if (span <= 0 || !Number.isFinite(span)) return 1;
+  return Math.max(0, Math.min(1, (xp - floor) / span));
 }
+
+/** XP earned within the current level (0 at level start, span at threshold). */
+export function getXpInCurrentLevel(level: number, xp: number): number {
+  if (level >= MAX_LEVEL) return 0;
+  return Math.max(0, xp - xpThresholdForLevel(level));
+}
+
+/** XP needed to advance from `level` to `level + 1`. Returns 0 at MAX. */
+export function getXpSpanForLevel(level: number): number {
+  if (level >= MAX_LEVEL) return 0;
+  return xpThresholdForLevel(level + 1) - xpThresholdForLevel(level);
+}
+
+/** Convenience: cumulative table snapshot for tests / introspection. */
+export const XP_TABLE: Record<number, number> = Object.fromEntries(
+  LEVEL_XP_CUMULATIVE.map((v, i) => [i + 1, v]),
+);
 
 // ===== LEVEL UNLOCKS =====
 export const LEVEL_UNLOCKS: Record<number, string[]> = {

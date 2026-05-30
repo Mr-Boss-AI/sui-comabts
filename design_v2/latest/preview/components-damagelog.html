@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Damage Log</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#0E0E0C;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:18px;display:flex;flex-direction:column;gap:8px;}
+  .row{display:flex;align-items:flex-start;gap:10px;}
+  .who{font-family:"Slackey";font-size:14px;min-width:96px;text-align:right;padding-top:4px;}
+  .you{color:#c89a3f;}
+  .foe{color:#b53d2c;}
+  .bub{position:relative;background:#15191f;color:#e8e2d4;border:2px solid #e8e2d4;border-radius:12px;padding:8px 14px;font-size:13px;font-weight:600;flex:1;}
+  .bub::before{content:"";position:absolute;left:-8px;top:10px;width:0;height:0;border-style:solid;border-width:6px 8px 6px 0;border-color:transparent #e8e2d4 transparent transparent;}
+  .crit{background:#c89a3f;color:#0a0d12;font-weight:800;border-color:#b53d2c;}
+  .crit::before{border-right-color:#b53d2c;}
+  .miss{opacity:.6;font-style:italic;}
+  .dmg{font-family:"JetBrains Mono";font-weight:800;color:#b53d2c;margin:0 2px;}
+  .stamp{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:2px 6px;border-radius:4px;background:#b53d2c;color:#e8e2d4;margin-left:6px;}
+</style></head><body>
+<div class="wrap">
+  <div class="row"><div class="who you">YOU</div><div class="bub">Hit chest for <span class="dmg">−18</span></div></div>
+  <div class="row"><div class="who foe">FOE</div><div class="bub">Blocked head — <span class="dmg" style="color:#3a6a9a">0</span> dmg</div></div>
+  <div class="row"><div class="who you">YOU</div><div class="bub crit">CRIT stomach <span class="dmg">−47</span><span class="stamp">×1.85</span></div></div>
+  <div class="row"><div class="who foe">FOE</div><div class="bub miss">Whiffed legs — you dodged</div></div>
+</div>
+</body></html>

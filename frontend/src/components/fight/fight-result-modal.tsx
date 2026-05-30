@@ -19,67 +19,176 @@ export function FightResultModal({
   myAddress,
   onClose,
 }: FightResultModalProps) {
-  const won = fight.winner === myAddress;
+  // Three-state outcome. The server emits `fight.winner = null` (literal)
+  // on a mutual-KO draw — verified against fight-room.ts:820–880, which
+  // assigns `fightPayload.winner = winnerWallet || null`. Treat both null
+  // and undefined as draw defensively. Win/loss branches are unchanged.
+  const outcome: "win" | "loss" | "draw" =
+    fight.winner == null
+      ? "draw"
+      : fight.winner === myAddress
+        ? "win"
+        : "loss";
+  const isDraw = outcome === "draw";
+  const won = outcome === "win";
+
+  const modalTitle = isDraw ? "Draw" : won ? "Victory!" : "Defeat";
+  const bigText = isDraw ? "DRAW" : won ? "YOU WIN" : "YOU LOSE";
+  const bigColor = isDraw
+    ? "var(--sc-parchment)"
+    : won
+      ? "var(--rarity-uncommon)"
+      : "var(--sc-blood)";
+  const bigShadow = isDraw
+    ? "3px 3px 0 #000"
+    : won
+      ? "3px 3px 0 #000, 0 0 24px rgba(74,156,74,.4)"
+      : "3px 3px 0 #000, 0 0 24px rgba(181,61,44,.4)";
 
   return (
-    <Modal open onClose={onClose} title={won ? "Victory!" : "Defeat"}>
-      <div className="text-center space-y-4">
+    <Modal open onClose={onClose} title={modalTitle}>
+      <div
+        style={{
+          textAlign: "center",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+          fontFamily: "var(--font-ui)",
+          color: "var(--sc-parchment)",
+        }}
+      >
         <div
-          className={`text-5xl font-black ${won ? "text-emerald-400" : "text-red-400"}`}
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 56,
+            lineHeight: 1.05,
+            color: bigColor,
+            letterSpacing: "0.02em",
+            textShadow: bigShadow,
+          }}
         >
-          {won ? "YOU WIN" : "YOU LOSE"}
+          {bigText}
         </div>
 
-        <div className="text-zinc-400 text-sm">
-          {fight.playerA.name} vs {fight.playerB.name} — {fight.log?.length ?? 0}{" "}
-          turns
+        <div style={{ color: "var(--fg-3)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+          {fight.playerA.name} vs {fight.playerB.name} — {fight.log?.length ?? 0} turns
         </div>
 
-        <div className="border-t border-zinc-800 pt-4 space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-zinc-400">XP Gained</span>
-            <span className="text-blue-400 font-bold">+{loot.xpGained}</span>
+        <div
+          style={{
+            borderTop: "1px solid var(--sc-rim)",
+            paddingTop: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <span style={{ color: "var(--fg-3)" }}>XP Gained</span>
+            <span style={{ color: "var(--sc-steel)", fontWeight: 800, fontFamily: "var(--font-mono)" }}>
+              +{loot.xpGained}
+            </span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-zinc-400">Rating</span>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <span style={{ color: "var(--fg-3)" }}>Rating</span>
             <span
-              className={`font-bold ${loot.ratingChange >= 0 ? "text-emerald-400" : "text-red-400"}`}
+              style={{
+                fontWeight: 800,
+                fontFamily: "var(--font-mono)",
+                // Draw: neutral so a green +0 doesn't read as "you gained".
+                // Win/loss: unchanged ternary.
+                color: isDraw
+                  ? "var(--sc-parchment)"
+                  : loot.ratingChange >= 0
+                    ? "var(--rarity-uncommon)"
+                    : "var(--sc-blood)",
+              }}
             >
               {loot.ratingChange >= 0 ? "+" : ""}
               {loot.ratingChange}
             </span>
           </div>
           {fight.wagerAmount && fight.wagerAmount > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-zinc-400">Wager</span>
-              <span
-                className={`font-bold ${won ? "text-emerald-400" : "text-red-400"}`}
-              >
-                {won ? "+" : "-"}
-                {fight.wagerAmount} SUI
-              </span>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+              <span style={{ color: "var(--fg-3)" }}>Wager</span>
+              {isDraw ? (
+                // Mutual-KO refund via arena::settle_tie — 100% of the
+                // stake returns to each side (verified on chain via the
+                // WagerTied event's `refund_each` field). Render as a
+                // refund, never with a minus sign.
+                <span
+                  style={{
+                    fontWeight: 800,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--sc-bronze)",
+                  }}
+                >
+                  Refunded · {fight.wagerAmount} SUI returned
+                </span>
+              ) : (
+                <span
+                  style={{
+                    fontWeight: 800,
+                    fontFamily: "var(--font-mono)",
+                    color: won ? "var(--sc-bronze)" : "var(--sc-blood)",
+                  }}
+                >
+                  {won ? "+" : "-"}
+                  {fight.wagerAmount} SUI
+                </span>
+              )}
             </div>
           )}
         </div>
 
         {loot.item && (
-          <div className="border-t border-zinc-800 pt-4">
-            <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">
+          <div style={{ borderTop: "1px solid var(--sc-rim)", paddingTop: 14 }}>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "var(--ls-stamp)",
+                textTransform: "uppercase",
+                color: "var(--sc-bronze)",
+                marginBottom: 6,
+              }}
+            >
               Loot Drop!
             </div>
-            <div className="bg-zinc-800 rounded-lg p-3 flex items-center gap-3">
-              <div className="text-2xl">
+            <div
+              style={{
+                background: "var(--sc-panel-2)",
+                border: "1px solid var(--sc-bronze-deep)",
+                borderLeft: "3px solid var(--sc-bronze)",
+                padding: 10,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                textAlign: "left",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 22,
+                  color: "var(--sc-bronze)",
+                  fontFamily: "var(--font-display)",
+                }}
+              >
                 {loot.item.rarity >= 4 ? "✦" : loot.item.rarity >= 3 ? "◆" : "•"}
               </div>
-              <div className="text-left">
-                <div className="font-semibold">{loot.item.name}</div>
-                <RarityBadge rarity={loot.item.rarity} />
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "var(--sc-parchment)" }}>
+                  {loot.item.name}
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  <RarityBadge rarity={loot.item.rarity} />
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        <Button onClick={onClose} className="w-full">
+        <Button onClick={onClose} style={{ width: "100%" }}>
           Continue
         </Button>
       </div>

@@ -15,6 +15,16 @@ interface ItemCardProps {
   selected?: boolean;
   compact?: boolean;
   showPrice?: boolean;
+  /** Render dimmed + grayscaled with a "Lv N" badge and a not-allowed
+   *  cursor. When true, the card is non-interactive even if `onClick`
+   *  is supplied — defense-in-depth for callers (the slot picker
+   *  passes `locked: true` and skips wiring `onClick` for level-locked
+   *  items so the detail modal never opens for an item the chain
+   *  would refuse). */
+  locked?: boolean;
+  /** Tooltip text for locked cards (e.g. "Requires Level 5"). Shown
+   *  via `title` and as a short visible badge in the top-right. */
+  lockedReason?: string;
 }
 
 const STAT_DISPLAY: { key: keyof Item["statBonuses"]; label: string; color: string }[] = [
@@ -45,59 +55,166 @@ const ITEM_TYPE_ICONS: Record<number, string> = {
   [ITEM_TYPES.NECKLACE]: "\ud83d\udcbf",
 };
 
-// Left border color by rarity (solid colors for the accent stripe)
-const RARITY_LEFT_BORDER: Record<number, string> = {
-  1: "border-l-zinc-500",
-  2: "border-l-green-500",
-  3: "border-l-blue-500",
-  4: "border-l-purple-500",
-  5: "border-l-orange-500",
+// Rarity-coloured left accent (4px stripe) and surrounding border
+// for the v2 forged-plate look.
+const RARITY_BORDER: Record<number, string> = {
+  1: "var(--rarity-common)",
+  2: "var(--rarity-uncommon)",
+  3: "var(--rarity-rare)",
+  4: "var(--rarity-epic)",
+  5: "var(--rarity-legendary)",
 };
+// Suppress the unused import warning by referencing RARITY_GLOW in
+// a no-op (kept available for future selected-state animations).
+void RARITY_GLOW;
 
-export function ItemCard({ item, onClick, selected, compact, showPrice }: ItemCardProps) {
+export function ItemCard({ item, onClick, selected, compact, showPrice, locked, lockedReason }: ItemCardProps) {
   const nonZeroStats = STAT_DISPLAY.filter(
     (s) => item.statBonuses[s.key] > 0
   );
+  const isLocked = locked === true;
+  const isInteractive = !!onClick && !isLocked;
 
-  return (
-    <button
-      onClick={onClick}
-      className={`text-left rounded-sm border border-zinc-800/40 border-l-2 ${RARITY_LEFT_BORDER[item.rarity]} p-2.5 transition-all w-full ${
-        RARITY_GLOW[item.rarity]
-      } ${
-        selected
-          ? "ring-1 ring-emerald-500 bg-zinc-900/80"
-          : "bg-[#0e0e12] hover:bg-zinc-900/60"
-      } ${onClick ? "cursor-pointer" : "cursor-default"}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-start gap-2 min-w-0">
+  const rarityColor = RARITY_BORDER[item.rarity];
+  const cardStyle: React.CSSProperties = {
+    background: selected ? "var(--sc-panel-2)" : "var(--sc-panel)",
+    border: `1px solid var(--sc-rim)`,
+    borderLeft: `4px solid ${rarityColor}`,
+    borderRadius: "var(--r-sm)",
+    padding: 10,
+    fontFamily: "var(--font-ui)",
+    color: "var(--sc-parchment)",
+    boxShadow: selected
+      ? `0 0 0 1px ${rarityColor}, var(--sh-plate-sm)`
+      : "var(--rim-top), var(--rim-bottom)",
+    cursor: isInteractive ? "pointer" : isLocked ? "not-allowed" : "default",
+    opacity: isLocked ? 0.45 : 1,
+    filter: isLocked ? "grayscale(.6)" : undefined,
+    transition: "transform var(--d-fast), box-shadow var(--d-fast), background var(--d-fast)",
+    textAlign: "left",
+    width: "100%",
+  };
+
+  const inner = (
+    <>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0 }}>
           {item.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={item.imageUrl}
               alt={item.name}
-              className="w-8 h-8 rounded object-cover shrink-0 mt-0.5"
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 2,
+                objectFit: "cover",
+                flexShrink: 0,
+                border: `1px solid ${rarityColor}`,
+                background: "var(--sc-page)",
+              }}
             />
           ) : (
-            <span className="text-base mt-0.5 shrink-0">{ITEM_TYPE_ICONS[item.itemType] || ""}</span>
+            <span style={{ fontSize: 18, marginTop: 2, flexShrink: 0 }}>
+              {ITEM_TYPE_ICONS[item.itemType] || ""}
+            </span>
           )}
-          <div className="min-w-0">
-            <div className={`font-semibold text-sm ${RARITY_COLORS[item.rarity]} truncate`}>
+          <div style={{ minWidth: 0 }}>
+            <div
+              className={RARITY_COLORS[item.rarity]}
+              style={{
+                fontWeight: 800,
+                fontSize: 13,
+                letterSpacing: "-0.01em",
+                color: rarityColor,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
               {item.name}
             </div>
-            <div className="text-[10px] text-zinc-600 mt-0.5">
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--fg-3)",
+                marginTop: 2,
+                fontFamily: "var(--font-ui)",
+                letterSpacing: ".02em",
+              }}
+            >
               {ITEM_TYPE_LABELS[item.itemType]} · {RARITY_LABELS[item.rarity]}
               {item.levelReq > 1 && ` · Lv.${item.levelReq}`}
             </div>
           </div>
         </div>
-        {item.inKiosk && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 border border-amber-700/30 shrink-0">
-            Listed
+        {isLocked && (
+          <span
+            title={lockedReason}
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              padding: "2px 6px",
+              background: "rgba(181,61,44,.15)",
+              color: "var(--sc-blood)",
+              border: "1px solid var(--sc-blood-deep)",
+              borderRadius: 2,
+              letterSpacing: ".10em",
+              textTransform: "uppercase",
+              flexShrink: 0,
+            }}
+          >
+            Lv {item.levelReq}
           </span>
         )}
+        {item.inKiosk && (
+          item.kioskListed ? (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "2px 6px",
+                background: "var(--sc-bronze)",
+                color: "var(--sc-page)",
+                border: "1px solid var(--sc-bronze-deep)",
+                borderRadius: 2,
+                letterSpacing: ".10em",
+                textTransform: "uppercase",
+                flexShrink: 0,
+              }}
+            >
+              Listed
+            </span>
+          ) : (
+            <span
+              title="Sitting unlisted in your Kiosk — click to retrieve"
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "2px 6px",
+                background: "var(--sc-panel-2)",
+                color: "var(--sc-steel)",
+                border: "1px solid var(--sc-steel-deep)",
+                borderRadius: 2,
+                letterSpacing: ".10em",
+                textTransform: "uppercase",
+                flexShrink: 0,
+              }}
+            >
+              In Kiosk
+            </span>
+          )
+        )}
         {showPrice && item.price !== undefined && (
-          <div className="text-xs text-amber-400 font-bold shrink-0">
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--sc-bronze)",
+              fontWeight: 800,
+              flexShrink: 0,
+            }}
+          >
             {item.price}g
           </div>
         )}
@@ -106,14 +223,32 @@ export function ItemCard({ item, onClick, selected, compact, showPrice }: ItemCa
       {!compact && (
         <>
           {item.minDamage > 0 && (
-            <div className="text-xs text-orange-400/80 mt-1 ml-7">
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--sc-blood)",
+                marginTop: 4,
+                marginLeft: 44,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+              }}
+            >
               {item.minDamage}-{item.maxDamage} dmg
             </div>
           )}
           {nonZeroStats.length > 0 && (
-            <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1.5 ml-7">
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0 10px",
+                marginTop: 6,
+                marginLeft: 44,
+                fontSize: 10,
+              }}
+            >
               {nonZeroStats.map((s) => (
-                <span key={s.key} className={`text-[10px] ${s.color}`}>
+                <span key={s.key} className={s.color} style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>
                   +{item.statBonuses[s.key]} {s.label}
                 </span>
               ))}
@@ -121,6 +256,35 @@ export function ItemCard({ item, onClick, selected, compact, showPrice }: ItemCa
           )}
         </>
       )}
-    </button>
+    </>
+  );
+
+  if (isInteractive) {
+    return (
+      <button
+        onClick={onClick}
+        title={lockedReason}
+        style={cardStyle}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "var(--sc-panel-2)";
+          e.currentTarget.style.transform = "translateY(-1px)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = selected ? "var(--sc-panel-2)" : "var(--sc-panel)";
+          e.currentTarget.style.transform = "";
+        }}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div
+      style={cardStyle}
+      title={isLocked ? lockedReason : undefined}
+      aria-disabled={isLocked || undefined}
+    >
+      {inner}
+    </div>
   );
 }

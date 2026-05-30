@@ -17,7 +17,9 @@ const MAX_STAT = 14;
 
 const emptyEquipment: EquipmentSlots = {
   weapon: null, offhand: null, helmet: null, chest: null, gloves: null,
-  boots: null, belt: null, ring1: null, ring2: null, necklace: null,
+  boots: null, belt: null, ring1: null, ring2: null, ring3: null, necklace: null,
+  // v5.1 (2026-05-28 PM, final) — 3 new slots: ring_3, pants, bracelets.
+  pants: null, bracelets: null,
 };
 
 const STAT_DESCRIPTIONS: Record<keyof CharacterStats, string> = {

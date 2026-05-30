@@ -1,31 +1,135 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+function required(name: string): string {
+  const v = process.env[name];
+  if (!v || v.trim() === '') {
+    throw new Error(`Required env var ${name} is not set. Check server/.env`);
+  }
+  return v.trim();
+}
+
+function optional(name: string, fallback: string = ''): string {
+  return (process.env[name] || fallback).trim();
+}
+
+// All v5-required envs throw if missing. There are no hardcoded fallbacks
+// for package IDs, addresses, or keys — those must come from the env.
 export const CONFIG = {
-  PORT: parseInt(process.env.PORT || '3001', 10),
-  SUPABASE_URL: process.env.SUPABASE_URL || '',
-  SUPABASE_KEY: process.env.SUPABASE_KEY || '',
-  SUI_NETWORK: process.env.SUI_NETWORK || 'testnet',
-  // Original package ID — used for type references and event queries (types live at original pkg)
-  SUI_PACKAGE_ID: process.env.SUI_PACKAGE_ID || '0x07fd856dc8db9dc2950f7cc2ef39408bd20414cea86a37477361f5717e188c1d',
-  // Latest upgraded package ID — used for all moveCall targets (gets the new bytecode with owner checks etc.)
-  SUI_UPGRADED_PACKAGE_ID: process.env.SUI_UPGRADED_PACKAGE_ID || '0x5f9011c8eb31f321fbd5b2ad5c811f34011a96a4c8a2ddfc6262727dee55c76b',
-  PLATFORM_TREASURY: process.env.PLATFORM_TREASURY || '0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60',
-  ADMIN_CAP_ID: process.env.ADMIN_CAP_ID || '0xff993e6ded3683762b3ed04d1e7dbe2e7a1373f3de9ddc52ed762b3c18ca9505',
+  PORT: parseInt(optional('PORT', '3001'), 10),
+  SUPABASE_URL: optional('SUPABASE_URL'),
+  SUPABASE_KEY: optional('SUPABASE_KEY'),
+  SUI_NETWORK: optional('SUI_NETWORK', 'testnet'),
+
+  // v5 has ONE package ID — no upgrade dichotomy. Required.
+  SUI_PACKAGE_ID: required('SUI_PACKAGE_ID'),
+  // AdminCap object id (held by treasury wallet). Required.
+  ADMIN_CAP_ID: required('ADMIN_CAP_ID'),
+  // TransferPolicy<Item> object id (created by setup_transfer_policy). Required for marketplace flows.
+  TRANSFER_POLICY_ID: optional('TRANSFER_POLICY_ID'),
+  // TransferPolicyCap<Item> object id. Optional — only the publisher needs it.
+  TRANSFER_POLICY_CAP_ID: optional('TRANSFER_POLICY_CAP_ID'),
+
+  // v5.1 — Shared registry object IDs. Optional during the v5.0 → v5.1
+  // transition (server gates v5.1 PTB construction on their presence). On
+  // v5.1, all three must be set; the server's startup sanity check warns if
+  // SUI_PACKAGE_ID looks like a v5.1 deploy but registries are unset.
+  CHARACTER_REGISTRY_ID: optional('CHARACTER_REGISTRY_ID'),
+  OPEN_WAGER_REGISTRY_ID: optional('OPEN_WAGER_REGISTRY_ID'),
+  KIOSK_REGISTRY_ID: optional('KIOSK_REGISTRY_ID'),
+  // Publisher wallet address (matches the hardcoded TREASURY in arena.move).
+  // Used for sanity check + log lines. Required.
+  PLATFORM_TREASURY: required('PLATFORM_TREASURY'),
+  // Treasury wallet's Ed25519 private key, suiprivkey1... format. Required for signing admin txs.
+  SUI_TREASURY_PRIVATE_KEY: required('SUI_TREASURY_PRIVATE_KEY'),
+
   WAGER_ACCEPT_TIMEOUT_MS: 30_000,
-  // Fight-lock duration — how long equip/unequip is on-chain blocked after fight start.
-  // Auto-expires this far in the future; server sets explicit 0 unlock on normal fight end.
+  // v5.1 mainnet-blocker — hard cap on wager stake to bound the blast radius
+  // of a single bug or admin-key compromise. 100 SUI on testnet is generous
+  // for QA; tune down on mainnet via env.
+  MAX_WAGER_SUI_MIST: BigInt(optional('MAX_WAGER_SUI_MIST', '100000000000')),  // 100 SUI default
+  // v5.1 mainnet-blocker — per-wallet WS message rate limit (msgs / minute).
+  // Defends chat, queue_fight, create_wager from spam / DoS. Configurable;
+  // increase for tournament events.
+  WS_MSG_RATE_LIMIT_PER_MIN: parseInt(optional('WS_MSG_RATE_LIMIT_PER_MIN', '120'), 10),
+  // Fight-lock duration set on fight start. Must be < chain's MAX_LOCK_MS (1 hour).
   FIGHT_LOCK_DURATION_MS: 10 * 60 * 1000,
+
+  // JWT signing secret for the wallet auth handshake. On testnet auto-generates
+  // if missing (per restart) for dev convenience; on mainnet it MUST be set
+  // explicitly so tokens survive restarts.
+  JWT_SECRET: (() => {
+    const v = process.env.JWT_SECRET?.trim();
+    if (v) return v;
+    if (process.env.SUI_NETWORK === 'mainnet') {
+      throw new Error('JWT_SECRET is required on mainnet');
+    }
+    const fallback = `dev-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+    console.warn(`[CONFIG] JWT_SECRET not set — generated ephemeral testnet secret. Tokens will invalidate on restart.`);
+    return fallback;
+  })(),
+  // 24-hour JWT session lifetime, in seconds.
+  JWT_TTL_SECONDS: 24 * 60 * 60,
+  // 5-minute window for completing a sign-in challenge.
+  AUTH_CHALLENGE_TTL_MS: 5 * 60 * 1000,
 } as const;
 
 export const GAME_CONSTANTS = {
-  TURN_TIMER_MS: 60_000,
-  MAX_LEVEL: 8,
+  TURN_TIMER_MS: 20_000,
+  // Server level cap matches chain MAX_LEVEL.
+  MAX_LEVEL: 20,
   STAT_POINTS_PER_LEVEL: 3,
   STARTING_STAT_POINTS: 20,
   MIN_STAT: 3,
-  LEVEL_HP: [0, 40, 65, 105, 170, 275, 445, 720, 1165] as readonly number[],
-  LEVEL_WEAPON_DAMAGE: [0, 6, 8, 16, 20, 42, 52, 84, 136] as readonly number[],
+  // HP / weapon-damage curves are purely server-side (combat math). The level
+  // index goes 0..20; index 0 is unused, 1..20 is the playable range.
+  // Values interpolated to follow the chunky-progression feel of the GDD.
+  LEVEL_HP: [
+    0,    // L0 (unused)
+    40,   // L1
+    50,   // L2
+    65,   // L3
+    85,   // L4
+    110,  // L5
+    140,  // L6
+    175,  // L7
+    215,  // L8
+    260,  // L9
+    310,  // L10
+    365,  // L11
+    425,  // L12
+    490,  // L13
+    560,  // L14
+    635,  // L15
+    715,  // L16
+    800,  // L17
+    890,  // L18
+    985,  // L19
+    1085, // L20
+  ] as readonly number[],
+  LEVEL_WEAPON_DAMAGE: [
+    0,   // L0 (unused)
+    6,   // L1
+    8,   // L2
+    11,  // L3
+    14,  // L4
+    18,  // L5
+    22,  // L6
+    27,  // L7
+    32,  // L8
+    38,  // L9
+    44,  // L10
+    50,  // L11
+    57,  // L12
+    64,  // L13
+    72,  // L14
+    80,  // L15
+    88,  // L16
+    97,  // L17
+    106, // L18
+    116, // L19
+    126, // L20
+  ] as readonly number[],
   DAMAGE_RANGE_LOW: 0.8,
   DAMAGE_RANGE_HIGH: 1.2,
   STR_DAMAGE_BONUS: 0.5,
@@ -59,10 +163,53 @@ export const GAME_CONSTANTS = {
     ['belt', 'legs'],
     ['legs', 'head'],
   ] as readonly (readonly string[])[],
-  EQUIP_SLOTS_PER_LEVEL: [0, 1, 1, 2, 2, 3, 3, 4, 5] as readonly number[],
-  LEVEL_XP: [0, 8, 21, 55, 144, 377, 987, 2584] as readonly number[],
-  XP_WIN_MIN: 1,
-  XP_WIN_MAX: 3,
+  // Cumulative XP threshold to BE at each level. Mirrors `character.move::xp_for_level`
+  // exactly — chain is the source of truth. Index = level. Value = total XP a
+  // character must have accumulated to be that level. Per GDD §9.1.
+  //   L1 = 0    (default)
+  //   L2 = 100, L3 = 300, L4 = 700, L5 = 1500, L6 = 3000, L7 = 6000, L8 = 12_000,
+  //   L9 = 25_000, L10 = 50_000, L11 = 80_000, L12 = 120_000, L13 = 170_000,
+  //   L14 = 250_000, L15 = 350_000, L16 = 430_000, L17 = 550_000, L18 = 700_000,
+  //   L19 = 850_000, L20 = 1_000_000
+  // Server-side XP is now CUMULATIVE (matches chain). Do not subtract on level-up.
+  LEVEL_XP_CUMULATIVE: [
+    0,        // L1
+    100,      // L2
+    300,      // L3
+    700,      // L4
+    1_500,    // L5
+    3_000,    // L6
+    6_000,    // L7
+    12_000,   // L8
+    25_000,  // L9
+    50_000,  // L10
+    80_000,  // L11
+    120_000, // L12
+    170_000, // L13
+    250_000, // L14
+    350_000, // L15
+    430_000, // L16
+    550_000, // L17
+    700_000, // L18
+    850_000, // L19
+    1_000_000, // L20
+  ] as readonly number[],
+  // Hard ceiling — must match chain `MAX_XP_PER_FIGHT`. Server XP rewards are
+  // also clamped here so we never bump into chain abort EXpTooHigh.
+  MAX_XP_PER_FIGHT: 1000,
+  // GDD §9.2 reward bands. See server/src/utils/elo.ts for the formulas.
+  XP_RANKED_WIN_BASE: 50,
+  XP_RANKED_WIN_MIN: 50,
+  XP_RANKED_WIN_MAX: 200,
+  XP_RANKED_WIN_RATING_DIVISOR: 10,
+  XP_RANKED_LOSS_MIN: 10,
+  XP_RANKED_LOSS_MAX: 30,
+  XP_WAGER_WIN_BASE: 100,
+  XP_WAGER_WIN_MIN: 100,
+  XP_WAGER_WIN_MAX: 400,
+  XP_WAGER_WIN_RATING_DIVISOR: 5,
+  XP_WAGER_LOSS_MIN: 20,
+  XP_WAGER_LOSS_MAX: 50,
   MATCHMAKING_INITIAL_RANGE: 200,
   MATCHMAKING_EXPAND_AMOUNT: 50,
   MATCHMAKING_EXPAND_INTERVAL_MS: 10_000,
@@ -70,7 +217,9 @@ export const GAME_CONSTANTS = {
   ELO_MIN_RATING: 100,
   DEFAULT_RATING: 1000,
   CHAT_RATE_LIMIT_MS: 1000,
-  STARTING_GOLD: 500,
+  STARTING_GOLD: 0,
+  // NFT-only flow: no NPC item drops, no gold economy. Loot tables use rarity
+  // probabilities only — picks from minted on-chain catalog.
   LOOT_NOTHING_CHANCE: 60,
   LOOT_COMMON_CHANCE: 25,
   LOOT_UNCOMMON_CHANCE: 10,

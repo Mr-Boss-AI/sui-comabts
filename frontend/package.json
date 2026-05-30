@@ -10,7 +10,14 @@
   },
   "dependencies": {
     "@mysten/dapp-kit-react": "^2.0.1",
+    "@mysten/enoki": "^1.0.8",
+    "@mysten/messaging": "^0.3.0",
+    "@mysten/seal": "^1.1.1",
+    "@mysten/slush-wallet": "^1.0.5",
     "@mysten/sui": "^2.15.0",
+    "@mysten/walrus": "^0.8.6",
+    "mysten-seal-v0": "npm:@mysten/seal@^0.9.6",
+    "mysten-sui-v1": "npm:@mysten/sui@^1.45.2",
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"

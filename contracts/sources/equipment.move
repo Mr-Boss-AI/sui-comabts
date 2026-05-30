@@ -1,11 +1,8 @@
+#[allow(lint(self_transfer))]
 module sui_combats::equipment {
-    use sui::object::{Self, ID};
-    use sui::transfer;
-    use sui::tx_context::{Self, TxContext};
     use sui::event;
     use sui::clock::Clock;
     use sui::dynamic_object_field as dof;
-    use std::option;
     use std::string::{Self, String};
 
     use sui_combats::character::{Self, Character};
@@ -18,7 +15,14 @@ module sui_combats::equipment {
     const ELevelTooLow: u64 = 3;
     const ENotOwner: u64 = 4;
     const EFightLocked: u64 = 5;
-    const EDeprecated: u64 = 6;
+    /// v5.1 — Tried to equip a two-handed weapon but the offhand slot is filled.
+    const EOffhandOccupied: u64 = 6;
+    /// v5.1 — Tried to equip an offhand item but the current weapon is two-handed.
+    const EWeaponIsTwoHanded: u64 = 7;
+    /// v5.1 — Tried to equip an offhand-tagged item (e.g. a shield) into the weapon slot.
+    const EItemNotMainhand: u64 = 8;
+    /// v5.1 — Tried to equip a mainhand-only / two-handed item into the offhand slot.
+    const EItemNotOffhand: u64 = 9;
 
     // ===== Events =====
     public struct ItemEquipped has copy, drop {
@@ -33,469 +37,599 @@ module sui_combats::equipment {
         slot: String,
     }
 
+    public struct LoadoutSaved has copy, drop {
+        character_id: ID,
+        owner: address,
+        version: u64,
+    }
+
     // ===========================================================================
-    //  v2 EQUIP FUNCTIONS — owner check + fight-lock check + existing validations
+    //  EQUIP — owner + fight-lock + type/level + slot-empty (DOF presence) checks
     // ===========================================================================
 
-    public entry fun equip_weapon_v2(
+    public fun equip_weapon(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::weapon_type(), EWrongItemType);
-        assert!(option::is_none(&character::weapon(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        // v5.1 — slot_type enforcement. Weapons are mainhand (0) or two-handed (2);
+        // never offhand-only (1). A two-handed weapon additionally requires the
+        // offhand slot to be empty (it reserves both slots while equipped).
+        let item_slot = item::slot_type(&item);
+        assert!(item_slot == item::slot_mainhand() || item_slot == item::slot_both_hands(), EItemNotMainhand);
+        if (item_slot == item::slot_both_hands()) {
+            let offhand_slot = string::utf8(b"offhand");
+            assert!(!dof::exists_<String>(character::uid(character), offhand_slot), EOffhandOccupied);
+        };
+
+        let slot = string::utf8(b"weapon");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"weapon");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_weapon(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"weapon") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_offhand_v2(
+    public fun equip_offhand(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(item::item_type(&item) == item::shield_type(), EWrongItemType);
-        assert!(option::is_none(&character::offhand(character)), ESlotOccupied);
+        // Offhand accepts SHIELD or a single-hand WEAPON (dual-wield).
+        let it = item::item_type(&item);
+        assert!(it == item::shield_type() || it == item::weapon_type(), EWrongItemType);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        // v5.1 — slot_type enforcement. Two-handed weapons cannot be offhanded.
+        // Shields must be slot_type=offhand. Single-hand weapons (slot_type=mainhand)
+        // are valid for dual-wield.
+        let item_slot = item::slot_type(&item);
+        assert!(item_slot != item::slot_both_hands(), EItemNotOffhand);
+        if (it == item::shield_type()) {
+            assert!(item_slot == item::slot_offhand(), EItemNotOffhand);
+        };
+
+        // v5.1 — Block offhand when current weapon is two-handed (it reserves
+        // the offhand slot). Without this, a PTB could equip a two-handed
+        // weapon then offhand a shield in the same tx, double-arming the player.
+        let weapon_slot_key = string::utf8(b"weapon");
+        if (dof::exists_<String>(character::uid(character), weapon_slot_key)) {
+            let current_weapon: &Item = dof::borrow(character::uid(character), weapon_slot_key);
+            assert!(item::slot_type(current_weapon) != item::slot_both_hands(), EWeaponIsTwoHanded);
+        };
+
+        let slot = string::utf8(b"offhand");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"offhand");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_offhand(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"offhand") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_helmet_v2(
+    public fun equip_helmet(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::helmet_type(), EWrongItemType);
-        assert!(option::is_none(&character::helmet(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"helmet");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"helmet");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_helmet(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"helmet") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_chest_v2(
+    public fun equip_chest(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::chest_type(), EWrongItemType);
-        assert!(option::is_none(&character::chest(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"chest");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"chest");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_chest(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"chest") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_gloves_v2(
+    public fun equip_gloves(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::gloves_type(), EWrongItemType);
-        assert!(option::is_none(&character::gloves(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"gloves");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"gloves");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_gloves(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"gloves") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_boots_v2(
+    public fun equip_boots(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::boots_type(), EWrongItemType);
-        assert!(option::is_none(&character::boots(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"boots");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"boots");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_boots(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"boots") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_belt_v2(
+    public fun equip_belt(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::belt_type(), EWrongItemType);
-        assert!(option::is_none(&character::belt(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"belt");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"belt");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_belt(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"belt") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_ring_1_v2(
+    public fun equip_ring_1(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::ring_type(), EWrongItemType);
-        assert!(option::is_none(&character::ring_1(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"ring_1");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"ring_1");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_ring_1(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"ring_1") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_ring_2_v2(
+    public fun equip_ring_2(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::ring_type(), EWrongItemType);
-        assert!(option::is_none(&character::ring_2(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"ring_2");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
 
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"ring_2");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_ring_2(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"ring_2") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
-    public entry fun equip_necklace_v2(
+    /// v5.1 — Third ring slot. Identical shape to equip_ring_1 / equip_ring_2.
+    public fun equip_ring_3(
         character: &mut Character,
         item: Item,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+        assert!(item::item_type(&item) == item::ring_type(), EWrongItemType);
+        assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"ring_3");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
+
+        let item_id = object::id(&item);
+        let character_id = object::id(character);
+        dof::add(character::uid_mut(character), slot, item);
+
+        event::emit(ItemEquipped { character_id, item_id, slot });
+    }
+
+    public fun equip_necklace(
+        character: &mut Character,
+        item: Item,
+        clock: &Clock,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::necklace_type(), EWrongItemType);
-        assert!(option::is_none(&character::necklace(character)), ESlotOccupied);
         assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
 
+        let slot = string::utf8(b"necklace");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
+
         let item_id = object::id(&item);
         let character_id = object::id(character);
-        let key = string::utf8(b"necklace");
+        dof::add(character::uid_mut(character), slot, item);
 
-        dof::add(character::uid_mut(character), key, item);
-        character::set_necklace(character, option::some(item_id));
-
-        event::emit(ItemEquipped { character_id, item_id, slot: string::utf8(b"necklace") });
+        event::emit(ItemEquipped { character_id, item_id, slot });
     }
+
+    // v5.1 (2026-05-28 PM) — three new wearable slots: pants, bracelets, pauldrons.
+    // Same shape as the existing armor primitives (helmet/chest/gloves/boots/belt).
+
+    public fun equip_pants(
+        character: &mut Character,
+        item: Item,
+        clock: &Clock,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+        assert!(item::item_type(&item) == item::pants_type(), EWrongItemType);
+        assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"pants");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
+
+        let item_id = object::id(&item);
+        let character_id = object::id(character);
+        dof::add(character::uid_mut(character), slot, item);
+
+        event::emit(ItemEquipped { character_id, item_id, slot });
+    }
+
+    public fun equip_bracelets(
+        character: &mut Character,
+        item: Item,
+        clock: &Clock,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+        assert!(item::item_type(&item) == item::bracelets_type(), EWrongItemType);
+        assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"bracelets");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
+
+        let item_id = object::id(&item);
+        let character_id = object::id(character);
+        dof::add(character::uid_mut(character), slot, item);
+
+        event::emit(ItemEquipped { character_id, item_id, slot });
+    }
+
 
     // ===========================================================================
-    //  v2 UNEQUIP FUNCTIONS — owner check + fight-lock check
+    //  UNEQUIP — owner + fight-lock + slot-filled (DOF presence) checks
     // ===========================================================================
 
-    public entry fun unequip_weapon_v2(
+    public fun unequip_weapon(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::weapon(character)), ESlotEmpty);
 
-        let key = string::utf8(b"weapon");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"weapon");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_weapon(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"weapon") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_offhand_v2(
+    public fun unequip_offhand(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::offhand(character)), ESlotEmpty);
 
-        let key = string::utf8(b"offhand");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"offhand");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_offhand(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"offhand") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_helmet_v2(
+    public fun unequip_helmet(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::helmet(character)), ESlotEmpty);
 
-        let key = string::utf8(b"helmet");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"helmet");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_helmet(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"helmet") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_chest_v2(
+    public fun unequip_chest(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::chest(character)), ESlotEmpty);
 
-        let key = string::utf8(b"chest");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"chest");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_chest(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"chest") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_gloves_v2(
+    public fun unequip_gloves(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::gloves(character)), ESlotEmpty);
 
-        let key = string::utf8(b"gloves");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"gloves");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_gloves(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"gloves") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_boots_v2(
+    public fun unequip_boots(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::boots(character)), ESlotEmpty);
 
-        let key = string::utf8(b"boots");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"boots");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_boots(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"boots") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_belt_v2(
+    public fun unequip_belt(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::belt(character)), ESlotEmpty);
 
-        let key = string::utf8(b"belt");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"belt");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_belt(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"belt") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_ring_1_v2(
+    public fun unequip_ring_1(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::ring_1(character)), ESlotEmpty);
 
-        let key = string::utf8(b"ring_1");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"ring_1");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_ring_1(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"ring_1") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_ring_2_v2(
+    public fun unequip_ring_2(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::ring_2(character)), ESlotEmpty);
 
-        let key = string::utf8(b"ring_2");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"ring_2");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_ring_2(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"ring_2") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
 
-    public entry fun unequip_necklace_v2(
+    /// v5.1 — Third ring unequip. Identical shape to unequip_ring_1 / unequip_ring_2.
+    public fun unequip_ring_3(
         character: &mut Character,
         clock: &Clock,
-        ctx: &mut TxContext,
+        ctx: &TxContext,
     ) {
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
-        assert!(option::is_some(&character::necklace(character)), ESlotEmpty);
 
-        let key = string::utf8(b"necklace");
-        let item: Item = dof::remove(character::uid_mut(character), key);
-        let item_id = object::id(&item);
+        let slot = string::utf8(b"ring_3");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
         let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
 
-        character::set_necklace(character, option::none());
-
-        event::emit(ItemUnequipped { character_id, item_id, slot: string::utf8(b"necklace") });
-
+        event::emit(ItemUnequipped { character_id, item_id, slot });
         transfer::public_transfer(item, tx_context::sender(ctx));
     }
+
+    public fun unequip_necklace(
+        character: &mut Character,
+        clock: &Clock,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+
+        let slot = string::utf8(b"necklace");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
+        let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
+
+        event::emit(ItemUnequipped { character_id, item_id, slot });
+        transfer::public_transfer(item, tx_context::sender(ctx));
+    }
+
+    // v5.1 (2026-05-28 PM) — unequip primitives for the 3 new slots.
+
+    public fun unequip_pants(
+        character: &mut Character,
+        clock: &Clock,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+
+        let slot = string::utf8(b"pants");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
+        let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
+
+        event::emit(ItemUnequipped { character_id, item_id, slot });
+        transfer::public_transfer(item, tx_context::sender(ctx));
+    }
+
+    public fun unequip_bracelets(
+        character: &mut Character,
+        clock: &Clock,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+
+        let slot = string::utf8(b"bracelets");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
+        let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
+
+        event::emit(ItemUnequipped { character_id, item_id, slot });
+        transfer::public_transfer(item, tx_context::sender(ctx));
+    }
+
 
     // ===========================================================================
-    //  DEPRECATED v1 FUNCTIONS — all abort. Kept so existing bytecode references
-    //  compile under Compatible upgrade policy. Asset-theft vulnerable (missing
-    //  owner check); no one should be able to call these post-upgrade.
+    //  SAVE LOADOUT — final command in a save PTB. Bumps loadout_version.
+    //  Owner-only. No fight-lock check (the equip/unequip primitives in the
+    //  same PTB enforce that; if locked, the whole PTB rolls back atomically).
     // ===========================================================================
 
-    public entry fun equip_weapon(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_offhand(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_helmet(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_chest(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_gloves(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_boots(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_belt(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_ring_1(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_ring_2(_character: &mut Character, _item: Item) { abort EDeprecated }
-    public entry fun equip_necklace(_character: &mut Character, _item: Item) { abort EDeprecated }
+    public fun save_loadout(
+        character: &mut Character,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
 
-    public entry fun unequip_weapon(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_offhand(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_helmet(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_chest(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_gloves(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_boots(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_belt(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_ring_1(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_ring_2(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
-    public entry fun unequip_necklace(_character: &mut Character, _ctx: &mut TxContext) { abort EDeprecated }
+        let owner = character::owner(character);
+        let character_id = object::id(character);
+        let new_version = character::bump_loadout_version(character);
+
+        event::emit(LoadoutSaved {
+            character_id,
+            owner,
+            version: new_version,
+        });
+    }
 }

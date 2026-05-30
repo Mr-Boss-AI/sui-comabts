@@ -27,5 +27,13 @@ Thumbs.db
 # Build output
 dist/
 
+# Sui Move build artifacts (Move.toml + Move.lock are committed; build/ is auto-generated)
+contracts/build/
+
 # Supabase local state
 supabase/.temp/
+
+# Local server-character snapshot (Bug 6, 2026-05-19 — fallback for
+# environments without Supabase configured). Host-local state, never
+# committed.
+server/.local-state/

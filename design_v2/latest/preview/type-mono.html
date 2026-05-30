@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mono & Numbers</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#15191f;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  .card{border:2px solid #e8e2d4;border-radius:12px;box-shadow:4px 4px 0 0 #000;padding:14px 16px;background:#15191f;}
+  .label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#8a8474;}
+  .big{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:32px;font-variant-numeric:tabular-nums;line-height:1;margin-top:4px;}
+  .row{display:flex;align-items:baseline;gap:6px;margin-top:2px;}
+  .delta{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:14px;}
+  .up{color:#5a8a3a;} .dn{color:#b53d2c;}
+  .meta{font-family:"JetBrains Mono",monospace;font-size:10px;color:#8a8474;margin-top:6px;}
+</style></head><body>
+<div class="wrap">
+  <div class="card">
+    <div class="label">Stake</div>
+    <div class="big">1.500 <span style="color:#c89a3f">SUI</span></div>
+    <div class="meta">Tabular nums · monospace</div>
+  </div>
+  <div class="card">
+    <div class="label">Damage</div>
+    <div class="big" style="color:#b53d2c">−47</div>
+    <div class="row"><span class="delta dn">CRIT</span><span class="delta dn">×1.85</span></div>
+  </div>
+  <div class="card">
+    <div class="label">ELO Delta</div>
+    <div class="big">2,134 <span class="delta up">+18</span></div>
+    <div class="meta">JetBrains Mono · 500/700</div>
+  </div>
+</div>
+</body></html>

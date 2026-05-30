@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Character Archetype</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#0a0d12;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .c{border:2px solid #e8e2d4;border-radius:12px;background:#15191f;box-shadow:4px 4px 0 0 #000;overflow:hidden;}
+  .top{height:96px;display:flex;align-items:flex-end;justify-content:center;position:relative;overflow:hidden;}
+  .silh{position:absolute;bottom:-8px;font-size:80px;line-height:1;filter:drop-shadow(0 4px 0 #e8e2d4);}
+  .meta{padding:10px 12px;border-top:2px solid #e8e2d4;}
+  .stamp{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:3px 8px;border-radius:999px;display:inline-block;}
+  .name{font-family:"Slackey";font-size:22px;line-height:1;margin-top:4px;}
+  .blurb{font-size:11px;color:#8a8474;margin-top:4px;}
+  .row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;font-family:"JetBrains Mono";font-weight:700;}
+  .red{background:#b53d2c;color:#e8e2d4;}
+  .yel{background:#c89a3f;color:#0a0d12;}
+  .pur{background:#7a3a8a;color:#e8e2d4;}
+  .blu{background:#3a6a9a;color:#e8e2d4;}
+</style></head><body>
+<div class="wrap">
+  <div class="c"><div class="top" style="background:#c89a3f"><div class="silh">🐸</div></div><div class="meta"><span class="stamp red">Bruiser</span><div class="name">Ponke</div><div class="blurb">Frog brawler. STR+, END+.</div><div class="row"><span>STR 14 / END 10</span><span style="color:#b53d2c">HP 240</span></div></div></div>
+  <div class="c"><div class="top" style="background:#b53d2c"><div class="silh">🐕</div></div><div class="meta"><span class="stamp yel">Tank</span><div class="name">Doge</div><div class="blurb">Knight in a too-big helm.</div><div class="row"><span>END 16</span><span style="color:#c89a3f">Armor 28</span></div></div></div>
+  <div class="c"><div class="top" style="background:#0a0d12"><div class="silh">🦍</div></div><div class="meta"><span class="stamp pur">Glass cannon</span><div class="name">Ape</div><div class="blurb">Dual-wield, all crit.</div><div class="row"><span>INT 12 / DEX 11</span><span style="color:#7a3a8a">Crit 32%</span></div></div></div>
+  <div class="c"><div class="top" style="background:#c89a3f"><div class="silh">😼</div></div><div class="meta"><span class="stamp blu">Dancer</span><div class="name">Cat</div><div class="blurb">Evasion build. Never hit.</div><div class="row"><span>DEX 16</span><span style="color:#3a6a9a">Dodge 28%</span></div></div></div>
+</div>
+</body></html>

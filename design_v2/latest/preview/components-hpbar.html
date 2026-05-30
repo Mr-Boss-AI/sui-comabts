@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>HP Bar</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#0E0E0C;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:24px;display:flex;flex-direction:column;gap:16px;}
+  .row{display:flex;align-items:center;gap:14px;}
+  .name{font-family:"Slackey";font-size:22px;min-width:140px;}
+  .bar{position:relative;flex:1;height:28px;background:#1A1916;border:2px solid #e8e2d4;border-radius:6px;overflow:hidden;box-shadow:inset 0 0 0 2px rgba(0,0,0,.4);}
+  .fill{height:100%;border-right:2px solid #e8e2d4;}
+  .ticks{position:absolute;inset:0;display:flex;}
+  .ticks i{flex:1;border-right:1.5px solid rgba(0,0,0,.4);}
+  .ticks i:last-child{border-right:none;}
+  .val{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:"JetBrains Mono";font-weight:700;font-size:13px;color:#e8e2d4;text-shadow:0 0 4px #000, 1px 1px 0 #000;}
+  .lbl{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#9a958a;}
+</style></head><body>
+<div class="wrap">
+  <div>
+    <div class="lbl">Healthy (78%)</div>
+    <div class="row" style="margin-top:6px;">
+      <div class="bar">
+        <div class="fill" style="width:78%;background:linear-gradient(180deg,#5a8a3a 0%, #2C7A38 100%);"></div>
+        <div class="ticks"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="val">187 / 240</div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div class="lbl">Bloodied (42%) — switches to yellow</div>
+    <div class="row" style="margin-top:6px;">
+      <div class="bar">
+        <div class="fill" style="width:42%;background:#c89a3f;"></div>
+        <div class="ticks"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="val">101 / 240</div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div class="lbl">Critical (12%) — pulses red</div>
+    <div class="row" style="margin-top:6px;">
+      <div class="bar" style="box-shadow:0 0 0 2px #b53d2c, inset 0 0 0 2px rgba(0,0,0,.4);">
+        <div class="fill" style="width:12%;background:#b53d2c;"></div>
+        <div class="ticks"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="val">28 / 240</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

@@ -11,20 +11,28 @@ import {
 } from "@/types/game";
 
 const STAT_DISPLAY: { key: keyof Item["statBonuses"]; label: string; color: string }[] = [
-  { key: "strengthBonus", label: "Strength", color: "text-red-400" },
-  { key: "dexterityBonus", label: "Dexterity", color: "text-cyan-400" },
-  { key: "intuitionBonus", label: "Intuition", color: "text-purple-400" },
-  { key: "enduranceBonus", label: "Endurance", color: "text-amber-400" },
-  { key: "hpBonus", label: "HP", color: "text-red-300" },
-  { key: "armorBonus", label: "Armor", color: "text-zinc-300" },
-  { key: "defenseBonus", label: "Defense", color: "text-amber-300" },
-  { key: "attackBonus", label: "Attack", color: "text-orange-400" },
-  { key: "critChanceBonus", label: "Crit Chance", color: "text-purple-300" },
-  { key: "critMultiplierBonus", label: "Crit Multiplier", color: "text-purple-300" },
-  { key: "evasionBonus", label: "Evasion", color: "text-cyan-300" },
-  { key: "antiCritBonus", label: "Anti-Crit", color: "text-zinc-400" },
-  { key: "antiEvasionBonus", label: "Anti-Evasion", color: "text-zinc-400" },
+  { key: "strengthBonus", label: "Strength", color: "var(--stat-str)" },
+  { key: "dexterityBonus", label: "Dexterity", color: "var(--stat-dex)" },
+  { key: "intuitionBonus", label: "Intuition", color: "var(--stat-int)" },
+  { key: "enduranceBonus", label: "Endurance", color: "var(--stat-end)" },
+  { key: "hpBonus", label: "HP", color: "var(--stat-hp)" },
+  { key: "armorBonus", label: "Armor", color: "var(--sc-steel)" },
+  { key: "defenseBonus", label: "Defense", color: "var(--sc-bronze)" },
+  { key: "attackBonus", label: "Attack", color: "var(--sc-blood)" },
+  { key: "critChanceBonus", label: "Crit Chance", color: "var(--stat-int)" },
+  { key: "critMultiplierBonus", label: "Crit Multiplier", color: "var(--stat-int)" },
+  { key: "evasionBonus", label: "Evasion", color: "var(--stat-dex)" },
+  { key: "antiCritBonus", label: "Anti-Crit", color: "var(--fg-3)" },
+  { key: "antiEvasionBonus", label: "Anti-Evasion", color: "var(--fg-3)" },
 ];
+
+const RARITY_BORDER: Record<number, string> = {
+  1: "var(--rarity-common)",
+  2: "var(--rarity-uncommon)",
+  3: "var(--rarity-rare)",
+  4: "var(--rarity-epic)",
+  5: "var(--rarity-legendary)",
+};
 
 const ITEM_TYPE_ICONS: Record<number, string> = {
   [ITEM_TYPES.WEAPON]: "\u2694\uFE0F",
@@ -47,32 +55,91 @@ interface ItemDetailModalProps {
 export function ItemDetailModal({ item, onClose, actions }: ItemDetailModalProps) {
   const nonZeroStats = STAT_DISPLAY.filter((s) => item.statBonuses[s.key] > 0);
 
+  const rarityColor = RARITY_BORDER[item.rarity];
+  // Reference RARITY_COLORS for Tailwind JIT scan retention.
+  void RARITY_COLORS;
+
   return (
     <Modal open onClose={onClose} title={item.name}>
-      <div className="space-y-4">
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          fontFamily: "var(--font-ui)",
+          color: "var(--sc-parchment)",
+        }}
+      >
         {/* Header: image + basic info */}
-        <div className="flex items-start gap-4">
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
           {item.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={item.imageUrl}
               alt={item.name}
-              className="w-16 h-16 rounded-lg object-cover shrink-0 border border-zinc-700"
+              style={{
+                width: 80,
+                height: 80,
+                objectFit: "cover",
+                flexShrink: 0,
+                border: `3px solid ${rarityColor}`,
+                background: "var(--sc-page)",
+                borderRadius: 2,
+                boxShadow: "var(--sh-plate-sm)",
+              }}
             />
           ) : (
-            <div className="w-16 h-16 rounded-lg bg-zinc-900 border border-zinc-700 flex items-center justify-center text-2xl shrink-0">
+            <div
+              style={{
+                width: 80,
+                height: 80,
+                background: "var(--sc-panel-2)",
+                border: `3px solid ${rarityColor}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 28,
+                flexShrink: 0,
+                borderRadius: 2,
+              }}
+            >
               {ITEM_TYPE_ICONS[item.itemType] || "?"}
             </div>
           )}
           <div>
-            <div className={`text-lg font-bold ${RARITY_COLORS[item.rarity]}`}>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 22,
+                color: rarityColor,
+                letterSpacing: "0.01em",
+                lineHeight: 1.1,
+              }}
+            >
               {item.name}
             </div>
-            <div className="text-sm text-zinc-500 mt-0.5">
-              {ITEM_TYPE_LABELS[item.itemType]} &middot; {RARITY_LABELS[item.rarity]}
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--fg-3)",
+                marginTop: 4,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}
+            >
+              {ITEM_TYPE_LABELS[item.itemType]} · {RARITY_LABELS[item.rarity]}
             </div>
             {item.levelReq > 1 && (
-              <div className="text-xs text-zinc-600 mt-1">
-                Requires Level {item.levelReq}
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--sc-bronze)",
+                  marginTop: 4,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                Requires Lv {item.levelReq}
               </div>
             )}
           </div>
@@ -80,22 +147,85 @@ export function ItemDetailModal({ item, onClose, actions }: ItemDetailModalProps
 
         {/* Damage */}
         {item.minDamage > 0 && (
-          <div className="rounded-lg bg-zinc-900/60 border border-zinc-800 px-3 py-2">
-            <span className="text-xs text-zinc-500">Damage</span>
-            <div className="text-orange-400 font-bold">
-              {item.minDamage} - {item.maxDamage}
+          <div
+            style={{
+              padding: "8px 12px",
+              background: "var(--sc-panel-2)",
+              border: "1px solid var(--sc-rim)",
+              borderLeft: "3px solid var(--sc-blood)",
+              borderRadius: "var(--r-card)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "var(--ls-stamp)",
+                textTransform: "uppercase",
+                color: "var(--fg-3)",
+              }}
+            >
+              Damage
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                color: "var(--sc-blood)",
+                fontWeight: 800,
+                fontSize: 18,
+                marginTop: 2,
+              }}
+            >
+              {item.minDamage} – {item.maxDamage}
             </div>
           </div>
         )}
 
         {/* Stats */}
         {nonZeroStats.length > 0 && (
-          <div className="rounded-lg bg-zinc-900/60 border border-zinc-800 px-3 py-2 space-y-1.5">
-            <span className="text-xs text-zinc-500">Bonuses</span>
+          <div
+            style={{
+              padding: "10px 12px",
+              background: "var(--sc-panel-2)",
+              border: "1px solid var(--sc-rim)",
+              borderLeft: "3px solid var(--sc-bronze)",
+              borderRadius: "var(--r-card)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "var(--ls-stamp)",
+                textTransform: "uppercase",
+                color: "var(--sc-bronze)",
+                borderBottom: "1px solid var(--sc-rim)",
+                paddingBottom: 4,
+                marginBottom: 2,
+              }}
+            >
+              Bonuses
+            </div>
             {nonZeroStats.map((s) => (
-              <div key={s.key} className="flex justify-between text-sm">
-                <span className="text-zinc-400">{s.label}</span>
-                <span className={`font-medium ${s.color}`}>
+              <div
+                key={s.key}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ color: "var(--fg-2)" }}>{s.label}</span>
+                <span
+                  style={{
+                    color: s.color,
+                    fontWeight: 800,
+                    fontFamily: "var(--font-mono)",
+                  }}
+                >
                   +{item.statBonuses[s.key]}
                 </span>
               </div>
@@ -104,7 +234,7 @@ export function ItemDetailModal({ item, onClose, actions }: ItemDetailModalProps
         )}
 
         {/* Action buttons */}
-        {actions && <div className="pt-1">{actions}</div>}
+        {actions && <div style={{ paddingTop: 4 }}>{actions}</div>}
       </div>
     </Modal>
   );

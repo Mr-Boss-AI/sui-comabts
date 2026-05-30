@@ -6,12 +6,28 @@ import { CONFIG } from './config';
 import { handleConnection, getOnlineCount } from './ws/handler';
 import { initMatchmaking, shutdownMatchmaking } from './game/matchmaking';
 import { createFight } from './ws/fight-room';
-import { getCharacterById, getCharacterByWallet } from './data/characters';
+import { getCharacterById, getCharacterByWallet, restoreCharacterFromDb, updateCharacter } from './data/characters';
 import { getLeaderboard } from './data/leaderboard';
-import { getShopCatalog } from './data/items';
 import { getSupabase } from './data/supabase';
 import { getFight } from './ws/fight-room';
-import type { QueueEntry } from './types';
+import { applyXp, xpForNextLevel } from './game/combat';
+import { findCharacterObjectId, updateCharacterOnChain, setFightLockOnChain, getTreasuryQueueStats, readObjectWithRetry, adminCancelWagerOnChain, getWagerStatus } from './utils/sui-settle';
+import { setOnChainObjectId, restoreCharacterFromChain, deleteCharacter } from './data/characters';
+import { getConnectedClients, adoptWagerIntoLobby, broadcastToAuthenticated } from './ws/handler';
+import { startMarketplaceIndex, shutdownMarketplaceIndex, subscribeMarketplace, listingToWire } from './data/marketplace';
+import { sweepOrphanActiveWagers } from './data/orphan-wager-recovery';
+import {
+  sweepStalePresence,
+  sweepStalePresenceInDb,
+  PRESENCE_STALE_MS,
+} from './data/presence';
+import {
+  sweepExpired as sweepExpiredFightRequests,
+  rehydratePendingFromDb as rehydrateFightRequests,
+} from './data/fight-requests';
+import { rehydrateFromDb as rehydrateDmChannels } from './data/dm-channels';
+import { rehydrateRecentFromDb as rehydrateDmMessages } from './data/dm-messages';
+import type { QueueEntry, WagerLobbyEntry } from './types';
 
 // === Express App ===
 
@@ -25,6 +41,7 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     uptime: process.uptime(),
     onlinePlayers: getOnlineCount(),
+    treasuryQueue: getTreasuryQueueStats(),
     timestamp: Date.now(),
   });
 });
@@ -33,12 +50,6 @@ app.get('/health', (_req, res) => {
 app.get('/api/leaderboard', (_req, res) => {
   const entries = getLeaderboard(100);
   res.json({ entries });
-});
-
-// --- Shop Catalog ---
-app.get('/api/shop', (_req, res) => {
-  const items = getShopCatalog();
-  res.json({ items });
 });
 
 // --- Character Data ---
@@ -55,16 +66,393 @@ app.get('/api/character/:walletAddress', (req, res) => {
       name: character.name,
       level: character.level,
       xp: character.xp,
-      xpToNextLevel: character.xpToNextLevel,
+      xpToNextLevel: xpForNextLevel(character.level),
       walletAddress: character.walletAddress,
       stats: character.stats,
       equipment: character.equipment,
       gold: character.gold,
       wins: character.wins,
       losses: character.losses,
+      draws: character.draws,
       rating: character.rating,
     },
   });
+});
+
+// --- Admin: grant XP (testnet-only) ---
+// POST /api/admin/grant-xp  { wallet: "0x...", xp: 500 }
+// Bumps XP both server-side (applyXp handles level-up + stat points) and
+// on-chain (update_after_fight with won=false — note this increments the
+// character's loss counter by 1 per call). Rejected on mainnet.
+app.post('/api/admin/grant-xp', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wallet = String(req.body?.wallet ?? '').trim();
+  const xp = Math.floor(Number(req.body?.xp ?? 0));
+  if (!wallet.startsWith('0x') || !Number.isFinite(xp) || xp <= 0 || xp > 10_000_000) {
+    res.status(400).json({ error: 'Body must be { wallet: "0x...", xp: <positive int> }' });
+    return;
+  }
+
+  let character = getCharacterByWallet(wallet);
+  if (!character) {
+    character = (await restoreCharacterFromDb(wallet)) ?? undefined;
+  }
+  if (!character) {
+    res.status(404).json({ error: 'Character not found for wallet' });
+    return;
+  }
+
+  const beforeLevel = character.level;
+  const beforeXp = character.xp;
+  const result = applyXp(character, xp);
+  updateCharacter(character);
+
+  let onchain: { digest?: string; error?: string } = {};
+  try {
+    const objId = await findCharacterObjectId(wallet);
+    if (objId) {
+      const { digest } = await updateCharacterOnChain(objId, false, xp, character.rating);
+      onchain.digest = digest;
+      // Tell the active WS client to re-fetch its on-chain character
+      for (const [, c] of getConnectedClients()) {
+        if (c.walletAddress === wallet && c.socket.readyState === c.socket.OPEN) {
+          c.socket.send(JSON.stringify({ type: 'character_updated_onchain' }));
+        }
+      }
+    } else {
+      onchain.error = 'No on-chain Character NFT for this wallet (server-only grant applied)';
+    }
+  } catch (err: any) {
+    onchain.error = err?.message || String(err);
+  }
+
+  console.log(`[Admin] Granted ${xp} XP to ${wallet.slice(0, 10)} (${beforeLevel}→${character.level}, xp ${beforeXp}→${character.xp})`);
+  res.json({
+    wallet,
+    xpGranted: xp,
+    before: { level: beforeLevel, xp: beforeXp },
+    after: {
+      level: character.level,
+      xp: character.xp,
+      unallocatedPoints: character.unallocatedPoints,
+      leveledUp: result.leveledUp,
+    },
+    onchain,
+  });
+});
+
+// --- Admin: force-unlock a Character (testnet-only) ---
+// POST /api/admin/force-unlock { wallet?: "0x...", characterId?: "0x..." }
+//
+// Clears any active fight-lock DOF on the Character NFT. Reaches for the
+// pinned `onChainObjectId` first; falls back to the event scan for legacy
+// rows. Used when the post-fight `setFightLockOnChain(0)` failed and the
+// player would otherwise have to wait up to 1 hour for the chain
+// `MAX_LOCK_MS` auto-expiry.
+app.post('/api/admin/force-unlock', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wallet = String(req.body?.wallet ?? '').trim();
+  const characterIdParam = String(req.body?.characterId ?? '').trim();
+  if ((!wallet || !wallet.startsWith('0x')) && !characterIdParam.startsWith('0x')) {
+    res.status(400).json({ error: 'Body must be { wallet?: "0x..." } or { characterId?: "0x..." }' });
+    return;
+  }
+
+  let characterId = characterIdParam;
+  if (!characterId) {
+    const character = getCharacterByWallet(wallet)
+      ?? (await restoreCharacterFromDb(wallet)) ?? undefined;
+    characterId = character?.onChainObjectId
+      ?? (await findCharacterObjectId(wallet)) ?? '';
+    if (!characterId) {
+      res.status(404).json({ error: 'No on-chain Character resolved for that wallet' });
+      return;
+    }
+  }
+
+  try {
+    const { digest } = await setFightLockOnChain(characterId, 0);
+    console.log(`[Admin] Force-unlock ${characterId.slice(0, 10)}... tx=${digest}`);
+    res.json({ ok: true, characterId, digest });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err), characterId });
+  }
+});
+
+// --- Admin: cancel an orphan ACTIVE wager (testnet-only) ---
+// POST /api/admin/cancel-wager  { wagerMatchId: "0x..." }
+//
+// Manual recovery path for any wager that's stuck in STATUS_ACTIVE because:
+//   - Server crashed mid-fight AND Supabase wasn't configured (so the
+//     boot sweeper saw nothing to sweep), OR
+//   - settle_wager retries exhausted, OR
+//   - Some other operational path lost the wagerMatchId reference.
+//
+// Calls `arena::admin_cancel_wager` (TREASURY-only on chain) for a 50/50
+// refund split. Routes through the treasury queue so it doesn't race
+// concurrent settlements.
+app.post('/api/admin/cancel-wager', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wagerMatchId = String(req.body?.wagerMatchId ?? '').trim();
+  if (!wagerMatchId.startsWith('0x') || wagerMatchId.length < 42) {
+    res.status(400).json({ error: 'Body must be { wagerMatchId: "0x..." }' });
+    return;
+  }
+
+  // Pre-check chain status — clearer error than a Move abort EMatchAlreadySettled.
+  let preStatus: number | null;
+  try {
+    preStatus = await getWagerStatus(wagerMatchId);
+  } catch (err: any) {
+    preStatus = null;
+    console.warn('[Admin] cancel-wager preflight failed:', err?.message || err);
+  }
+  if (preStatus === 2) {
+    res.status(409).json({ error: 'Wager is already SETTLED on chain', status: preStatus });
+    return;
+  }
+
+  try {
+    const { digest } = await adminCancelWagerOnChain(wagerMatchId);
+    console.log(`[Admin] Cancel-wager ${wagerMatchId.slice(0, 10)}... tx=${digest}`);
+    res.json({ ok: true, wagerMatchId, preStatus, digest });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err), wagerMatchId });
+  }
+});
+
+// --- Admin: re-pin a wallet's active Character to a specific NFT (testnet-only) ---
+// POST /api/admin/repin-character  { wallet: "0x...", characterId: "0x..." }
+//
+// Recovery path for the duplicate-mint bug: wallet has more than one
+// Character NFT and the server attached to the wrong one (the descending
+// event scan returns the most-recent, which can be the accidental dupe).
+// This endpoint:
+//   1. Fetches the target Character NFT from chain
+//   2. Validates `owner == wallet` (refuses cross-wallet repin)
+//   3. Drops any existing server-side Character record for the wallet
+//   4. Re-inserts using the NFT's chain values (level, xp, stats, …)
+//      with `onChainObjectId` PINNED to the requested id — every later
+//      admin call will hit THIS NFT, not whichever one was newest.
+//   5. Pushes a `character_data` refresh to the connected WS client so
+//      the user sees their character back without a manual reload.
+app.post('/api/admin/repin-character', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wallet = String(req.body?.wallet ?? '').trim();
+  const characterId = String(req.body?.characterId ?? '').trim();
+  if (!wallet.startsWith('0x') || !characterId.startsWith('0x')) {
+    res.status(400).json({ error: 'Body must be { wallet: "0x...", characterId: "0x..." }' });
+    return;
+  }
+
+  // 1) Fetch the target Character NFT
+  let fields: Record<string, unknown> | null;
+  let typeRepr: string | null;
+  try {
+    const r = await readObjectWithRetry(characterId, { showContent: true, showType: true });
+    fields = r.fields;
+    typeRepr = r.type;
+  } catch (err: any) {
+    res.status(502).json({ error: `Chain RPC failed: ${err?.message || err}` });
+    return;
+  }
+  if (!fields || !typeRepr?.endsWith('::character::Character')) {
+    res.status(404).json({ error: 'Object is not a Character', type: typeRepr });
+    return;
+  }
+
+  // 2) Verify ownership
+  const ownerOnChain = String(fields.owner ?? '').toLowerCase();
+  if (ownerOnChain !== wallet.toLowerCase()) {
+    res.status(403).json({
+      error: 'Character is not owned by the requested wallet',
+      ownerOnChain,
+      requestedWallet: wallet,
+    });
+    return;
+  }
+
+  // 3) Drop any existing server-side record so the new one gets inserted
+  //    cleanly. (deleteCharacter is a no-op when the wallet has nothing.)
+  const previous = getCharacterByWallet(wallet);
+  if (previous) {
+    deleteCharacter(wallet);
+  }
+
+  // 4) Re-create from chain truth, pinning the requested objectId.
+  const restored = restoreCharacterFromChain(
+    wallet,
+    String(fields.name ?? ''),
+    {
+      strength: Number(fields.strength ?? 5),
+      dexterity: Number(fields.dexterity ?? 5),
+      intuition: Number(fields.intuition ?? 5),
+      endurance: Number(fields.endurance ?? 5),
+    },
+    Number(fields.level ?? 1),
+    Number(fields.xp ?? 0),
+    Number(fields.unallocated_points ?? 0),
+    Number(fields.wins ?? 0),
+    Number(fields.losses ?? 0),
+    Number(fields.draws ?? 0),
+    Number(fields.rating ?? 1000),
+    characterId,
+  );
+
+  if (!restored.character) {
+    res.status(500).json({ error: restored.error || 'Failed to rebuild server character' });
+    return;
+  }
+  // Belt + braces: ensure the pin sticks even if `restoreCharacterFromChain`
+  // returned an existing record (idempotent path).
+  setOnChainObjectId(wallet, characterId);
+
+  // 5) Push the refreshed character to the connected client (if any). They'll
+  //    re-render against the canonical NFT without a manual reload.
+  for (const [, c] of getConnectedClients()) {
+    if (c.walletAddress === wallet && c.socket.readyState === c.socket.OPEN) {
+      c.characterId = restored.character.id;
+      c.socket.send(JSON.stringify({
+        type: 'character_data',
+        character: {
+          id: restored.character.id,
+          name: restored.character.name,
+          level: restored.character.level,
+          xp: restored.character.xp,
+          walletAddress: restored.character.walletAddress,
+          stats: restored.character.stats,
+          unallocatedPoints: restored.character.unallocatedPoints,
+          equipment: restored.character.equipment,
+          wins: restored.character.wins,
+          losses: restored.character.losses,
+          draws: restored.character.draws,
+          rating: restored.character.rating,
+        },
+      }));
+    }
+  }
+
+  console.log(
+    `[Admin] Repinned wallet ${wallet.slice(0, 10)}…` +
+    ` from ${previous?.onChainObjectId?.slice(0, 10) ?? 'none'}…` +
+    ` to ${characterId.slice(0, 10)}… (${restored.character.name})`,
+  );
+
+  res.json({
+    ok: true,
+    wallet,
+    previousCharacterId: previous?.onChainObjectId ?? null,
+    pinnedCharacterId: characterId,
+    name: restored.character.name,
+    level: restored.character.level,
+  });
+});
+
+// --- Admin: adopt orphaned wager into lobby (testnet-only) ---
+// POST /api/admin/adopt-wager  { wagerMatchId: "0x..." }
+//
+// Recovers a WagerMatch that was created on-chain but never made it into
+// the in-memory lobby (e.g. WS reconnect race, or server restart after the
+// create_wager tx landed). Fetches the WagerMatch from chain, verifies
+// status=WAITING, resolves the creator's character, inserts the lobby
+// entry, and broadcasts to all connected clients. Rejected on mainnet.
+app.post('/api/admin/adopt-wager', async (req, res) => {
+  if (CONFIG.SUI_NETWORK === 'mainnet') {
+    res.status(403).json({ error: 'Admin endpoint disabled on mainnet' });
+    return;
+  }
+
+  const wagerMatchId = String(req.body?.wagerMatchId ?? '').trim();
+  if (!wagerMatchId.startsWith('0x') || wagerMatchId.length < 42) {
+    res.status(400).json({ error: 'Body must be { wagerMatchId: "0x..." }' });
+    return;
+  }
+
+  // Fetch WagerMatch from chain via the shared SDK client (inherits retry +
+  // connection pooling from `sui-settle::readObjectWithRetry`).
+  let fields: Record<string, unknown> | null;
+  try {
+    const result = await readObjectWithRetry(wagerMatchId, { showContent: true, showType: true });
+    fields = result.fields;
+    const objType = result.type;
+    if (!fields || !objType?.includes('::arena::WagerMatch')) {
+      res.status(404).json({ error: 'Object not found or not a WagerMatch', type: objType });
+      return;
+    }
+  } catch (err: any) {
+    res.status(502).json({ error: `Chain RPC failed: ${err?.message || err}` });
+    return;
+  }
+
+  const status = Number(fields.status);
+  if (status !== 0) {
+    res.status(409).json({
+      error: 'Wager not in WAITING state',
+      status,
+      statusLabel: status === 1 ? 'ACTIVE' : status === 2 ? 'SETTLED' : 'UNKNOWN',
+    });
+    return;
+  }
+
+  const creatorWallet = String(fields.player_a);
+  const stakeMist = Number(fields.stake_amount);
+  const createdAtMs = Number(fields.created_at);
+  const wagerAmount = stakeMist / 1_000_000_000;
+
+  // Resolve creator's character so the lobby entry has real data
+  const creatorChar = getCharacterByWallet(creatorWallet);
+  if (!creatorChar) {
+    res.status(409).json({
+      error: 'Creator has no active character on server — they must be logged in to adopt',
+      creatorWallet,
+    });
+    return;
+  }
+
+  const entry: WagerLobbyEntry = {
+    wagerMatchId,
+    creatorWallet,
+    creatorCharacterId: creatorChar.id,
+    creatorName: creatorChar.name,
+    creatorLevel: creatorChar.level,
+    creatorRating: creatorChar.rating,
+    creatorStats: { ...creatorChar.stats },
+    wagerAmount,
+    // IMPORTANT: use Date.now(), not the chain's original created_at. The
+    // lobby's 10-minute sweeper uses this field; using the chain timestamp
+    // (potentially already stale by the time we adopt) triggers immediate
+    // admin-cancel on the next sweeper tick, refunding the escrow and
+    // defeating the recovery. Adopted entries get a fresh lobby clock.
+    createdAt: Date.now(),
+    // Preserve chain-side timestamp for auditing / future UI ("created 20m ago").
+    // The existing WagerLobbyEntry type doesn't declare this yet; leaving it
+    // out of the literal keeps the adopted entry shape-compatible today.
+  };
+  void createdAtMs;
+
+  const adopted = adoptWagerIntoLobby(entry);
+  if (!adopted) {
+    res.status(409).json({ error: 'Wager already in lobby', entry });
+    return;
+  }
+
+  res.json({ ok: true, entry });
 });
 
 // --- Fight Details ---
@@ -131,7 +519,9 @@ function onMatchFound(entryA: QueueEntry, entryB: QueueEntry): void {
   );
 
   // Wager fights go through lobby now, not matchmaking — this only handles friendly/ranked
-  createFight(charA, charB, entryA.fightType, entryA.wagerAmount);
+  createFight(charA, charB, entryA.fightType, entryA.wagerAmount).catch((err) => {
+    console.error('[Matchmaking] createFight failed:', err?.message || err);
+  });
 }
 
 initMatchmaking(onMatchFound);
@@ -139,6 +529,143 @@ initMatchmaking(onMatchFound);
 // === Initialize Supabase ===
 
 getSupabase();
+
+// === Bucket 3 — Tavern boot wiring ===
+//
+// Pull pending DM channel rows + still-live fight requests back into the
+// in-memory stores so a player whose pending challenge spans a server
+// restart still sees it. Presence rows older than the stale window are
+// dropped on boot so a player who was online when the server crashed
+// doesn't haunt the player list forever.
+sweepStalePresenceInDb()
+  .then((dropped) => {
+    if (dropped > 0) console.log(`[Presence] Boot sweep dropped ${dropped} stale row(s).`);
+  })
+  .catch((err) => console.error('[Presence] Boot sweep failed:', err?.message ?? err));
+
+rehydrateDmChannels()
+  .catch((err) => console.error('[DmChannels] Boot rehydrate failed:', err?.message ?? err));
+
+rehydrateDmMessages()
+  .catch((err) => console.error('[DmMessages] Boot rehydrate failed:', err?.message ?? err));
+
+// ─── Hotfix #6 boot banner ───────────────────────────────────────────
+// Confirms the plaintext DM transport handlers are wired. If a
+// contributor reports "the server keeps saying Unknown message type:
+// dm_send" the first thing to check is whether THIS line appeared in
+// the server log on the most recent restart — missing line means the
+// old node process is still running.
+console.log(
+  '[Tavern] DM transport: plaintext WS + Supabase (Hotfix #6 ' +
+    '— dm_send / dm_history wired via dispatchTavernMessage). ' +
+    'Encrypted SDK path preserved behind NEXT_PUBLIC_DM_TRANSPORT=encrypted.',
+);
+
+rehydrateFightRequests()
+  .then((live) => {
+    if (live.length > 0) {
+      console.log(`[FightRequests] Boot rehydrate restored ${live.length} pending request(s).`);
+    }
+  })
+  .catch((err) => console.error('[FightRequests] Boot rehydrate failed:', err?.message ?? err));
+
+// Periodic sweepers — presence stale rows every 30s, fight-request TTL
+// every 10s. Both unrefed so they don't keep the process alive.
+
+setInterval(() => {
+  const dropped = sweepStalePresence();
+  if (dropped.length > 0) {
+    for (const wallet of dropped) {
+      broadcastToAuthenticated({ type: 'player_left', walletAddress: wallet });
+    }
+    console.log(`[Presence] sweep dropped ${dropped.length} stale wallet(s)`);
+  }
+}, Math.min(PRESENCE_STALE_MS / 2, 30_000)).unref();
+
+setInterval(() => {
+  sweepExpiredFightRequests((req) => {
+    const expiryMsg = {
+      type: 'fight_request_resolved',
+      action: 'expire',
+      request: {
+        id: req.id,
+        requestType: req.requestType,
+        fromWallet: req.fromWallet,
+        fromName: req.fromName,
+        toWallet: req.toWallet,
+        toName: req.toName,
+        stakeMist: req.stakeMist ?? null,
+        message: req.message ?? null,
+        status: req.status,
+        expiresAt: req.expiresAt,
+        resolvedAt: req.resolvedAt ?? null,
+        createdAt: req.createdAt,
+      },
+    };
+    for (const [, c] of getConnectedClients()) {
+      if (
+        (c.walletAddress === req.fromWallet || c.walletAddress === req.toWallet) &&
+        c.socket.readyState === c.socket.OPEN
+      ) {
+        c.socket.send(JSON.stringify(expiryMsg));
+      }
+    }
+  });
+}, 10_000).unref();
+
+// === Crash recovery — orphan ACTIVE wager sweeper ===
+//
+// On boot, scan Supabase for in-flight wager rows older than 60s. For
+// each, check chain status; if still ACTIVE, call admin_cancel_wager
+// (50/50 refund); if SETTLED, drop the stale row. Runs once after
+// matchmaking is wired (so the treasury queue is ready) and after
+// Supabase is initialised.
+sweepOrphanActiveWagers().catch((err) => {
+  console.error('[OrphanWager] sweep failed:', err?.message || err);
+});
+
+// === Initialize Marketplace event index ===
+//
+// Cold-syncs from chain, then opens a WSS subscription to the public Sui
+// fullnode. Every list/delist/buy/kiosk-create updates the in-memory listing
+// index reactively and broadcasts the delta to all authenticated clients.
+startMarketplaceIndex().catch((err) => {
+  console.error('[Marketplace] startMarketplaceIndex failed:', err?.message || err);
+});
+
+subscribeMarketplace((event) => {
+  // Translate the server-shape into the wire-shape and broadcast to all
+  // authenticated clients. Each event maps 1:1 to a frontend WS message.
+  if (event.type === 'item_listed') {
+    broadcastToAuthenticated({ type: 'item_listed', listing: listingToWire(event.listing) });
+    return;
+  }
+  if (event.type === 'item_delisted') {
+    broadcastToAuthenticated({
+      type: 'item_delisted',
+      listingId: event.listingId,
+      // Forward seller + kioskId — the seller's UI uses them to know
+      // whether to refresh their own kiosk panel.
+      seller: event.seller,
+      kioskId: event.kioskId,
+    });
+    return;
+  }
+  if (event.type === 'item_bought') {
+    // The listing has already been removed from the server index, so the
+    // wire shape carries the bare ID + counterparties. The seller's tab
+    // pivots on `seller` to auto-refresh their profits + listing count
+    // without having to have signed the buy tx themselves.
+    broadcastToAuthenticated({
+      type: 'item_bought',
+      listing: { id: event.listingId },
+      buyer: event.buyer,
+      seller: event.seller,
+      kioskId: event.kioskId,
+    });
+    return;
+  }
+});
 
 // === Start Server ===
 
@@ -154,7 +681,6 @@ server.listen(CONFIG.PORT, () => {
   Endpoints:
     GET /health
     GET /api/leaderboard
-    GET /api/shop
     GET /api/character/:walletAddress
     GET /api/fights/:fightId
     WS  /  (WebSocket)
@@ -168,6 +694,7 @@ function gracefulShutdown(signal: string): void {
   console.log(`\n[Server] ${signal} received. Shutting down gracefully...`);
 
   shutdownMatchmaking();
+  shutdownMarketplaceIndex();
 
   wss.clients.forEach((client) => {
     client.close(1001, 'Server shutting down');
@@ -190,3 +717,24 @@ function gracefulShutdown(signal: string): void {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Bug 7 (2026-05-19) safety net. The handleWagerAccepted incident
+// at 0xce620b9c… traced to an async handler whose unhandled rejection
+// vanished into Node's default "warning only" behaviour, leaving 0.2
+// SUI locked on chain with no server log. We catch globally now so
+// any promise that escapes a local catch still lands in the log with
+// enough context for triage. Process stays up — these are typically
+// transient (RPC blips); kill -9 would lock more SUI than it saved.
+process.on('unhandledRejection', (reason, _promise) => {
+  const r = reason as Error | { message?: string; stack?: string } | string | undefined;
+  const stack = (r as Error)?.stack;
+  const message = typeof r === 'string' ? r : (r as { message?: string })?.message;
+  console.error(
+    '[unhandledRejection]',
+    stack || message || JSON.stringify(reason),
+  );
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err?.stack || err?.message || err);
+});

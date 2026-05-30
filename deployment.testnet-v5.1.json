@@ -1,0 +1,132 @@
+{
+  "version": "5.1.0-13slot-ring3",
+  "network": "testnet",
+  "publishedAt": "2026-05-28-PM-final",
+  "publishDigest": "5mtUf93YMfS2p45xFgGCiZyDGGNPJcRWXwMYKHYQRgAy",
+  "policyDigest": "3kKCKnJtMY7KuFnfdaRbfS3Wa3WgBF8Z1nDPDzccyGPU",
+  "displayCharacterDigest": "HXov9TSx2gp7Np4DfE5fZmpz2E27ziUdXCdZrHRntWBk",
+  "displayItemDigest": "FrjSeampx9SZ3RrmoUc2vvvnxb4rM15YeGEuXTdsQYCY",
+  "packageId": "0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717",
+
+  "supersedes": [
+    {
+      "packageId": "0x95c231e5909678609202b5a976c575366280222cdb703e4a7a097043bd712c69",
+      "publishDigest": "2eQedAHCjNE9kpkQPVwqdTkA7fa5xy1qeAruRt2mtTPh",
+      "reason": "13-slot v5.1 with pauldrons. User decided to drop pauldrons and add ring_3 instead — fresh publish needed because Item type enum changed (PAULDRONS=12 removed) and a new equip primitive (equip_ring_3 / unequip_ring_3) was added."
+    },
+    {
+      "packageId": "0x7853412fb905e73cf8d2ba3f8377045720069c25b5e656abc926119659641518",
+      "publishDigest": "DJjfc4tWN3EdXqjJLnfENj79AjNSgmJUgEEM4XSkznkY",
+      "reason": "Original 10-slot v5.1 from the overnight run."
+    }
+  ],
+
+  "shared": {
+    "characterRegistry": "0xad05d60e00149ab105ee60f8eaaec1542ec08d8c8795da53305f01bde4c9105f",
+    "openWagerRegistry": "0xa3be188a6b636bdf12d1d7b79f866fc6d22f287c60daf7157f95b3c246908e20",
+    "kioskRegistry": "0x05d355fdf844bc615d66bd621f1a8aa7f673784f70d1d991681e4c6a012d4860",
+    "transferPolicy": "0x0483cd855318921a330ff2d8967fb925382d76c7360a29a5d2bbf676bd13f69f"
+  },
+
+  "caps": {
+    "adminCap": "0x2cbeef93fb0d167ccd87fd67f99542b7e2387601a0a3644bb19a600db3461c50",
+    "upgradeCap": "0x7434a214aa346c5af0199bee519cc8203ce4d8633bcc8397fba08e281dbbb07a",
+    "publisher": "0x2cb1d94c837bae772ce1122f8c17314bc2fdb0bbec4991540e1a38c4c28495b1",
+    "transferPolicyCap": "0xee5a808c9aa22daf8c57420fa06e9ae0073b0d6a22e55a8be7c84da3f6ed31c8"
+  },
+
+  "display": {
+    "character": "0x94a855326a01a91e247a8062d9c475eddf5770829f52d7dbfceef535a5fc0885",
+    "item": "0x32bdda84dd589ed21e804171b924cc5b3676f97b35b55dff2d064d035a5aa658"
+  },
+
+  "treasury": "0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d",
+
+  "modules": [
+    "arena",
+    "character",
+    "equipment",
+    "item",
+    "marketplace",
+    "royalty_rule"
+  ],
+
+  "slots": {
+    "_comment": "13-slot loadout (final). pauldrons REMOVED; ring_3 added. Total slot count matches the original v5.1 plan.",
+    "count": 13,
+    "all": [
+      "weapon",
+      "offhand",
+      "helmet",
+      "chest",
+      "gloves",
+      "boots",
+      "belt",
+      "ring_1",
+      "ring_2",
+      "ring_3",
+      "necklace",
+      "pants",
+      "bracelets"
+    ],
+    "new_in_v5_1": [
+      "ring_3",
+      "pants",
+      "bracelets"
+    ]
+  },
+
+  "item_types": {
+    "WEAPON": 1,
+    "SHIELD": 2,
+    "HELMET": 3,
+    "CHEST": 4,
+    "GLOVES": 5,
+    "BOOTS": 6,
+    "BELT": 7,
+    "RING": 8,
+    "NECKLACE": 9,
+    "PANTS": 10,
+    "BRACELETS": 11
+  },
+
+  "rarity_stat_budgets": {
+    "_comment": "Sum of all *_bonus fields + max_damage capped per rarity in mint_item_admin.",
+    "COMMON": 20,
+    "UNCOMMON": 40,
+    "RARE": 70,
+    "EPIC": 110,
+    "LEGENDARY": 160
+  },
+
+  "v5_2_deferred": [
+    "sui::random for loot rolls (D1)",
+    "respec_character + 5 SUI sink + 24h cooldown DOF (D7)",
+    "settle_wager_attested dual-sig settlement (D8)",
+    "Confirm-modal gate for every signAndExecuteTransaction (MAINNET_PREP §D HARD blocker)",
+    "Settlement retry / journal (audit's #1 risk)",
+    "WS message Zod validation + rate-limiter middleware",
+    "Frontend Draw modal + W/L/D counter render",
+    "Empty catch sweep + StatBonuses shape unification"
+  ],
+
+  "mint_instructions": {
+    "_comment": "How to mint items into TREASURY then transfer to a player wallet. The frontend supports drag-equip/inventory-pick across all 13 slots once items are in the player's wallet.",
+    "from_repo_root_run": "cd ~/sui-comabts/server && SUI_PACKAGE_ID=0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717 ADMIN_CAP_ID=0x2cbeef93fb0d167ccd87fd67f99542b7e2387601a0a3644bb19a600db3461c50 NODE_PATH=node_modules npx tsx <your-mint-script>.ts",
+    "mint_item_admin_signature": "mint_item_admin(admin_cap, name, image_url, item_type, class_req, level_req, rarity, slot_type, str_bonus, dex_bonus, int_bonus, end_bonus, hp_bonus, armor_bonus, defense_bonus, attack_bonus, crit_chance_bonus, crit_multiplier_bonus, evasion_bonus, anti_crit_bonus, anti_evasion_bonus, min_damage, max_damage, ctx)",
+    "slot_type_rules": {
+      "WEAPON": "0 (mainhand) OR 2 (both_hands). Never 1.",
+      "SHIELD": "Must be 1 (offhand).",
+      "everything_else": "Must be 0 (mainhand) by convention — armor slots are determined by item_type alone, slot_type is a no-op for them but must be zero per validator."
+    },
+    "rarity_budget": "Sum of all *_bonus fields + max_damage must be ≤ rarity budget. mint_item_admin aborts with ERarityBudgetExceeded (code 5) if exceeded.",
+    "example_mint_script": "See scripts/mint-v5.1-13slot-catalog.ts in the repo — illustrates the full mint+transfer pattern with retry-on-version-race. Adjust item specs + recipient wallet, then run with the v5.1 SUI_PACKAGE_ID and ADMIN_CAP_ID env vars."
+  },
+
+  "gas_costs": {
+    "publish_sui": 0.16,
+    "policy_setup_sui": 0.003,
+    "display_setup_sui": 0.006,
+    "treasury_estimate_post_setup_sui": 2.79
+  }
+}

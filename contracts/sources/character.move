@@ -1,39 +1,65 @@
+#[allow(lint(self_transfer, share_owned))]
 module sui_combats::character {
-    use sui::object::{Self, UID, ID};
-    use sui::transfer;
-    use sui::tx_context::{Self, TxContext};
     use sui::event;
     use sui::clock::{Self, Clock};
     use sui::dynamic_field as df;
+    use sui::table::{Self, Table};
     use std::string::String;
-    use std::option::{Self, Option};
 
     // ===== Error constants =====
     const EInvalidStatTotal: u64 = 0;
-    const EMaxLevelReached: u64 = 1;
+    const EXpTooHigh: u64 = 1;
     const ENotEnoughPoints: u64 = 2;
     const ENameTooLong: u64 = 3;
-    const EStatTooHigh: u64 = 4;
+    const ELockTooLong: u64 = 4;
     const ENotOwner: u64 = 5;
+    /// v5.1 — Wallet already has a Character registered. Closes Block A Layer 3
+    /// (PTB-crafted duplicate-mint that bypasses the auth-phase + server pre-mint
+    /// guards). Chain-side is now the primary defence; frontend + server become
+    /// defence-in-depth.
+    const EWalletAlreadyHasCharacter: u64 = 6;
+    /// v5.1 — Caller tried to burn a Character not in the registry, or the
+    /// registry entry points at a different Character object. Either is a sign
+    /// the caller passed the wrong object id.
+    const ENotRegistered: u64 = 7;
 
-    // ===== Fight-lock key for dynamic field =====
-    // Value stored under this key is a u64 Unix millis timestamp. The character
-    // is considered locked while block_time < stored_value. Zero or missing = unlocked.
+    // ===== Fight-lock dynamic field key (u64 unix-ms expiry) =====
     const LOCK_KEY: vector<u8> = b"fight_lock_expires_at";
 
-    // ===== Constants =====
+    // ===== Game constants =====
     const MAX_LEVEL: u8 = 20;
     const INITIAL_STAT_POINTS: u16 = 20;
     const POINTS_PER_LEVEL: u16 = 3;
     const MAX_NAME_LENGTH: u64 = 32;
     const DEFAULT_RATING: u16 = 1000;
 
-    // ===== AdminCap — minted once on publish, held by server =====
-    public struct AdminCap has key, store {
+    // ===== Hardening caps =====
+    /// Largest XP delta the server (AdminCap holder) can grant in a single fight.
+    /// Server-side max today is ~400 (won wager vs +200 ELO opponent); this gives
+    /// 2.5× headroom for tournaments / events while bounding admin-key compromise.
+    const MAX_XP_PER_FIGHT: u64 = 1000;
+
+    /// Longest fight-lock duration the server can set in one call. 1 hour absorbs
+    /// any reasonable fight + settlement + retry window. Prevents accidental or
+    /// malicious 999-year locks if the AdminCap leaks.
+    const MAX_LOCK_MS: u64 = 3_600_000;
+
+    // ===== AdminCap — minted once at init, held by server/treasury =====
+    public struct AdminCap has key, store { id: UID }
+
+    // ===== CharacterRegistry (v5.1) — shared object enforcing one Character per wallet =====
+    /// Maps player address → Character object id. Inserted by create_character,
+    /// removed by burn_character. The registry is the chain-side source of truth
+    /// for the one-character-per-wallet invariant; the auth-phase + server
+    /// pre-mint guards now act as defence-in-depth.
+    public struct CharacterRegistry has key {
         id: UID,
+        table: Table<address, ID>,
     }
 
     // ===== Character shared object =====
+    // Equipment lives ONLY in dynamic object fields keyed by slot name.
+    // No parallel Option<ID> pointers: DOFs are the single source of truth.
     public struct Character has key {
         id: UID,
         owner: address,
@@ -45,25 +71,20 @@ module sui_combats::character {
         dexterity: u16,
         intuition: u16,
         endurance: u16,
-        // Unallocated stat points
+        // Unallocated stat points (granted on level-up, spent via allocate_points)
         unallocated_points: u16,
         // Combat record
         wins: u32,
         losses: u32,
+        /// v5.1 — Draws counter for mutual-KO outcomes. update_after_fight_draw
+        /// increments this; W/L/D leaderboards read it.
+        draws: u32,
         rating: u16,
-        // Timestamp of last on-chain update
+        // Timestamps
+        created_at: u64,
         last_updated: u64,
-        // Equipment slots (store ID references to equipped items)
-        weapon: Option<ID>,
-        offhand: Option<ID>,
-        helmet: Option<ID>,
-        chest: Option<ID>,
-        gloves: Option<ID>,
-        boots: Option<ID>,
-        belt: Option<ID>,
-        ring_1: Option<ID>,
-        ring_2: Option<ID>,
-        necklace: Option<ID>,
+        // Bumped by equipment::save_loadout — anti-cheat + indexer hint
+        loadout_version: u64,
     }
 
     // ===== Events =====
@@ -106,12 +127,33 @@ module sui_combats::character {
         remaining_points: u16,
     }
 
-    // ===== Init — creates AdminCap and sends to deployer =====
+    /// v5.1 — Draw outcome recorded against a Character. Mirrors
+    /// FightResultUpdated but increments draws rather than wins/losses.
+    public struct DrawRecorded has copy, drop {
+        character_id: ID,
+        owner: address,
+        xp_gained: u64,
+        new_xp: u64,
+        new_draws: u32,
+    }
+
+    /// v5.1 — Admin burned a Character. Cleans up the registry entry for `owner`
+    /// so they can mint a fresh Character on the same wallet.
+    public struct CharacterBurned has copy, drop {
+        character_id: ID,
+        owner: address,
+    }
+
+    // ===== Init — mint single AdminCap to the deployer + share CharacterRegistry =====
     fun init(ctx: &mut TxContext) {
-        let admin_cap = AdminCap {
-            id: object::new(ctx),
-        };
+        let admin_cap = AdminCap { id: object::new(ctx) };
         transfer::transfer(admin_cap, tx_context::sender(ctx));
+
+        let registry = CharacterRegistry {
+            id: object::new(ctx),
+            table: table::new<address, ID>(ctx),
+        };
+        transfer::share_object(registry);
     }
 
     #[test_only]
@@ -124,9 +166,9 @@ module sui_combats::character {
         xp_for_level(level)
     }
 
-    // ===== XP thresholds for each level (PRODUCTION values — reverted from test) =====
-    // Anchor points from GDD: L2=100, L5=1500, L10=50k, L15=350k, L20=1M.
-    // Missing levels interpolated geometrically from those anchors.
+    // ===== XP curve (production values per GDD §9.1) =====
+    // Anchors: L2=100, L5=1500, L10=50k, L15=350k, L20=1M.
+    // Intermediate levels interpolated geometrically.
     fun xp_for_level(level: u8): u64 {
         if (level <= 1) { 0 }
         else if (level == 2) { 100 }
@@ -153,22 +195,26 @@ module sui_combats::character {
 
     // ===== Public entry functions =====
 
-    /// Create a new character. Shared object so the server can update it.
-    /// The `owner` field ensures only the player can allocate stats.
-    public entry fun create_character(
+    /// Mint a new character. Stat sum must equal INITIAL_STAT_POINTS (20).
+    /// v5.1 — Aborts if `tx_context::sender` already has a Character registered.
+    /// Character is shared so the server can update it via AdminCap.
+    public fun create_character(
         name: String,
         str: u16,
         dex: u16,
         int: u16,
         end: u16,
+        registry: &mut CharacterRegistry,
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        let name_bytes = std::string::bytes(&name);
-        assert!(std::vector::length(name_bytes) <= MAX_NAME_LENGTH, ENameTooLong);
+        assert!(name.length() <= MAX_NAME_LENGTH, ENameTooLong);
         assert!(str + dex + int + end == INITIAL_STAT_POINTS, EInvalidStatTotal);
 
         let player = tx_context::sender(ctx);
+        assert!(!table::contains(&registry.table, player), EWalletAlreadyHasCharacter);
+
+        let now = clock::timestamp_ms(clock);
 
         let character = Character {
             id: object::new(ctx),
@@ -183,21 +229,17 @@ module sui_combats::character {
             unallocated_points: 0,
             wins: 0,
             losses: 0,
+            draws: 0,
             rating: DEFAULT_RATING,
-            last_updated: clock::timestamp_ms(clock),
-            weapon: option::none(),
-            offhand: option::none(),
-            helmet: option::none(),
-            chest: option::none(),
-            gloves: option::none(),
-            boots: option::none(),
-            belt: option::none(),
-            ring_1: option::none(),
-            ring_2: option::none(),
-            necklace: option::none(),
+            created_at: now,
+            last_updated: now,
+            loadout_version: 0,
         };
 
         let character_id = object::id(&character);
+
+        // Register before sharing — atomic guard against the racing-PTB case.
+        table::add(&mut registry.table, player, character_id);
 
         event::emit(CharacterCreated {
             character_id,
@@ -212,9 +254,55 @@ module sui_combats::character {
         transfer::share_object(character);
     }
 
-    /// Server calls this after each fight to update the character on-chain.
-    /// Requires AdminCap (only the server holds this).
-    public entry fun update_after_fight(
+    /// v5.1 — Admin burns a Character. Removes the registry entry so the owner
+    /// can mint a fresh Character on the same wallet. The admin is responsible
+    /// for ensuring the Character has no attached equipment DOFs before calling
+    /// — orphaned DOFs are unreachable post-delete but consume storage rent.
+    /// Aborts with ENotRegistered if the registry doesn't map owner → this id.
+    public fun burn_character(
+        _admin: &AdminCap,
+        character: Character,
+        registry: &mut CharacterRegistry,
+    ) {
+        let character_id = object::id(&character);
+        let owner = character.owner;
+
+        assert!(table::contains(&registry.table, owner), ENotRegistered);
+        let registered_id = *table::borrow(&registry.table, owner);
+        assert!(registered_id == character_id, ENotRegistered);
+        let _ = table::remove(&mut registry.table, owner);
+
+        event::emit(CharacterBurned { character_id, owner });
+
+        // Unpack and delete. Fields with `copy/drop/store` (which all our
+        // primitives have) are dropped automatically when the binding goes out
+        // of scope; only the UID needs explicit deletion.
+        let Character {
+            id,
+            owner: _,
+            name: _,
+            level: _,
+            xp: _,
+            strength: _,
+            dexterity: _,
+            intuition: _,
+            endurance: _,
+            unallocated_points: _,
+            wins: _,
+            losses: _,
+            draws: _,
+            rating: _,
+            created_at: _,
+            last_updated: _,
+            loadout_version: _,
+        } = character;
+        object::delete(id);
+    }
+
+    /// Server (AdminCap holder) persists fight result. Aborts if `xp_gained`
+    /// exceeds MAX_XP_PER_FIGHT — bounds blast radius if the admin key leaks.
+    /// Auto-levels up while xp crosses thresholds, granting POINTS_PER_LEVEL each.
+    public fun update_after_fight(
         _admin: &AdminCap,
         character: &mut Character,
         won: bool,
@@ -222,17 +310,15 @@ module sui_combats::character {
         new_rating: u16,
         clock: &Clock,
     ) {
-        // Update win/loss
+        assert!(xp_gained <= MAX_XP_PER_FIGHT, EXpTooHigh);
+
         if (won) {
             character.wins = character.wins + 1;
         } else {
             character.losses = character.losses + 1;
         };
 
-        // Update rating
         character.rating = new_rating;
-
-        // Add XP and check for level-ups
         character.xp = character.xp + xp_gained;
 
         while (character.level < MAX_LEVEL) {
@@ -268,8 +354,52 @@ module sui_combats::character {
         });
     }
 
-    /// Player allocates unallocated stat points. Only the character owner can call this.
-    public entry fun allocate_points(
+    /// v5.1 — Server (AdminCap holder) records a draw outcome. Increments
+    /// `draws`, applies XP (typically 10% of normal — server enforces), keeps
+    /// rating unchanged. Auto-levels exactly like update_after_fight.
+    public fun update_after_fight_draw(
+        _admin: &AdminCap,
+        character: &mut Character,
+        xp_gained: u64,
+        clock: &Clock,
+    ) {
+        assert!(xp_gained <= MAX_XP_PER_FIGHT, EXpTooHigh);
+
+        character.draws = character.draws + 1;
+        character.xp = character.xp + xp_gained;
+
+        while (character.level < MAX_LEVEL) {
+            let next_level = character.level + 1;
+            let required_xp = xp_for_level(next_level);
+            if (character.xp >= required_xp) {
+                character.level = next_level;
+                character.unallocated_points = character.unallocated_points + POINTS_PER_LEVEL;
+
+                event::emit(LevelUp {
+                    character_id: object::id(character),
+                    owner: character.owner,
+                    new_level: character.level,
+                    xp: character.xp,
+                    unallocated_points: character.unallocated_points,
+                });
+            } else {
+                break
+            }
+        };
+
+        character.last_updated = clock::timestamp_ms(clock);
+
+        event::emit(DrawRecorded {
+            character_id: object::id(character),
+            owner: character.owner,
+            xp_gained,
+            new_xp: character.xp,
+            new_draws: character.draws,
+        });
+    }
+
+    /// Owner-only. Spend up to `unallocated_points` across stats.
+    public fun allocate_points(
         character: &mut Character,
         str: u16,
         dex: u16,
@@ -299,16 +429,23 @@ module sui_combats::character {
         });
     }
 
-    // ===== Fight-lock (admin-gated on-chain proof that equipment cannot change mid-fight) =====
+    // ===== Fight-lock (admin-gated proof equipment cannot change mid-fight) =====
 
-    /// Server sets a lock expiry on a character. Passing `expires_at_ms = 0` clears
-    /// any existing lock. While the stored timestamp is greater than the current
-    /// block time, `is_fight_locked` returns true and all equip/unequip calls abort.
-    public entry fun set_fight_lock(
+    /// Set or extend the fight-lock expiry. `expires_at_ms = 0` clears any lock.
+    /// Aborts if the requested expiry is more than MAX_LOCK_MS in the future
+    /// (bounds blast radius of an admin-key compromise + accidental long locks).
+    public fun set_fight_lock(
         _admin: &AdminCap,
         character: &mut Character,
         expires_at_ms: u64,
+        clock: &Clock,
     ) {
+        let now = clock::timestamp_ms(clock);
+        assert!(
+            expires_at_ms == 0 || expires_at_ms <= now + MAX_LOCK_MS,
+            ELockTooLong,
+        );
+
         let uid = &mut character.id;
         if (df::exists_<vector<u8>>(uid, LOCK_KEY)) {
             let slot: &mut u64 = df::borrow_mut(uid, LOCK_KEY);
@@ -316,7 +453,6 @@ module sui_combats::character {
         } else if (expires_at_ms > 0) {
             df::add(uid, LOCK_KEY, expires_at_ms);
         };
-        // If no DF exists and expires_at_ms == 0, nothing to do.
     }
 
     /// True iff the character has an unexpired fight lock. Auto-expires once
@@ -328,53 +464,48 @@ module sui_combats::character {
         *expires > clock::timestamp_ms(clock)
     }
 
-    // ===== Package-internal helpers (used by equipment module) =====
+    // ===== Package-internal helpers (used by equipment module only) =====
+
+    public(package) fun uid(character: &Character): &UID { &character.id }
 
     public(package) fun uid_mut(character: &mut Character): &mut UID {
         &mut character.id
     }
 
-    public fun uid(character: &Character): &UID {
-        &character.id
+    /// Increment loadout_version and return the new value. Called by
+    /// equipment::save_loadout as the final command in a save PTB.
+    public(package) fun bump_loadout_version(character: &mut Character): u64 {
+        character.loadout_version = character.loadout_version + 1;
+        character.loadout_version
     }
 
-    // ===== Accessor functions =====
+    // ===== Read-only accessors =====
 
     public fun owner(character: &Character): address { character.owner }
     public fun level(character: &Character): u8 { character.level }
+    public fun xp(character: &Character): u64 { character.xp }
+    public fun unallocated_points(character: &Character): u16 { character.unallocated_points }
     public fun strength(character: &Character): u16 { character.strength }
     public fun dexterity(character: &Character): u16 { character.dexterity }
     public fun intuition(character: &Character): u16 { character.intuition }
     public fun endurance(character: &Character): u16 { character.endurance }
-    public fun rating(character: &Character): u16 { character.rating }
     public fun wins(character: &Character): u32 { character.wins }
     public fun losses(character: &Character): u32 { character.losses }
-    public fun xp(character: &Character): u64 { character.xp }
+    /// v5.1 — Draws accessor.
+    public fun draws(character: &Character): u32 { character.draws }
+    public fun rating(character: &Character): u16 { character.rating }
     public fun name(character: &Character): String { character.name }
-    public fun unallocated_points(character: &Character): u16 { character.unallocated_points }
+    public fun created_at(character: &Character): u64 { character.created_at }
     public fun last_updated(character: &Character): u64 { character.last_updated }
+    public fun loadout_version(character: &Character): u64 { character.loadout_version }
 
-    // Equipment slot accessors
-    public fun weapon(character: &Character): Option<ID> { character.weapon }
-    public fun offhand(character: &Character): Option<ID> { character.offhand }
-    public fun helmet(character: &Character): Option<ID> { character.helmet }
-    public fun chest(character: &Character): Option<ID> { character.chest }
-    public fun gloves(character: &Character): Option<ID> { character.gloves }
-    public fun boots(character: &Character): Option<ID> { character.boots }
-    public fun belt(character: &Character): Option<ID> { character.belt }
-    public fun ring_1(character: &Character): Option<ID> { character.ring_1 }
-    public fun ring_2(character: &Character): Option<ID> { character.ring_2 }
-    public fun necklace(character: &Character): Option<ID> { character.necklace }
+    /// v5.1 — CharacterRegistry accessor for test + read-only callers.
+    public fun registry_has(registry: &CharacterRegistry, who: address): bool {
+        table::contains(&registry.table, who)
+    }
 
-    // Equipment slot setters (package-level for equipment module)
-    public(package) fun set_weapon(character: &mut Character, id: Option<ID>) { character.weapon = id; }
-    public(package) fun set_offhand(character: &mut Character, id: Option<ID>) { character.offhand = id; }
-    public(package) fun set_helmet(character: &mut Character, id: Option<ID>) { character.helmet = id; }
-    public(package) fun set_chest(character: &mut Character, id: Option<ID>) { character.chest = id; }
-    public(package) fun set_gloves(character: &mut Character, id: Option<ID>) { character.gloves = id; }
-    public(package) fun set_boots(character: &mut Character, id: Option<ID>) { character.boots = id; }
-    public(package) fun set_belt(character: &mut Character, id: Option<ID>) { character.belt = id; }
-    public(package) fun set_ring_1(character: &mut Character, id: Option<ID>) { character.ring_1 = id; }
-    public(package) fun set_ring_2(character: &mut Character, id: Option<ID>) { character.ring_2 = id; }
-    public(package) fun set_necklace(character: &mut Character, id: Option<ID>) { character.necklace = id; }
+    /// v5.1 — Look up a wallet's Character id. Aborts via Table abort if absent.
+    public fun registry_get(registry: &CharacterRegistry, who: address): ID {
+        *table::borrow(&registry.table, who)
+    }
 }

@@ -1,13 +1,10 @@
 module sui_combats::arena {
-    use sui::object::{Self, UID, ID};
-    use sui::transfer;
-    use sui::tx_context::{Self, TxContext};
     use sui::event;
     use sui::coin::{Self, Coin};
     use sui::balance::{Self, Balance};
     use sui::sui::SUI;
     use sui::clock::{Self, Clock};
-    use std::option::{Self, Option};
+    use sui::table::{Self, Table};
 
     // ===== Error constants =====
     const EInvalidStake: u64 = 0;
@@ -20,24 +17,40 @@ module sui_combats::arena {
     const ECannotJoinOwnMatch: u64 = 7;
     const EUnauthorized: u64 = 8;
     const ENotExpired: u64 = 9;
+    const ENoOpponent: u64 = 10;
+    /// v5.1 — Caller already has an open wager (WAITING or ACTIVE). Closes
+    /// the server-down-mid-create orphan class AND the silent-accept-as-creator
+    /// case. Chain-side becomes primary defence; frontend gate stays as UX.
+    const EAlreadyHasOpenWager: u64 = 11;
 
     // ===== Status constants =====
     const STATUS_WAITING: u8 = 0;
     const STATUS_ACTIVE: u8 = 1;
     const STATUS_SETTLED: u8 = 2;
 
-    // ===== Platform fee =====
+    // ===== Platform fee (5%) =====
     const PLATFORM_FEE_BPS: u64 = 500;
-    const BPS_BASE: u64 = 10000;
+    const BPS_BASE: u64 = 10_000;
 
     // ===== Timeouts =====
-    const MATCH_EXPIRY_MS: u64 = 600_000;       // 10 minutes — unaccepted wager expires
-    const SETTLEMENT_TIMEOUT_MS: u64 = 600_000;  // 10 minutes after accept — unsettled wager expires
+    const MATCH_EXPIRY_MS: u64 = 600_000;        // 10 min — unaccepted wager auto-refunds
+    const SETTLEMENT_TIMEOUT_MS: u64 = 600_000;  // 10 min after accept — unsettled splits 50/50
 
-    // Platform treasury / admin — receives 5% fee, can settle and admin-cancel
-    const TREASURY: address = @0xdbd3acbd6db16bdba55cf084ea36131bd97366e399859758689ab2dd686bcd60;
+    // ===== TREASURY — receives 5% platform fee + can settle / admin-cancel.
+    // Hardcoded to the v5 publisher wallet. A change requires a fresh publish.
+    const TREASURY: address = @0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d;
 
-    // ===== WagerMatch shared object =====
+    // ===== OpenWagerRegistry (v5.1) — chain-side one-open-wager-per-wallet gate =====
+    /// Maps creator address → wager_id. Inserted by create_wager; removed by
+    /// any wager-completion path (cancel_wager / settle_wager / settle_tie /
+    /// admin_cancel_wager / cancel_expired_wager). accept_wager reads-only —
+    /// the acceptor must not be a creator themselves.
+    public struct OpenWagerRegistry has key {
+        id: UID,
+        table: Table<address, ID>,
+    }
+
+    // ===== WagerMatch (shared) =====
     public struct WagerMatch has key {
         id: UID,
         player_a: address,
@@ -47,6 +60,7 @@ module sui_combats::arena {
         status: u8,
         created_at: u64,
         accepted_at: u64,
+        settled_at: u64,
     }
 
     // ===== Events =====
@@ -83,11 +97,37 @@ module sui_combats::arena {
         refund_each: u64,
     }
 
+    /// v5.1 — Emitted by `settle_tie` when a fight ends in mutual KO. Mirrors
+    /// WagerRefunded semantically (both players whole) but is its own type so
+    /// indexers can distinguish "tie" from "admin-cancelled" or "expired".
+    public struct WagerTied has copy, drop {
+        match_id: ID,
+        player_a: address,
+        player_b: address,
+        refund_each: u64,
+    }
+
+    // ===== Init — share OpenWagerRegistry once at publish =====
+    fun init(ctx: &mut TxContext) {
+        let registry = OpenWagerRegistry {
+            id: object::new(ctx),
+            table: table::new<address, ID>(ctx),
+        };
+        transfer::share_object(registry);
+    }
+
+    #[test_only]
+    public fun init_for_testing(ctx: &mut TxContext) {
+        init(ctx);
+    }
+
     // ===== Public functions =====
 
-    /// Create a new wager match. The sender's coins go into escrow.
-    public entry fun create_wager(
+    /// Create a new wager. Sender deposits `stake` into escrow; status starts WAITING.
+    /// v5.1 — Aborts if sender already has an open wager in the registry.
+    public fun create_wager(
         stake: Coin<SUI>,
+        registry: &mut OpenWagerRegistry,
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
@@ -95,6 +135,10 @@ module sui_combats::arena {
         assert!(stake_amount > 0, EInvalidStake);
 
         let player_a = tx_context::sender(ctx);
+
+        // v5.1 — Chain-side gate. The frontend + server gates remain as UX
+        // defence; this is the primary "no duplicate wagers per wallet" rule.
+        assert!(!table::contains(&registry.table, player_a), EAlreadyHasOpenWager);
 
         let wager = WagerMatch {
             id: object::new(ctx),
@@ -105,29 +149,38 @@ module sui_combats::arena {
             status: STATUS_WAITING,
             created_at: clock::timestamp_ms(clock),
             accepted_at: 0,
+            settled_at: 0,
         };
 
         let match_id = object::id(&wager);
 
-        event::emit(WagerCreated {
-            match_id,
-            player_a,
-            stake_amount,
-        });
+        // Register before share to keep the gate atomic with the side-effect.
+        table::add(&mut registry.table, player_a, match_id);
 
+        event::emit(WagerCreated { match_id, player_a, stake_amount });
         transfer::share_object(wager);
     }
 
-    /// Accept a wager match. Player B joins by depositing matching stake into escrow.
-    public entry fun accept_wager(
+    /// Player B joins by depositing matching stake. Status moves WAITING → ACTIVE.
+    /// v5.1 — Aborts if acceptor already has an open wager (they're a creator).
+    /// Read-only registry access — no mutation (acceptor isn't a creator).
+    public fun accept_wager(
         wager: &mut WagerMatch,
         stake: Coin<SUI>,
+        registry: &OpenWagerRegistry,
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
         assert!(wager.status == STATUS_WAITING, EMatchNotWaiting);
 
         let player_b = tx_context::sender(ctx);
+
+        // v5.1 — Registry check first: surfaces the more informative
+        // EAlreadyHasOpenWager when the caller is a creator (including the
+        // "tried to accept own wager" subcase). ECannotJoinOwnMatch remains
+        // as belt-and-suspenders for any edge case where a caller has a
+        // wager-as-player_a but somehow isn't in the registry.
+        assert!(!table::contains(&registry.table, player_b), EAlreadyHasOpenWager);
         assert!(player_b != wager.player_a, ECannotJoinOwnMatch);
 
         let stake_value = coin::value(&stake);
@@ -149,17 +202,20 @@ module sui_combats::arena {
         });
     }
 
-    /// Settle the wager. Only the admin (TREASURY) can call this.
-    /// Winner receives 95% of total escrow; 5% goes to platform treasury.
-    public entry fun settle_wager(
+    /// Settle a finished wager. TREASURY-only. `winner` MUST be one of the two
+    /// participants. Splits escrow 95% to winner / 5% to TREASURY.
+    /// v5.1 — Removes the creator (player_a) from the open-wager registry.
+    public fun settle_wager(
         wager: &mut WagerMatch,
         winner: address,
+        registry: &mut OpenWagerRegistry,
+        clock: &Clock,
         ctx: &mut TxContext,
     ) {
         assert!(tx_context::sender(ctx) == TREASURY, EUnauthorized);
         assert!(wager.status == STATUS_ACTIVE, EMatchNotActive);
+        assert!(option::is_some(&wager.player_b), ENoOpponent);
 
-        // Validate winner is one of the two players
         let player_b_addr = *option::borrow(&wager.player_b);
         assert!(
             winner == wager.player_a || winner == player_b_addr,
@@ -167,22 +223,24 @@ module sui_combats::arena {
         );
 
         let total = balance::value(&wager.escrow);
-
-        // Calculate platform fee (5%)
         let platform_fee = (total * PLATFORM_FEE_BPS) / BPS_BASE;
         let payout = total - platform_fee;
 
-        // Send platform fee to treasury
         let fee_balance = balance::split(&mut wager.escrow, platform_fee);
         let fee_coin = coin::from_balance(fee_balance, ctx);
         transfer::public_transfer(fee_coin, TREASURY);
 
-        // Send remaining to winner
         let winner_balance = balance::withdraw_all(&mut wager.escrow);
         let winner_coin = coin::from_balance(winner_balance, ctx);
         transfer::public_transfer(winner_coin, winner);
 
         wager.status = STATUS_SETTLED;
+        wager.settled_at = clock::timestamp_ms(clock);
+
+        // v5.1 — Remove creator from open-wager registry.
+        if (table::contains(&registry.table, wager.player_a)) {
+            let _ = table::remove(&mut registry.table, wager.player_a);
+        };
 
         let match_id = object::id(wager);
 
@@ -194,9 +252,57 @@ module sui_combats::arena {
         });
     }
 
-    /// Cancel a wager that hasn't been accepted yet. Only player_a can cancel.
-    public entry fun cancel_wager(
+    /// v5.1 — TREASURY-only. Mutual-KO outcome: refund 100% to each participant,
+    /// NO platform fee. Emits WagerTied (distinct from WagerRefunded so
+    /// indexers can break out tie outcomes).
+    public fun settle_tie(
         wager: &mut WagerMatch,
+        registry: &mut OpenWagerRegistry,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ) {
+        assert!(tx_context::sender(ctx) == TREASURY, EUnauthorized);
+        assert!(wager.status == STATUS_ACTIVE, EMatchNotActive);
+        assert!(option::is_some(&wager.player_b), ENoOpponent);
+
+        let player_b_addr = *option::borrow(&wager.player_b);
+        let stake = wager.stake_amount;
+
+        // Escrow holds 2 × stake. Refund stake to each. No fee.
+        let balance_a = balance::split(&mut wager.escrow, stake);
+        let coin_a = coin::from_balance(balance_a, ctx);
+        transfer::public_transfer(coin_a, wager.player_a);
+
+        // Withdraw the rest — handles any odd-MIST rounding even though both
+        // halves are exactly stake.
+        let balance_b = balance::withdraw_all(&mut wager.escrow);
+        let coin_b = coin::from_balance(balance_b, ctx);
+        transfer::public_transfer(coin_b, player_b_addr);
+
+        wager.status = STATUS_SETTLED;
+        wager.settled_at = clock::timestamp_ms(clock);
+
+        // v5.1 — Remove creator from open-wager registry.
+        if (table::contains(&registry.table, wager.player_a)) {
+            let _ = table::remove(&mut registry.table, wager.player_a);
+        };
+
+        let match_id = object::id(wager);
+
+        event::emit(WagerTied {
+            match_id,
+            player_a: wager.player_a,
+            player_b: player_b_addr,
+            refund_each: stake,
+        });
+    }
+
+    /// Player A cancels their own unaccepted wager. WAITING-only.
+    /// v5.1 — Removes the registry entry on success.
+    public fun cancel_wager(
+        wager: &mut WagerMatch,
+        registry: &mut OpenWagerRegistry,
+        clock: &Clock,
         ctx: &mut TxContext,
     ) {
         assert!(wager.status == STATUS_WAITING, EMatchNotWaiting);
@@ -210,6 +316,12 @@ module sui_combats::arena {
         transfer::public_transfer(refund_coin, wager.player_a);
 
         wager.status = STATUS_SETTLED;
+        wager.settled_at = clock::timestamp_ms(clock);
+
+        // v5.1 — Remove creator from open-wager registry.
+        if (table::contains(&registry.table, wager.player_a)) {
+            let _ = table::remove(&mut registry.table, wager.player_a);
+        };
 
         let match_id = object::id(wager);
 
@@ -220,26 +332,29 @@ module sui_combats::arena {
         });
     }
 
-    /// Admin cancel — only TREASURY can call. Works in WAITING or ACTIVE state.
-    /// WAITING: refunds player_a fully.
-    /// ACTIVE: refunds both players equally (50/50 split).
-    public entry fun admin_cancel_wager(
+    /// TREASURY can cancel any non-settled wager.
+    /// WAITING: refund to player_a. ACTIVE: 50/50 split.
+    /// v5.1 — Removes the registry entry on success.
+    public fun admin_cancel_wager(
         wager: &mut WagerMatch,
+        registry: &mut OpenWagerRegistry,
+        clock: &Clock,
         ctx: &mut TxContext,
     ) {
         assert!(tx_context::sender(ctx) == TREASURY, EUnauthorized);
         assert!(wager.status != STATUS_SETTLED, EMatchAlreadySettled);
 
         let match_id = object::id(wager);
+        let now = clock::timestamp_ms(clock);
 
         if (wager.status == STATUS_WAITING) {
-            // Refund player A
             let refund_amount = balance::value(&wager.escrow);
             let refund_balance = balance::withdraw_all(&mut wager.escrow);
             let refund_coin = coin::from_balance(refund_balance, ctx);
             transfer::public_transfer(refund_coin, wager.player_a);
 
             wager.status = STATUS_SETTLED;
+            wager.settled_at = now;
 
             event::emit(WagerCancelled {
                 match_id,
@@ -247,24 +362,24 @@ module sui_combats::arena {
                 refund: refund_amount,
             });
         } else {
-            // STATUS_ACTIVE — refund both players equally
-            let total = balance::value(&wager.escrow);
-            let half = total / 2;
-            let remainder = total - half;
-
+            // STATUS_ACTIVE — refund both sides equally
+            assert!(option::is_some(&wager.player_b), ENoOpponent);
             let player_b_addr = *option::borrow(&wager.player_b);
 
-            // Player A gets half
+            let total = balance::value(&wager.escrow);
+            let half = total / 2;
+
             let balance_a = balance::split(&mut wager.escrow, half);
             let coin_a = coin::from_balance(balance_a, ctx);
             transfer::public_transfer(coin_a, wager.player_a);
 
-            // Player B gets the rest (handles odd MIST)
+            // Player B gets the rest (handles odd MIST cleanly)
             let balance_b = balance::withdraw_all(&mut wager.escrow);
             let coin_b = coin::from_balance(balance_b, ctx);
             transfer::public_transfer(coin_b, player_b_addr);
 
             wager.status = STATUS_SETTLED;
+            wager.settled_at = now;
 
             event::emit(WagerRefunded {
                 match_id,
@@ -273,13 +388,20 @@ module sui_combats::arena {
                 refund_each: half,
             });
         };
+
+        // v5.1 — Remove creator from open-wager registry (both branches).
+        if (table::contains(&registry.table, wager.player_a)) {
+            let _ = table::remove(&mut registry.table, wager.player_a);
+        };
     }
 
-    /// Cancel an expired wager. Anyone can call this as a safety net.
-    /// WAITING + past MATCH_EXPIRY_MS: refunds player_a.
-    /// ACTIVE + past SETTLEMENT_TIMEOUT_MS: refunds both players equally.
-    public entry fun cancel_expired_wager(
+    /// Anyone can refund an expired wager. Safety net if server is offline.
+    /// WAITING + past MATCH_EXPIRY_MS: refund player_a.
+    /// ACTIVE + past SETTLEMENT_TIMEOUT_MS: 50/50 split.
+    /// v5.1 — Removes the registry entry on success.
+    public fun cancel_expired_wager(
         wager: &mut WagerMatch,
+        registry: &mut OpenWagerRegistry,
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
@@ -297,6 +419,7 @@ module sui_combats::arena {
             transfer::public_transfer(refund_coin, wager.player_a);
 
             wager.status = STATUS_SETTLED;
+            wager.settled_at = now;
 
             event::emit(WagerCancelled {
                 match_id,
@@ -306,11 +429,11 @@ module sui_combats::arena {
         } else {
             // STATUS_ACTIVE — settlement timed out
             assert!(now >= wager.accepted_at + SETTLEMENT_TIMEOUT_MS, ENotExpired);
+            assert!(option::is_some(&wager.player_b), ENoOpponent);
+            let player_b_addr = *option::borrow(&wager.player_b);
 
             let total = balance::value(&wager.escrow);
             let half = total / 2;
-
-            let player_b_addr = *option::borrow(&wager.player_b);
 
             let balance_a = balance::split(&mut wager.escrow, half);
             let coin_a = coin::from_balance(balance_a, ctx);
@@ -321,6 +444,7 @@ module sui_combats::arena {
             transfer::public_transfer(coin_b, player_b_addr);
 
             wager.status = STATUS_SETTLED;
+            wager.settled_at = now;
 
             event::emit(WagerRefunded {
                 match_id,
@@ -329,9 +453,14 @@ module sui_combats::arena {
                 refund_each: half,
             });
         };
+
+        // v5.1 — Remove creator from open-wager registry (both branches).
+        if (table::contains(&registry.table, wager.player_a)) {
+            let _ = table::remove(&mut registry.table, wager.player_a);
+        };
     }
 
-    // ===== Accessor functions =====
+    // ===== Read-only accessors =====
     public fun player_a(wager: &WagerMatch): address { wager.player_a }
     public fun player_b(wager: &WagerMatch): Option<address> { wager.player_b }
     public fun stake_amount(wager: &WagerMatch): u64 { wager.stake_amount }
@@ -339,4 +468,15 @@ module sui_combats::arena {
     public fun escrow_value(wager: &WagerMatch): u64 { balance::value(&wager.escrow) }
     public fun created_at(wager: &WagerMatch): u64 { wager.created_at }
     public fun accepted_at(wager: &WagerMatch): u64 { wager.accepted_at }
+    public fun settled_at(wager: &WagerMatch): u64 { wager.settled_at }
+    public fun treasury_address(): address { TREASURY }
+
+    /// v5.1 — Registry accessors for tests + read-only clients.
+    public fun registry_has(registry: &OpenWagerRegistry, who: address): bool {
+        table::contains(&registry.table, who)
+    }
+
+    public fun registry_get(registry: &OpenWagerRegistry, who: address): ID {
+        *table::borrow(&registry.table, who)
+    }
 }

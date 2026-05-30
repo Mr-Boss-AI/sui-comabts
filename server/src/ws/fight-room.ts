@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { settleWagerOnChain } from '../utils/sui-settle';
-import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain } from '../utils/sui-settle';
+import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain, settleTieOnChain, updateCharacterDrawOnChain, adminCancelWagerOnChain } from '../utils/sui-settle';
+import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import {
   applyXp,
   checkFightEnd,
@@ -11,7 +12,10 @@ import {
   resolveTurn,
   validateTurnAction,
 } from '../game/combat';
-import { rollLoot } from '../game/loot';
+// BUG 3 (live test 2026-05-02) — `rollLoot` is intentionally not imported
+// here. v5 is NFT-only; the off-chain loot path violates that contract.
+// The function is preserved in `../game/loot` so v5.1 can reuse the rarity
+// + stat-roll logic when it adds an admin-signed on-chain Item NFT mint.
 import { calculateEloChange, calculateXpReward } from '../utils/elo';
 import {
   addFightHistory,
@@ -19,7 +23,14 @@ import {
   updateCharacter,
   persistItems,
 } from '../data/characters';
-import { dbSaveFight } from '../data/db';
+import { recordRecentOutcome } from '../data/recent-outcomes';
+import { clearFightGrace } from './reconnect-grace';
+import { dbSaveFight, dbDeleteWagerInFlight } from '../data/db';
+import {
+  markDisconnect as graceMarkDisconnect,
+  markReconnect as graceMarkReconnect,
+} from './reconnect-grace';
+import { pauseFightTimer, resumeFightTimer } from './fight-pause';
 import type {
   Character,
   ConnectedClient,
@@ -42,6 +53,28 @@ let clientsRef: Map<string, ConnectedClient> = new Map();
 
 export function setClientsRef(clients: Map<string, ConnectedClient>): void {
   clientsRef = clients;
+}
+
+/**
+ * Optional callback invoked whenever a fight is started or ended for a
+ * given wallet. Wired by `handler.ts` to drive the Bucket 3 presence
+ * service (`status: 'in_fight'` ↔ `'online'`). Kept as an injection
+ * point so this module stays decoupled from the presence layer.
+ */
+let presenceFightBroadcaster: ((wallet: string, fightId: string | null) => void) | null = null;
+
+export function setPresenceFightBroadcaster(
+  fn: ((wallet: string, fightId: string | null) => void) | null,
+): void {
+  presenceFightBroadcaster = fn;
+}
+
+function notifyFightChanged(wallet: string, fightId: string | null): void {
+  try {
+    presenceFightBroadcaster?.(wallet, fightId);
+  } catch (err: any) {
+    console.error('[Presence] fight broadcaster threw:', err?.message ?? err);
+  }
 }
 
 function getClientByWallet(walletAddress: string): ConnectedClient | undefined {
@@ -110,17 +143,55 @@ function buildFightStatePayload(fight: FightState): Record<string, any> {
     turn: fight.turn,
     log: fight.turnResults,
     wagerAmount: fight.wagerAmount,
+    // Timer state — populated so a `fight_resumed` payload rehydrates
+    // the client UI exactly where it was: countdown deadline, pause
+    // flag, and frozen remaining ms (when paused).
+    turnDeadline: fight.turnDeadline ?? null,
+    turnPaused: fight.turnPaused === true,
+    turnPausedRemainingMs: fight.turnPausedRemainingMs ?? null,
   };
 }
 
 // === Create a Fight ===
 
-export function createFight(
+export async function createFight(
   characterA: Character,
   characterB: Character,
   fightType: FightType,
   wagerAmount?: number
-): FightState {
+): Promise<FightState> {
+  // D3 (strict): re-read chain DOFs right before the combat snapshot. This is
+  // the anti-cheat seam — even if the client lied about equipment at
+  // queue/accept time, chain-truth is what enters the fight. Also catches
+  // any save the player did between auth and this moment. Done in parallel
+  // with the character lookup so fight-start latency stays in the same
+  // budget as the RPC we already pay for fight-lock acquisition.
+  // Prefer the pinned `onChainObjectId` on the server-side Character record
+  // — set once at auth/restore time. Multi-character wallets (legacy / migration)
+  // would otherwise hit the wrong NFT via `findCharacterObjectId`'s newest-first
+  // event scan. Fall back to the scan only if pinning hasn't happened yet
+  // (legacy rows pre-onChainObjectId).
+  const [aObjId, bObjId] = await Promise.all([
+    characterA.onChainObjectId ?? findCharacterObjectId(characterA.walletAddress),
+    characterB.onChainObjectId ?? findCharacterObjectId(characterB.walletAddress),
+  ]);
+  const [dofA, dofB] = await Promise.all([
+    aObjId ? fetchEquippedFromDOFs(aObjId) : Promise.resolve(null),
+    bObjId ? fetchEquippedFromDOFs(bObjId) : Promise.resolve(null),
+  ]);
+  if (dofA) {
+    const changed = applyDOFEquipment(characterA.equipment, dofA);
+    if (changed.length > 0) {
+      console.log(`[Fight] ${characterA.name} DOF-synced slots: ${changed.join(', ')}`);
+    }
+  }
+  if (dofB) {
+    const changed = applyDOFEquipment(characterB.equipment, dofB);
+    if (changed.length > 0) {
+      console.log(`[Fight] ${characterB.name} DOF-synced slots: ${changed.join(', ')}`);
+    }
+  }
+
   const fighterA = createFighterState(characterA, characterB);
   const fighterB = createFighterState(characterB, characterA);
 
@@ -135,6 +206,7 @@ export function createFight(
     wagerAmount,
     spectators: new Set(),
     turnActions: new Map(),
+    disconnectedWallets: new Set(),
     startedAt: Date.now(),
   };
 
@@ -147,6 +219,11 @@ export function createFight(
   if (clientA) clientA.currentFightId = fight.id;
   if (clientB) clientB.currentFightId = fight.id;
 
+  // Bucket 3 presence — broadcast `in_fight` status so the player
+  // sidebar dims them and the "Watch" button replaces "Fight".
+  notifyFightChanged(characterA.walletAddress, fight.id);
+  notifyFightChanged(characterB.walletAddress, fight.id);
+
   const fightPayload = buildFightStatePayload(fight);
 
   const startMsg: ServerMessage = {
@@ -156,14 +233,11 @@ export function createFight(
 
   broadcastToFight(fight, startMsg);
 
-  // On-chain fight-lock (fire-and-forget — auto-expiry is the safety net if this fails,
-  // and server-side fight state is authoritative for combat resolution regardless).
+  // On-chain fight-lock (fire-and-forget — auto-expiry is the safety net if
+  // this fails, and server-side fight state is authoritative for combat
+  // resolution regardless). Reuses the object IDs fetched above.
   (async () => {
     try {
-      const [aObjId, bObjId] = await Promise.all([
-        findCharacterObjectId(characterA.walletAddress),
-        findCharacterObjectId(characterB.walletAddress),
-      ]);
       const expiry = Date.now() + CONFIG.FIGHT_LOCK_DURATION_MS;
       const locks: Promise<unknown>[] = [];
       if (aObjId) locks.push(setFightLockOnChain(aObjId, expiry));
@@ -187,16 +261,36 @@ function startNextTurn(fight: FightState): void {
   fight.turnActions.clear();
 
   const deadline = Date.now() + GAME_CONSTANTS.TURN_TIMER_MS;
+  fight.turnDeadline = deadline;
 
   const turnStartMsg: ServerMessage = {
     type: 'turn_start',
     turn: fight.turn,
     deadline,
   };
-
   broadcastToFight(fight, turnStartMsg);
 
-  // Set turn timer
+  // Block C1.b — if a player is currently in the reconnect-grace window
+  // we MUST start the new turn paused; otherwise the timer would tick
+  // down for a player who can't possibly act and the spec ("connected
+  // player can't run out the clock without consequence") breaks.
+  // pauseFightTimer is idempotent — it captures the full TURN_TIMER_MS
+  // since the timer hasn't been started yet.
+  if (fight.disconnectedWallets.size > 0) {
+    fight.turnPaused = true;
+    fight.turnPausedRemainingMs = GAME_CONSTANTS.TURN_TIMER_MS;
+    fight.turnTimer = undefined;
+    broadcastToFight(fight, {
+      type: 'timer_paused',
+      fightId: fight.id,
+      turn: fight.turn,
+      remainingMs: GAME_CONSTANTS.TURN_TIMER_MS,
+    } as ServerMessage);
+    return;
+  }
+
+  fight.turnPaused = false;
+  fight.turnPausedRemainingMs = undefined;
   fight.turnTimer = setTimeout(() => {
     handleTurnTimeout(fight);
   }, GAME_CONSTANTS.TURN_TIMER_MS);
@@ -270,6 +364,9 @@ export function submitTurnAction(
       clearTimeout(fight.turnTimer);
       fight.turnTimer = undefined;
     }
+    fight.turnDeadline = undefined;
+    fight.turnPaused = false;
+    fight.turnPausedRemainingMs = undefined;
     resolveFightTurn(fight);
   }
 
@@ -292,7 +389,8 @@ function resolveFightTurn(fight: FightState): void {
 
   fight.turnResults.push(turnResult);
 
-  // Build turn result message
+  // Build turn result message. hpAfter is included so the frontend damage log
+  // can render post-turn HP (without this the log shows "Your HP: ?").
   const turnResultMsg: ServerMessage = {
     type: 'turn_result',
     result: {
@@ -300,10 +398,12 @@ function resolveFightTurn(fight: FightState): void {
       playerA: {
         actions: turnResult.playerA.actions,
         hits: turnResult.playerA.hits,
+        hpAfter: turnResult.playerA.hpAfter,
       },
       playerB: {
         actions: turnResult.playerB.actions,
         hits: turnResult.playerB.hits,
+        hpAfter: turnResult.playerB.hpAfter,
       },
     },
     fight: buildFightStatePayload(fight),
@@ -315,7 +415,7 @@ function resolveFightTurn(fight: FightState): void {
   const endCheck = checkFightEnd(fight.playerA, fight.playerB);
 
   if (endCheck.finished) {
-    finishFight(fight, endCheck.winner, endCheck.draw);
+    finishFight(fight, endCheck.winner, endCheck.draw, endCheck.draw ? 'draw' : 'hp_zero');
   } else {
     // Start next turn after a short delay
     setTimeout(() => {
@@ -328,14 +428,36 @@ function resolveFightTurn(fight: FightState): void {
 
 // === Finish Fight ===
 
-function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void {
+type FinishReason = 'hp_zero' | 'draw' | 'disconnect';
+
+function finishFight(
+  fight: FightState,
+  winnerId?: string,
+  draw?: boolean,
+  reason: FinishReason = 'hp_zero',
+): void {
   fight.status = 'finished';
   fight.finishedAt = Date.now();
+
+  // Bug C diagnostic — distinguishes HP-zero / draw / disconnect-forfeit end
+  // paths. If a reported "fight ended without HP zero" happens, the log line
+  // tells us whether the cause was a disconnect (reason=disconnect, both HPs
+  // above 0) or something else entirely.
+  console.log(
+    `[Fight] End id=${fight.id.slice(0, 8)} reason=${reason}` +
+    ` winner=${winnerId ? winnerId.slice(0, 10) : 'none'} draw=${!!draw}` +
+    ` turn=${fight.turn}` +
+    ` hpA=${fight.playerA.currentHp}/${fight.playerA.maxHp}` +
+    ` hpB=${fight.playerB.currentHp}/${fight.playerB.maxHp}`,
+  );
 
   if (fight.turnTimer) {
     clearTimeout(fight.turnTimer);
     fight.turnTimer = undefined;
   }
+  fight.turnDeadline = undefined;
+  fight.turnPaused = false;
+  fight.turnPausedRemainingMs = undefined;
 
   let winnerWallet: string | undefined;
   let loserWallet: string | undefined;
@@ -356,7 +478,6 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
   let loserRatingChange = 0;
   let winnerXp = 0;
   let loserXp = 0;
-  let lootDrop: Item | null = null;
 
   if (winnerChar && loserChar && !draw) {
     // ELO update for ranked/wager
@@ -381,16 +502,24 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
 
     // Wager handling — settle on-chain if wagerMatchId exists, else fall back to gold
     if (fight.type === 'wager' && fight.wagerMatchId && winnerWallet) {
-      settleWagerOnChain(fight.wagerMatchId, winnerWallet)
+      const wagerMatchId = fight.wagerMatchId;
+      settleWagerOnChain(wagerMatchId, winnerWallet)
         .then(({ digest }) => {
           console.log(`[Wager] Settled on-chain: ${digest}`);
-          sendToWallet(fight.playerA.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId: fight.wagerMatchId });
-          sendToWallet(fight.playerB.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId: fight.wagerMatchId });
+          // Settlement landed — drop the in-flight recovery row so the boot
+          // sweeper doesn't accidentally re-cancel a settled wager on next
+          // restart. (Idempotent: admin_cancel_wager would abort with
+          // EMatchAlreadySettled anyway, but cleaning up keeps the table
+          // honest.)
+          dbDeleteWagerInFlight(wagerMatchId).catch(() => {});
+          sendToWallet(fight.playerA.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId });
+          sendToWallet(fight.playerB.walletAddress, { type: 'wager_settled', txDigest: digest, wagerMatchId });
         })
         .catch((err) => {
           console.error('[Wager] On-chain settlement failed:', err);
-          sendToWallet(fight.playerA.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Contact support.' });
-          sendToWallet(fight.playerB.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Contact support.' });
+          // Leave the in-flight row in place — boot sweeper handles it.
+          sendToWallet(fight.playerA.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Refund expected within 10 minutes.', sticky: true });
+          sendToWallet(fight.playerB.walletAddress, { type: 'error', message: 'Wager settlement failed on-chain. Refund expected within 10 minutes.', sticky: true });
         });
     } else if (fight.type === 'wager' && fight.wagerAmount) {
       // Fallback: gold-based wager (no on-chain escrow)
@@ -398,11 +527,18 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
       loserChar.gold = Math.max(0, loserChar.gold - fight.wagerAmount);
     }
 
-    // Loot
-    lootDrop = rollLoot(winnerChar.level);
-    if (lootDrop) {
-      winnerChar.inventory.push(lootDrop);
-    }
+    // BUG 3 (live test 2026-05-02) — v5 is NFT-only. The legacy `rollLoot`
+    // path generated server-side fake items (UUID id, randomly-rolled stat
+    // bonuses) and pushed them to `winnerChar.inventory`. These items had
+    // no chain presence, couldn't be equipped via the loadout-save PTB,
+    // couldn't be listed on the marketplace, and couldn't be transferred
+    // between wallets — so they violated the v5 NFT-only contract while
+    // also confusing players who saw "Wooden Club / Cloth Hood" drops
+    // disappear on Reset Character. The whole rollLoot+inventory.push
+    // block is removed; the wire shape (loot.item / fightHistory.lootGained)
+    // continues to carry undefined / null. A real on-chain loot mint
+    // (admin-signed Item NFT minted to the winner) is tracked for v5.1
+    // alongside the player-signed settlement republish.
 
     // Persist
     updateCharacter(winnerChar);
@@ -417,7 +553,8 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
       result: 'win',
       ratingChange: winnerRatingChange,
       xpGained: winnerXp,
-      lootGained: lootDrop,
+      // BUG 3 (2026-05-02) — off-chain loot drops removed for v5.
+      lootGained: null,
       turns: fight.turn,
       timestamp: Date.now(),
     });
@@ -445,38 +582,158 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
     persistItems(winnerChar);
     persistItems(loserChar);
 
-    // Update on-chain Character NFTs + release fight-lock (fire-and-forget)
-    (async () => {
-      try {
-        const [winnerObjId, loserObjId] = await Promise.all([
-          findCharacterObjectId(winnerChar.walletAddress),
-          findCharacterObjectId(loserChar.walletAddress),
-        ]);
-        if (winnerObjId) {
-          await updateCharacterOnChain(winnerObjId, true, winnerXp, winnerChar.rating);
+    // BUG 2 (live test 2026-05-02): release fight-locks BEFORE the heavier
+    // settle_wager + update_after_fight admin calls. The treasury queue
+    // serializes everything (single concurrency, by design — gas coin
+    // contention), so the lock release was previously stuck behind ~10–25 s
+    // of settle/update work. A player clicking Save Loadout immediately
+    // after fight_end hit `EFightLocked` (equipment.move code 5) because
+    // chain still showed an active lock.
+    //
+    // Reordering is safe: the lock exists to prevent equipment changes
+    // DURING combat. By the time finishFight runs, combat is over and
+    // post-fight bookkeeping (XP / wins / loot persistence) doesn't depend
+    // on lock state. Releasing now lets the player save a fresh loadout
+    // within ~2–5 s instead of ~10–25 s.
+    //
+    // Each updateCharacterOnChain has built-in 3-attempt exponential-backoff
+    // retry. On success, the returned FightResultEffects (parsed from
+    // on-chain events) is the SOURCE OF TRUTH for the post-fight character
+    // state — we overwrite the server's optimistic in-memory cache with
+    // chain values so server and chain never diverge on `unallocated_points`.
+    // On exhausted retry, we send a sticky error to the affected player so
+    // they know the chain state is stale.
+    const winnerCharRef = winnerChar;
+    const loserCharRef = loserChar;
+    void (async () => {
+      // Pinned id wins; falls back to event scan only for legacy records.
+      const [winnerObjId, loserObjId] = await Promise.all([
+        winnerCharRef.onChainObjectId
+          ? Promise.resolve(winnerCharRef.onChainObjectId)
+          : findCharacterObjectId(winnerCharRef.walletAddress).catch(() => null),
+        loserCharRef.onChainObjectId
+          ? Promise.resolve(loserCharRef.onChainObjectId)
+          : findCharacterObjectId(loserCharRef.walletAddress).catch(() => null),
+      ]);
+
+      // Release fight-locks FIRST — see comment above. Routes through the
+      // treasury queue (sequential) so the release tx never races a
+      // concurrent settlement for the same gas coin. On exhausted retry we
+      // surface a sticky toast so the player knows their lock is
+      // auto-expiring; the chain's MAX_LOCK_MS = 1 hour ceiling is the
+      // ultimate safety net, and the testnet-only `/api/admin/force-unlock`
+      // endpoint can clear it sooner.
+      if (winnerObjId) {
+        setFightLockOnChain(winnerObjId, 0).catch((err) => {
+          const detail = err?.message || String(err);
+          console.error('[FightLock] Release (winner) failed:', detail);
+          sendToWallet(winnerCharRef.walletAddress, {
+            type: 'error',
+            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
+            sticky: true,
+          });
+        });
+      }
+      if (loserObjId) {
+        setFightLockOnChain(loserObjId, 0).catch((err) => {
+          const detail = err?.message || String(err);
+          console.error('[FightLock] Release (loser) failed:', detail);
+          sendToWallet(loserCharRef.walletAddress, {
+            type: 'error',
+            message: 'Fight-lock release failed on chain. Lock auto-expires within 1 hour. Refresh once it clears, or contact support.',
+            sticky: true,
+          });
+        });
+      }
+
+      // Capture each player's level BEFORE the chain update so we can
+      // emit `character_leveled_up` if a threshold was crossed (Fix 3,
+      // 2026-05-04). The chain `effects.leveledUp` is the source of
+      // truth — it's the post-tx Move event, not the optimistic local
+      // applyXp result.
+      const winnerLevelBefore = winnerCharRef.level;
+      const loserLevelBefore = loserCharRef.level;
+
+      if (winnerObjId) {
+        try {
+          const effects = await updateCharacterOnChain(
+            winnerObjId, true, winnerXp, winnerCharRef.rating,
+          );
+          // Mirror chain truth into server cache
+          winnerCharRef.xp = effects.newXp;
+          winnerCharRef.rating = effects.newRating;
+          winnerCharRef.wins = effects.newWins;
+          winnerCharRef.losses = effects.newLosses;
+          if (effects.leveledUp) {
+            winnerCharRef.level = effects.newLevel;
+            winnerCharRef.unallocatedPoints = effects.newUnallocatedPoints;
+          }
+          updateCharacter(winnerCharRef);
+          sendToWallet(winnerCharRef.walletAddress, { type: 'character_updated_onchain' });
+          if (effects.leveledUp) {
+            const levelsGained = effects.newLevel - winnerLevelBefore;
+            sendToWallet(winnerCharRef.walletAddress, {
+              type: 'character_leveled_up',
+              oldLevel: winnerLevelBefore,
+              newLevel: effects.newLevel,
+              pointsGranted: GAME_CONSTANTS.STAT_POINTS_PER_LEVEL * Math.max(1, levelsGained),
+              newTotalUnallocated: effects.newUnallocatedPoints,
+              fightId: fight.id,
+            });
+          }
+        } catch (err: any) {
+          console.error('[Character] Winner on-chain update failed after retries:', err?.message || err);
+          sendToWallet(winnerCharRef.walletAddress, {
+            type: 'error',
+            message: 'On-chain character update failed after retries. Stats may be temporarily out of sync — please refresh.',
+          });
         }
-        if (loserObjId) {
-          await updateCharacterOnChain(loserObjId, false, loserXp, loserChar.rating);
+      }
+
+      if (loserObjId) {
+        try {
+          const effects = await updateCharacterOnChain(
+            loserObjId, false, loserXp, loserCharRef.rating,
+          );
+          loserCharRef.xp = effects.newXp;
+          loserCharRef.rating = effects.newRating;
+          loserCharRef.wins = effects.newWins;
+          loserCharRef.losses = effects.newLosses;
+          if (effects.leveledUp) {
+            loserCharRef.level = effects.newLevel;
+            loserCharRef.unallocatedPoints = effects.newUnallocatedPoints;
+          }
+          updateCharacter(loserCharRef);
+          sendToWallet(loserCharRef.walletAddress, { type: 'character_updated_onchain' });
+          if (effects.leveledUp) {
+            const levelsGained = effects.newLevel - loserLevelBefore;
+            sendToWallet(loserCharRef.walletAddress, {
+              type: 'character_leveled_up',
+              oldLevel: loserLevelBefore,
+              newLevel: effects.newLevel,
+              pointsGranted: GAME_CONSTANTS.STAT_POINTS_PER_LEVEL * Math.max(1, levelsGained),
+              newTotalUnallocated: effects.newUnallocatedPoints,
+              fightId: fight.id,
+            });
+          }
+        } catch (err: any) {
+          console.error('[Character] Loser on-chain update failed after retries:', err?.message || err);
+          sendToWallet(loserCharRef.walletAddress, {
+            type: 'error',
+            message: 'On-chain character update failed after retries. Stats may be temporarily out of sync — please refresh.',
+          });
         }
-        // Release on-chain fight-lock so players can equip/unequip again immediately.
-        // If these fail, the 10-minute auto-expiry from createFight is the safety net.
-        if (winnerObjId) {
-          setFightLockOnChain(winnerObjId, 0).catch((err) =>
-            console.error('[FightLock] Release (winner) failed:', err?.message || err));
-        }
-        if (loserObjId) {
-          setFightLockOnChain(loserObjId, 0).catch((err) =>
-            console.error('[FightLock] Release (loser) failed:', err?.message || err));
-        }
-        // Notify clients that on-chain character data has been updated
-        sendToWallet(winnerChar.walletAddress, { type: 'character_updated_onchain' });
-        sendToWallet(loserChar.walletAddress, { type: 'character_updated_onchain' });
-      } catch (err: any) {
-        console.error('[Character] On-chain update after fight failed:', err.message);
       }
     })();
   } else if (draw) {
-    // Draw: both get small XP, no rating change
+    // v5.1 — Mutual-KO outcome. (1) Server local XP bump + history record;
+    // (2) on-chain `update_after_fight_draw` for both Characters so the
+    // `draws: u32` counter increments (falls back to update_after_fight
+    // with won=false on v5.0 env); (3) for wager fights, `settle_tie` on
+    // the WagerMatch (falls back to admin_cancel_wager on v5.0 env).
+    // Pre-v5.1 the draw branch did NONE of the on-chain work — every
+    // tied wager stranded the escrow (incident 2026-05-28 wager
+    // 0xf2f3982266…).
     const charA = getCharacterById(fight.playerA.characterId);
     const charB = getCharacterById(fight.playerB.characterId);
     if (charA) {
@@ -488,13 +745,27 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
         type: fight.type,
         opponentName: charB?.name || 'Unknown',
         opponentWallet: fight.playerB.walletAddress,
-        result: 'loss',
+        // v5.1 — server-side history records 'draw' (frontend widens the
+        // FightHistoryEntry.result type from 'win' | 'loss' to include 'draw'
+        // and renders the neutral badge). On v5.0 frontends, the value will
+        // round-trip through any unknown-result fallback.
+        result: 'draw' as any,
         ratingChange: 0,
         xpGained: xp,
         lootGained: null,
         turns: fight.turn,
         timestamp: Date.now(),
       });
+      // v5.1 — On-chain draw recording. Fire-and-forget; failures log but
+      // don't break the user-visible flow (server cache already updated).
+      if (charA.onChainObjectId) {
+        updateCharacterDrawOnChain(charA.onChainObjectId, xp).catch((err) => {
+          console.error(
+            '[Character] update_after_fight_draw (A) failed:',
+            err?.message || err,
+          );
+        });
+      }
     }
     if (charB) {
       const xp = calculateXpReward(fight.type, false, charB.rating, charB.rating);
@@ -505,12 +776,41 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
         type: fight.type,
         opponentName: charA?.name || 'Unknown',
         opponentWallet: fight.playerA.walletAddress,
-        result: 'loss',
+        result: 'draw' as any,
         ratingChange: 0,
         xpGained: xp,
         lootGained: null,
         turns: fight.turn,
         timestamp: Date.now(),
+      });
+      if (charB.onChainObjectId) {
+        updateCharacterDrawOnChain(charB.onChainObjectId, xp).catch((err) => {
+          console.error(
+            '[Character] update_after_fight_draw (B) failed:',
+            err?.message || err,
+          );
+        });
+      }
+    }
+
+    // v5.1 — Settle the wager on chain. 100% refund both sides via
+    // settle_tie (or admin_cancel fallback on v5.0). Pre-v5.1 this was the
+    // missing piece that stranded the escrow.
+    if (fight.type === 'wager' && fight.wagerMatchId) {
+      console.log(`[Wager] Draw — settling tie on chain for ${fight.wagerMatchId}`);
+      settleTieOnChain(fight.wagerMatchId).catch((err) => {
+        console.error(
+          `[Wager] settle_tie failed for ${fight.wagerMatchId}:`,
+          err?.message || err,
+        );
+        // Last-resort safety net: try admin_cancel_wager. Same outcome for
+        // ACTIVE wagers (50/50 split = stake each).
+        adminCancelWagerOnChain(fight.wagerMatchId!).catch((fallbackErr) => {
+          console.error(
+            `[Wager] admin_cancel fallback ALSO failed for ${fight.wagerMatchId}:`,
+            fallbackErr?.message || fallbackErr,
+          );
+        });
       });
     }
   }
@@ -528,7 +828,9 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
       loot: {
         xpGained: winnerXp,
         ratingChange: winnerRatingChange,
-        item: lootDrop ? { id: lootDrop.id, name: lootDrop.name, rarity: lootDrop.rarity, itemType: lootDrop.itemType } : undefined,
+        // BUG 3 — off-chain loot drops removed for v5 (NFT-only). v5.1
+        // re-introduces this as an admin-signed on-chain Item NFT mint.
+        item: undefined,
       },
     };
 
@@ -546,17 +848,52 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
 
     // Spectators get the winner's view
     broadcastToSpectators(fight, winnerMsg);
+
+    // Bug 3 (live test 2026-05-03) — if a wallet was disconnected at
+    // settle time (forfeit, tab-closed, network drop), the sendToWallet
+    // above vanishes into the OS buffer. Stash the per-wallet outcome
+    // so the next auth handshake can replay the modal.
+    const settledAt = Date.now();
+    recordRecentOutcome(winnerWallet, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: winnerMsg.loot,
+      settledAt,
+    });
+    recordRecentOutcome(loserWallet, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: loserMsg.loot,
+      settledAt,
+    });
   } else {
     // Draw case
+    const drawLoot = {
+      xpGained: 0,
+      ratingChange: 0,
+    };
     const drawMsg: ServerMessage = {
       type: 'fight_end',
       fight: fightPayload,
-      loot: {
-        xpGained: 0,
-        ratingChange: 0,
-      },
+      loot: drawLoot,
     };
     broadcastToFight(fight, drawMsg);
+
+    // Same replay-on-reconnect coverage for draws — both participants
+    // missed the modal symmetrically.
+    const drawAt = Date.now();
+    recordRecentOutcome(fight.playerA.walletAddress, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: drawLoot,
+      settledAt: drawAt,
+    });
+    recordRecentOutcome(fight.playerB.walletAddress, {
+      fightId: fight.id,
+      fight: fightPayload,
+      loot: drawLoot,
+      settledAt: drawAt,
+    });
   }
 
   // Clean up client fight references
@@ -565,9 +902,21 @@ function finishFight(fight: FightState, winnerId?: string, draw?: boolean): void
   if (clientA) clientA.currentFightId = undefined;
   if (clientB) clientB.currentFightId = undefined;
 
+  // Bucket 3 presence — broadcast `online` status so the player
+  // sidebar lights them back up.
+  notifyFightChanged(fight.playerA.walletAddress, null);
+  notifyFightChanged(fight.playerB.walletAddress, null);
+
   // Move to finished fights
   activeFights.delete(fight.id);
   finishedFights.set(fight.id, fight);
+
+  // Bug 1 (2026-05-03) — wipe per-wallet grace records for this
+  // fight so the next fight on the same wallets starts with a fresh
+  // 60 s cumulative budget. Without this, a wallet that consumed
+  // 40 s of grace in fight N would only have 20 s available in
+  // fight N+1.
+  clearFightGrace(fight.id);
 
   // Clean up spectators
   for (const spectatorWallet of fight.spectators) {
@@ -632,15 +981,179 @@ export function getPlayerActiveFight(walletAddress: string): FightState | undefi
 }
 
 /**
- * Clean up a fight if a player disconnects.
+ * Schedule a forfeit for `walletAddress` after the reconnect grace window
+ * expires AND pause the turn timer so the opponent can't run out the
+ * clock against a player who is provably absent.
+ *
+ * Closes Block C1 of the 2026-04-30 Gemini re-audit and the three live-test
+ * follow-ups (C1.a banner, C1.b timer pause, C1.c choice acceptance).
+ *
+ * Pre-fix this called `finishFight('disconnect')` instantly. The first
+ * pass added the grace window. This pass adds the timer pause + the
+ * persistent participant-state preservation so the rejoining player can
+ * actually act when they come back.
+ *
+ * Idempotent: duplicate close events on one socket don't reset the grace
+ * clock or re-pause an already-paused timer.
  */
 export function handlePlayerDisconnect(walletAddress: string): void {
   const fight = getPlayerActiveFight(walletAddress);
   if (!fight) return;
 
-  // The disconnecting player forfeits
-  const isPlayerA = fight.playerA.walletAddress === walletAddress;
-  const winnerId = isPlayerA ? fight.playerB.characterId : fight.playerA.characterId;
+  const opponentWallet =
+    fight.playerA.walletAddress === walletAddress
+      ? fight.playerB.walletAddress
+      : fight.playerA.walletAddress;
+  const fightId = fight.id;
 
-  finishFight(fight, winnerId, false);
+  const info = graceMarkDisconnect(walletAddress, fightId, () => {
+    // Re-resolve the fight at timeout time — it may have ended via
+    // another path (chain settle, draw, etc.) during the grace window.
+    const stillActive = activeFights.get(fightId);
+    if (!stillActive) {
+      console.log(
+        `[Fight] ${walletAddress.slice(0, 10)} forfeit timeout fired but fight ${fightId} ` +
+        `is no longer active — skipping (already finished by another path).`,
+      );
+      return;
+    }
+
+    const isPlayerA = stillActive.playerA.walletAddress === walletAddress;
+    const winnerId = isPlayerA
+      ? stillActive.playerB.characterId
+      : stillActive.playerA.characterId;
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} did not reconnect within grace — forfeit fight ${fightId}`,
+    );
+    finishFight(stillActive, winnerId, false, 'disconnect');
+  });
+
+  if (!info) return; // duplicate close on one socket — opponent already notified
+
+  // Block C1.b — pause the turn timer NOW. If both players are
+  // disconnected this is idempotent (second call returns paused=false
+  // but preserves the captured remainingMs). Resume only fires when
+  // EVERY disconnected wallet has reconnected, so the timer stays
+  // frozen for as long as anyone is in grace.
+  fight.disconnectedWallets.add(walletAddress);
+  const pause = pauseFightTimer(fight);
+  if (pause.paused) {
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} disconnected — paused turn timer ` +
+      `with ${Math.round(pause.remainingMs / 1000)}s remaining (turn ${fight.turn}, fight ${fightId})`,
+    );
+    broadcastToFight(fight, {
+      type: 'timer_paused',
+      fightId,
+      turn: fight.turn,
+      remainingMs: pause.remainingMs,
+    } as ServerMessage);
+  }
+
+  console.log(
+    `[Fight] ${walletAddress.slice(0, 10)} entered reconnect grace — ` +
+    `${Math.round(info.graceMs / 1000)}s window (expires ${new Date(info.expiresAt).toISOString()})`,
+  );
+
+  // Tell the opponent so they don't think the game has frozen.
+  sendToWallet(opponentWallet, {
+    type: 'opponent_disconnected',
+    fightId,
+    walletAddress,
+    expiresAt: info.expiresAt,
+    graceMs: info.graceMs,
+  } as ServerMessage);
+}
+
+/**
+ * Cancel a pending forfeit for `walletAddress` if one exists, restore the
+ * client's seat in the fight (so `fight_action` is accepted again — the
+ * C1.c bug), and resume the turn timer if all disconnected players have
+ * now returned.
+ *
+ * Called from `acceptAuthenticatedSession` (handler.ts) every time a
+ * wallet re-authenticates. Idempotent for wallets that aren't mid-fight.
+ */
+export function handlePlayerReconnect(walletAddress: string): void {
+  const fightId = graceMarkReconnect(walletAddress);
+  if (!fightId) return;
+
+  const fight = activeFights.get(fightId);
+  if (!fight) {
+    // Fight ended on another path during the grace window. Nothing more
+    // to do — the rejoining client will receive its own auth_ok with no
+    // fight in flight.
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} reconnected but fight ${fightId} is no longer active — ` +
+      `nothing to resume.`,
+    );
+    return;
+  }
+
+  // Block C1.c — restore the participant slot on the NEW socket. The
+  // previous WS session's client object was removed from connectedClients
+  // by handler.ts::handleDisconnect, so the new socket has a fresh
+  // `client` with `currentFightId === undefined`. Without this fix,
+  // `handleFightAction` rejects every `fight_action` with
+  // "Not in a fight" — the bug the user reproduced live tonight.
+  const newClient = getClientByWallet(walletAddress);
+  if (newClient) {
+    newClient.currentFightId = fight.id;
+    // Also restore characterId in case the new client hasn't hydrated
+    // it yet (acceptAuthenticatedSession does this, but defence-in-depth).
+    const isPlayerA = fight.playerA.walletAddress === walletAddress;
+    newClient.characterId = isPlayerA
+      ? fight.playerA.characterId
+      : fight.playerB.characterId;
+  }
+
+  // Block C1.b — only resume the turn timer once EVERY disconnected
+  // wallet has come back. If both players had dropped, the first
+  // reconnect just clears their forfeit; the timer waits for the
+  // second.
+  fight.disconnectedWallets.delete(walletAddress);
+  if (fight.disconnectedWallets.size === 0) {
+    const resume = resumeFightTimer(fight, () => handleTurnTimeout(fight));
+    if (resume.resumed) {
+      console.log(
+        `[Fight] ${walletAddress.slice(0, 10)} reconnected — resumed turn timer with ` +
+        `${Math.round(resume.remainingMs / 1000)}s (deadline ${new Date(resume.deadline).toISOString()})`,
+      );
+      broadcastToFight(fight, {
+        type: 'timer_resumed',
+        fightId: fight.id,
+        turn: fight.turn,
+        deadline: resume.deadline,
+        remainingMs: resume.remainingMs,
+      } as ServerMessage);
+    }
+  } else {
+    console.log(
+      `[Fight] ${walletAddress.slice(0, 10)} reconnected but ${fight.disconnectedWallets.size} ` +
+      `other player(s) still in grace — timer stays paused.`,
+    );
+  }
+
+  console.log(
+    `[Fight] ${walletAddress.slice(0, 10)} reconnected to fight ${fightId} within grace — forfeit cancelled.`,
+  );
+
+  const opponentWallet =
+    fight.playerA.walletAddress === walletAddress
+      ? fight.playerB.walletAddress
+      : fight.playerA.walletAddress;
+  sendToWallet(opponentWallet, {
+    type: 'opponent_reconnected',
+    fightId,
+    walletAddress,
+  } as ServerMessage);
+
+  // Push the current fight state to the rejoining client so its UI
+  // re-hydrates immediately (turn count, HP, log, timer state). The
+  // payload includes turnPaused / turnDeadline / turnPausedRemainingMs
+  // so the rejoiner's countdown UI lines up with the server.
+  sendToWallet(walletAddress, {
+    type: 'fight_resumed',
+    fight: buildFightStatePayload(fight),
+  } as ServerMessage);
 }

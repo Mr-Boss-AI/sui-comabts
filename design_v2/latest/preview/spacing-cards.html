@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Card Anatomy</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#0a0d12;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:24px;display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  .card{background:#15191f;border:2px solid #e8e2d4;border-radius:12px;box-shadow:4px 4px 0 0 #000;padding:18px;display:flex;flex-direction:column;gap:8px;}
+  .card.yellow{background:#c89a3f;}
+  .stamp{align-self:flex-start;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:4px 10px;border-radius:999px;background:#0a0d12;color:#0a0d12;}
+  .stamp.outline{background:transparent;color:#e8e2d4;border:1.5px solid #8a8474;}
+  h3{margin:0;font-size:20px;font-weight:800;letter-spacing:-0.01em;}
+  p{margin:0;font-size:14px;color:#8a8474;line-height:1.45;}
+  .card.yellow p{color:#e8e2d4;}
+  .row{display:flex;justify-content:space-between;align-items:center;margin-top:4px;}
+  .price{font-family:"JetBrains Mono";font-weight:700;font-size:16px;}
+</style></head><body>
+<div class="wrap">
+  <div class="card">
+    <span class="stamp">Marketplace</span>
+    <h3>Skullcrusher Maul</h3>
+    <p>Two-handed. Takes weapon + offhand slots. STR +6, END +2.</p>
+    <div class="row"><span class="price">0.750 SUI</span><span class="stamp" style="background:#c89a3f;color:#0a0d12;">Legendary</span></div>
+  </div>
+  <div class="card yellow">
+    <span class="stamp outline">Hero / hype card</span>
+    <h3>Yellow surface variant</h3>
+    <p>Used sparingly for hero panels, victory moments, level-up celebrations. Same border + shadow recipe; flat yellow fill.</p>
+  </div>
+</div>
+</body></html>

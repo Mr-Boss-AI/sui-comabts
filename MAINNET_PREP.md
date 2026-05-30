@@ -1,7 +1,79 @@
 # SUI Combats — Mainnet Deployment Prep Checklist
 
 > **READ THIS BEFORE ANY MAINNET ACTION.** Testnet lessons encoded here.
-> Last updated: 2026-04-18, after Phase 0 + 0.5 upgrade landed on testnet.
+> Last updated: 2026-05-28, after the wager-accept finality-race fix
+> shipped and the mutual-KO / draw bundle was added to the v5.1
+> backlog (§C Contract layer). Earlier-dated content from 2026-05-03
+> (v5 testnet hardening + repo cleanup) and 2026-05-20 (KioskRegistry
+> bundling) remains canonical. The Sui-protocol content (sections
+> A–H) is unchanged from the original 2026-04-18 draft — those facts
+> are baked into the chain semantics, not our code state.
+
+---
+
+## Current state — 2026-05-03 (evening)
+
+**v5 is the testnet codename.** Branch `feature/v5-redeploy`, latest
+commit `9d7dd19`. v5 is a fresh `sui client publish` of the entire
+package — not an upgrade of any prior package. Per section A below,
+that's the only valid mainnet path too.
+
+**v5.1 is the planned mainnet republish.** It bundles every Move-side
+change still pending so we never re-publish for a single fix:
+
+| Item | Status | Move work | Why |
+|---|---|---|---|
+| Player-signed settlement attestation | **DEFERRED to v5.2** | new `settle_wager_attested(wager, winner, sig_a, sig_b)` entry | Closes the TREASURY-key-holder trust assumption (server can pick wrong winner). Dual-sig hash construction non-trivial; bundled into the v5.2 trust tier. |
+| `CharacterRegistry` | ✅ SHIPPED v5.1 testnet | shared object mapping `address → ID`; aborts new mints when wallet already has one | Closes layer 3 of the duplicate-mint bug (UI bypass via direct Slush PTB). Live at `0xad05d60e…9105f`. |
+| `burn_character` | ✅ SHIPPED v5.1 testnet | admin-gated entry to retire a Character object | Cleanup for legacy mr_boss + sx multi-Character residue. Clears the CharacterRegistry entry as a side effect so a fresh mint becomes possible on the same wallet. |
+| Admin-signed loot mint | **DEFERRED to v5.2** | reuse existing `item::mint_item` with rarity + stat-roll math from `server/src/game/loot.ts` | Replace the v5 disabled "fake loot" path with real on-chain Item NFTs. Wants `sui::random` for fairness; bundled with v5.2 trust pieces. |
+| `settle_tie` for mutual-KO | ✅ SHIPPED v5.1 testnet | new `settle_tie(wager, registry, clock, ctx)` entry — full refund both sides (no platform fee on draws) | Closed the 2026-05-28 stranded-escrow bug. Server `fight-room.ts:728` `else if (draw)` branch fires `settleTieOnChain` + `updateCharacterDrawOnChain`. Emits `WagerTied { match_id, player_a, player_b, refund_each }`. |
+| `draws: u32` on `Character` | ✅ SHIPPED v5.1 testnet | add `draws: u32` field to the `Character` struct + new `update_after_fight_draw` admin entry | W/L/D record across the on-chain NFT. Initial value 0 for new mints. Frontend Draw modal + W/L/D counter widget pending v5.2 (server already records the draw on chain). |
+| `KioskRegistry` + `create_or_get_player_kiosk` | ✅ SHIPPED v5.1 testnet | shared `Table<address, ID>` + idempotent kiosk-create entry | Closes the 2026-05-20 phantom-empty-kiosk vector. Frontend can drop the JS pre-flight; chain registry is the gate now. Live at `0x05d355fd…d4860`. |
+| `OpenWagerRegistry` + one-open-wager invariant | ✅ SHIPPED v5.1 testnet | shared `Table<address, ID>` + abort `EAlreadyHasOpenWager` on duplicate-create or duplicate-accept | Closes the silent-accept-as-creator case and the server-down-mid-create orphan family. All wager-completion paths remove the entry. Live at `0xa3be188a…908e20`. |
+| `Item.slot_type: u8` + equipment trinity enforcement | ✅ SHIPPED v5.1 testnet | `mint_item_admin` shape-validates slot_type by item_type; `equip_weapon` / `equip_offhand` enforce two-handed/offhand semantics on chain | Drops the v5.0 hardcoded `TWO_HANDED_NAMES` allowlist. Frontend `lib/two-handed-weapons.ts` post-cutover swap deferred (works either way). |
+| Item rarity stat budgets (Common=20, Uncommon=40, Rare=70, Epic=110, Legendary=160) | ✅ SHIPPED v5.1 testnet | `mint_item_admin` aborts `ERarityBudgetExceeded (5)` if sum of `*_bonus` + `max_damage` > rarity cap | Prevents admin minting a Legendary with stat-stack beyond its tier. |
+| 13-slot loadout (added ring_3 / pants / bracelets) | ✅ SHIPPED v5.1 testnet | 6 new equip/unequip primitives + new ITEM_TYPES (PANTS=10, BRACELETS=11; RING=8 reused for ring_3) | Mid-session slot decision: pauldrons removed, ring_3 added in its place. Full 13-slot live across contracts + server + frontend doll panels. |
+
+**Mainnet readiness:** 5/8 original blockers + 8 hotfixes closed (see
+`STATUS.md` → "Mainnet readiness"). The only ⚠️ items are (a) Block 2
+end-to-end validation gated on Supabase provisioning, and (b) the
+v5.1 republish above. Three additional polish bugs from the
+2026-05-03 arena gauntlet (cumulative grace budget, clearable stake
+input, outcome-modal-on-rejoin) closed and live-verified the same
+day.
+
+**`allocate_points` regression watch.** The v4-era / 2026-05-02
+MoveAbort code 2 (`ENotEnoughPoints`) was the canonical mainnet
+blocker for stat allocation. Post-fix verification:
+
+- Mr_Boss Lv3 → Lv4 (2026-05-02) — clean
+- Mr_Boss Lv4 → Lv5 (2026-05-03 day) — clean
+- Sx Lv5 (2026-05-03 evening) — clean
+
+Three Slush approvals across two characters and two level-ups, no
+abort, no MoveCall failure on dry-run. Treats the bug as
+**confirmed fixed**; Bucket 1 mainnet-readiness item stays closed.
+
+**Test gauntlet:** 14 suites, 731/731 PASS. Plus 35/35 Move unit
+tests in `contracts/tests/`. See `STATUS.md` → "Test totals".
+
+**Bucket 1 (live testnet QA) progress.**
+
+- ✅ Character room — equip/unequip, slot picker, save loadout,
+  stat allocate, fight history.
+- ✅ Arena room — friendly, ranked, wager (12-test gauntlet pass);
+  Lv5 vs Lv5 wager + dual-wield + shield + epic loadout verified.
+- ⏳ Market room — code covered by gauntlets, live UX walkthrough
+  pending.
+- ⏳ Tavern — chat / presence / whispers / profile clicks not yet
+  live-walked.
+- ⏳ Hall of Fame — minimal; deeper sort/filter test pending.
+- ⏳ Multi-day stability — no overnight uptime test yet.
+- ⏳ Fresh user onboarding — wipe localStorage + full create-flow
+  not yet verified.
+
+---
 
 ---
 
@@ -100,6 +172,15 @@ Each item below must be verified before running `sui client publish` against mai
 - [ ] **Equip/unequip have owner check + fight-lock check** — the `_v2` functions in `equipment.move` already include both
 - [ ] **`option::borrow` is always guarded by `option::is_some`** — check `contracts/sources/arena.move:163, 255, 313` (flagged in Phase 0.5 audit, address during mainnet prep)
 - [ ] **`#[allow(lint(public_entry))]` suppressions or cleanups** — the `public entry` redundancy warnings throughout the codebase are harmless but noisy; clean up for mainnet professionalism
+- [ ] **One-Kiosk-per-wallet invariant must be on-chain enforced** — `marketplace::create_player_kiosk` (`contracts/sources/marketplace.move:59`) is currently unconditional; a second call mints a second `KioskOwnerCap` and the wallet ends up owning two shared kiosks. On testnet (May 20 2026, ShakaLiX) this produced the phantom-empty-kiosk bug — the UI tracked the first cap returned by RPC while sale profits settled in the second kiosk. **On mainnet this is a real lost-funds vector**, not testnet annoyance. The JS-side guard in `useMarketplaceActions.createKiosk` (queries `KioskOwnerCap` ownership before signing) is the deployed testnet fix, but it can be bypassed by anyone hand-crafting a PTB or racing two tabs through tx-indexing lag. Bundle into the v5.1 republish: add a shared `KioskRegistry { table: Table<address, ID> }` and a `create_or_get_player_kiosk(registry, ctx)` entry function that returns the existing kiosk_id if `tx_context::sender` is already registered, otherwise creates one and registers it. Frontend can then drop the JS guard.
+
+- [ ] **Mutual-KO / draw bundle (added 2026-05-28).** A tied fight (both players reach 0 HP on the same turn — happens via combat resolver `server/src/game/combat.ts:422` `if (aDead && bDead) return { finished: true, draw: true }`) currently has NO on-chain settlement path: `arena::settle_wager` requires a single `winner` address, and the server's post-fight code (`server/src/ws/fight-room.ts:467` + `:482`) gates settlement behind `!draw`. Result: the wager stays `STATUS_ACTIVE` with full escrow stranded; both clients show "Defeat / You Lose" (`frontend/src/app/game-provider.tsx:267-271` has no draw branch — `msg.fight.winner === null` is falsy for both wallets). Live incident 2026-05-28: wager `0xf2f3982266cfa69d7061638b00c191dca30dcbe546eef217557622719cbee608`, fight `87ce91b9`, server log `[Fight] End id=87ce91b9 reason=draw winner=none draw=true turn=5 hpA=0/50 hpB=0/50` — 0.2 SUI orphaned in escrow; manually refunded via tx `9YPY7K9yNWeNbdvryhHyJAXVoyH3bTJtpsQ56sz5E37x` through `admin_cancel_wager`. **Bundle for v5.1:**
+  - **Move** — add `public fun settle_tie(wager: &mut WagerMatch, clock: &Clock, ctx: &mut TxContext)` to `arena.move`, TREASURY-only, asserts `status == STATUS_ACTIVE && option::is_some(&player_b)`, refunds 100% to each (no 5% platform fee on draws — design decision option A2 over A1's `admin_cancel_wager` hack and over A3's 47.5/47.5/5 split). Emits new `WagerTied { match_id, player_a, player_b, refund_each }` event. Sets `status = STATUS_SETTLED, settled_at = clock`. Matches the existing `WagerRefunded` event shape so indexers can fold both into the same "no-winner" bucket if desired.
+  - **Move** — add `draws: u32` to the `Character` struct alongside `wins: u32, losses: u32`. Bump `update_after_fight` signature to accept a `result: u8` discriminator (`0=loss, 1=win, 2=draw`) or split into `update_after_fight_draw(character, xp_gained, clock, ctx)`. Initial value 0 for new mints. Adds one `u32` per Character — negligible storage.
+  - **Server** — in `fight-room.ts:728` `else if (draw)` branch, fire `settleTieOnChain(fight.wagerMatchId)` (new helper in `sui-settle.ts`, mirrors `adminCancelWagerOnChain` but calls `settle_tie`) for `fight.type === 'wager'`. Award draw XP (`calculateXpReward(fight.type, false, …)` currently used — fine to keep). Update `update_after_fight` call to pass `result: 'draw'` so the on-chain `draws` counter increments. Fall back to `admin_cancel_wager` if `settle_tie` fails — keeps the testnet safety net alive on mainnet too.
+  - **Frontend** — `game-provider.tsx:258 case "fight_end"` add an explicit draw branch: detect `msg.fight.winner === null && fight.status === 'finished'`, dispatch `SET_DRAW_OUTCOME` (new), play a neutral "draw" sound (or no sound). New `<DrawOutcomeModal />` mirroring the post-fight modal layout, neutral copy ("Draw — both fighters down"), shows refund amount instead of "−0.1 SUI", shows XP gain (consolation). History rows: widen `result` type from `'win' | 'loss'` to `'win' | 'loss' | 'draw'`; add badge tint (neutral grey, not victory-green nor blood-red) at `character-profile.tsx:817-818`. Navbar W/L counter becomes W/L/D.
+  - **Tests** — Move unit test for `settle_tie` (mirror `settle_wager` tests; assert refund_each == stake_amount, status flips to SETTLED, both balances credited). Frontend gauntlet pinning the draw branch dispatch + draw badge + W/L/D counter render.
+  - **Until v5.1 ships:** testnet QA uses `admin_cancel_wager` as manual safety net — endpoint already exists; both this incident (2026-05-28 `0xf2f3982266…`) and earlier ones (2026-05-27 `0xf3aae8c5468e…` via disconnect cleanup, `0x0c24213f9f59…` via curl) prove the path works for 50/50 refunds. Acceptable for testnet; unacceptable for mainnet because (a) it requires admin intervention per draw, (b) the 50/50 split semantically reads as "cancelled" not "tied," and (c) no on-chain record of the draw outcome.
 
 ### Server layer
 
@@ -124,21 +205,23 @@ Each item below must be verified before running `sui client publish` against mai
 
 ### Frontend layer
 
-- [ ] **Delete dead code: `frontend/src/components/items/equipment-grid.tsx`** — exported `EquipmentGrid` component, never imported anywhere (grep confirms zero consumers as of 2026-04-18). The active equipment UI lives in `character-profile.tsx`. Parked for separate cleanup PR rather than deleted alongside refactors.
-- [ ] **`frontend/src/lib/sui-contracts.ts:5-7`** — remove the hardcoded testnet fallback `"0x7fd54c4d..."` for `NEXT_PUBLIC_SUI_PACKAGE_ID`. Missing env should throw at build time.
+- [x] ~~**Delete dead code: `frontend/src/components/items/equipment-grid.tsx`**~~ — DONE (file no longer present, verified 2026-05-19).
+- [x] ~~**`frontend/src/lib/sui-contracts.ts:5-7`** — remove the hardcoded testnet fallback~~ — DONE; `PACKAGE_ID` now resolves through a `required(name, value)` env helper at sui-contracts.ts:44 that throws when `NEXT_PUBLIC_SUI_PACKAGE_ID` is absent.
 - [ ] **All `moveCall` targets use the upgraded package ID** — on mainnet there's only one package, so this is moot, but the pattern should stay so future upgrades work cleanly
 - [ ] **No testnet wallet addresses visible in source** — search the frontend tree for `0xdbd3`, `0x3606`, `0xa5ad`, `0x07fd`, `0xff99` and remove all hits
 - [ ] **No dev-mode API endpoints** — all RPC URLs come from env, no hardcoded testnet fullnode
 - [ ] **Frontend error handlers surface, not swallow** — sweep for `catch {}`
+- [ ] **Kiosk cap resolution is aggregate, not `caps[0]`** — `useKiosk` (`frontend/src/hooks/useKiosk.ts`) enumerates every `KioskOwnerCap` the wallet owns and surfaces aggregated profits / listing count / item count. The seller-panel `Withdraw` button must call `buildWithdrawAllKioskProfitsTx` (single PTB, every kiosk swept in one signature), and `Delist` / `Retrieve` must look up the matching cap via `kiosk.capForKiosk(listingOrItem.kioskId)` rather than the wallet's "primary" cap. **Regression guard:** the gauntlet `scripts/qa-kiosk-orphan.ts` pins `aggregateKiosks` primary-selection, `buildWithdrawAllKioskProfitsTx` PTB shape, and the `createKiosk` pre-flight contract. Re-run before any change to `useKiosk` / `useMarketplaceActions`.
 
 ### Shared
 
+- [ ] **Unify StatBonuses shape between `server/src/types.ts` and `frontend/src/types/game.ts`.** Currently server uses `{armor, hp, defense, damage, critBonus, strength, dexterity, intuition, endurance}` while frontend expects `{armorBonus, hpBonus, defenseBonus, attackBonus, critChanceBonus, strengthBonus, ...}`. Translation layer in `sanitizeItem` (server handler.ts) masks the divergence today but drops 4 stat fields (`critMultiplierBonus`, `evasionBonus`, `antiCritBonus`, `antiEvasionBonus`). Resolve before mainnet.
 - [ ] **All `.env.example` files contain only placeholders**:
   - [ ] `server/.env.example` — `SUPABASE_URL=https://your-project.supabase.co`, `SUI_PACKAGE_ID=0x...`, etc.
   - [ ] `frontend/.env.local.example` (create if missing)
   - [ ] No real secrets, no real addresses
-- [ ] **`scripts/mint-demo-items.sh`** — file is testnet-specific (hardcodes `0xa5ad...` as recipient). Either delete before mainnet or rewrite with env vars + safety check for `NETWORK=mainnet`.
-- [ ] **`deployment.json`** — delete or move to `deployment.testnet.json`. Mainnet starts with a fresh `deployment.mainnet.json`.
+- [x] ~~**`scripts/mint-demo-items.sh`**~~ — DONE (file no longer present, verified 2026-05-19).
+- [x] ~~**`deployment.json`** — delete or move to `deployment.testnet.json`~~ — DONE (root now holds only `deployment.testnet-v5.json`).
 - [ ] **`contracts/Published.toml`** — delete the testnet publish metadata. It will regenerate on mainnet publish.
 - [ ] **`contracts/Move.toml`** — currently has `sui_combats = "0x0"`. Leave as is; `sui client publish` auto-updates.
 
@@ -155,6 +238,30 @@ Each item below must be verified before running `sui client publish` against mai
 - [ ] **`option::is_some` guards before every `option::borrow`** — `arena.move:163, 255, 313` flagged. Add per-line.
 - [ ] **Item stat bonus caps** — `mint_item_admin` should cap each `*_bonus: u16` at some reasonable maximum (e.g. 10000) to prevent integer overflow in combat math on frontend/server.
 - [ ] **`level_req` cap** — `mint_item_admin` should `assert!(level_req <= MAX_LEVEL)` (20) so items can't be permanently unusable.
+
+### UX gates — zkLogin signing must require explicit confirmation
+
+> **HARD MAINNET BLOCKER — added 2026-05-19.** On testnet, Enoki
+> zkLogin signs every `signAndExecuteTransaction` silently for demo-
+> smoothness reasons (the Phase A login pass deliberately accepted
+> the no-popup UX to keep the demo headline simple). That is **not
+> safe for mainnet**: a logged-in user who walks away from their
+> screen could lose real SUI to anyone with physical access, and
+> a malicious page-injection attack could fire arbitrary
+> `accept_wager` / `list_item` / `buy_listing` PTBs without the
+> user noticing. Confirm popups are the line of defence between
+> a stolen browser session and a drained mainnet wallet.
+
+- [ ] **Every wallet-popup site must gain an explicit confirm-popup gate.** All sites that today call `signer.signAndExecuteTransaction({ transaction })` go through this gate. Audit checklist:
+  - [ ] `frontend/src/components/fight/matchmaking-queue.tsx` — `handleQueue` (create_wager), `handleAcceptWager`, `handleCancelWager`
+  - [ ] `frontend/src/components/character/character-creation.tsx` — initial mint
+  - [ ] `frontend/src/hooks/useEquipmentActions.ts` — `saveLoadout`
+  - [ ] `frontend/src/components/character/stat-allocate-modal.tsx` — `allocate_points`
+  - [ ] `frontend/src/components/marketplace/*` — `list_item`, `delist_item`, `buy_listing`, kiosk withdraw
+  - [ ] Any future signer.signAndExecuteTransaction call site — grep before every release.
+- [ ] **Implementation shape:** the confirm modal SHOULD show: (a) target Move function (`arena::accept_wager`), (b) human-readable amount + asset (`0.1 SUI`), (c) recipient if applicable (`creator's address …4ed3`), (d) gas estimate. A single shared `<ConfirmTxModal />` component renders before the signer call; the user must click "Sign" before the Enoki popup fires.
+- [ ] **Pinning:** add a gauntlet that fails if a new `signAndExecuteTransaction` is added without an immediately-preceding `await confirmTransaction(...)` call. Mirror the pattern in `qa-wager-accept-race.ts` (source-grep count of signing sites with paired pre-flight).
+- [ ] **Settings toggle (optional, not safe-by-default):** a "Trust this session for 30 minutes" setting that bypasses the popup for the same Move function. Default OFF. Surface clearly in the UI so the user knows they've reduced their own defence depth.
 
 ### Operational security
 
@@ -234,6 +341,8 @@ Execute in order. Do NOT skip steps.
 28. [ ] Unequip item, verify DOF removed
 29. [ ] List item for sale (wallet popup → 0.01 SUI fee routes to TREASURY, item in kiosk)
 30. [ ] Second wallet buys listed item — verify TransferPolicy royalty (2.5%) taken
+30a. [ ] Seller withdraws profits — verify aggregated `profitsSui` clears to 0 in one signature, balance lands in wallet
+30b. [ ] Click "Create my Kiosk" a second time — confirm the JS guard short-circuits to "You already own a Kiosk — refreshing." (or, post-v5.1, that `create_or_get_player_kiosk` returns the existing id)
 31. [ ] Queue a friendly fight between the two wallets — fight resolves, `update_after_fight` lands on both characters
 32. [ ] Queue a wager fight (start with 0.1 SUI to minimize blast radius) — wager creation + acceptance + settlement all land on-chain
 33. [ ] Verify TREASURY received 5% of the wager pot
@@ -284,8 +393,55 @@ Explicitly do not bring into mainnet:
 
 ---
 
+## Testnet recovery endpoints
+
+These endpoints are **testnet-only** — all guarded by `CONFIG.SUI_NETWORK !== 'mainnet'` and respond with 403 on mainnet. They exist to rescue state when normal flows fail during development. Do NOT build features that depend on them.
+
+### `POST /api/admin/grant-xp`
+Grants XP to a character server-side AND on-chain (via `update_after_fight` with `won=false`). Bumps on-chain level so level-gated items become equippable without grinding fights.
+
+**Side effect:** increments the character's loss counter by 1 per call. Acceptable on testnet; document per-character if leaderboard is important.
+
+```bash
+curl -X POST http://localhost:3001/api/admin/grant-xp \
+  -H 'Content-Type: application/json' \
+  -d '{"wallet":"0x...","xp":300}'
+```
+
+### `POST /api/admin/adopt-wager`
+Recovers an on-chain WagerMatch that never made it into the in-memory lobby (e.g. WS reconnect race, frontend extraction failure, server restart mid-flow). Queries chain, validates status=WAITING, inserts lobby entry, broadcasts `wager_lobby_added`. Creator must be logged in at the time of adoption.
+
+```bash
+curl -X POST http://localhost:3001/api/admin/adopt-wager \
+  -H 'Content-Type: application/json' \
+  -d '{"wagerMatchId":"0x..."}'
+```
+
+Returns 409 if already in lobby, 409 if status != WAITING, 404 if not a WagerMatch object.
+
+---
+
+## Known races & reliability gaps
+
+### WS reconnect vs outbound message
+On unstable connections, the browser socket can reconnect silently during the gap between a successful on-chain tx landing and the frontend's follow-up WS message (`queue_fight`, `wager_accepted`, etc.). The outbound send either fires on the old (closing) socket and gets dropped, or fires before the new session has completed auth handshake. Result: chain state exists, server state doesn't, user sees nothing.
+
+**Current mitigations:**
+- Sticky (non-fading) error banner when wager-id extraction fails after create_wager sign — user cannot miss the state divergence. Banner tells them to contact admin rather than retry (retry would lock a second stake).
+- Testnet `/api/admin/adopt-wager` endpoint for manual recovery.
+- Server-side `DEBUG_WS=1` logs every inbound WS message with type + key fields — diagnoses "did the server receive it" in one log line.
+
+**To resolve before mainnet:**
+- [ ] Outbound message queue on the WS client — buffer sends while socket is disconnected, flush on reconnect+auth success.
+- [ ] Make the post-tx WS message idempotent (server tolerates duplicate `queue_fight` for the same `wagerMatchId`) so a retry is safe.
+- [ ] Automated orphan-wager scanner: server periodically queries chain for WagerMatch objects in WAITING state whose creator is connected but has no lobby entry, auto-adopt. Eliminates manual curl.
+
 ## Change log
 
 | Date | Author | Change |
 |---|---|---|
 | 2026-04-18 | Initial draft | After Phase 0 + 0.5 testnet upgrade revealed Sui upgrade semantics (old bytecode stays callable). Documented to prevent future sessions from assuming upgrade-to-mainnet is viable. |
+| 2026-05-20 | Session wrap | Bundled `KioskRegistry` + `create_or_get_player_kiosk` into v5.1 (§C Contract layer) after the 2026-05-20 phantom-empty-kiosk incident. |
+| 2026-05-28 | Session wrap | Bundled mutual-KO / draw handling into v5.1 (§C Contract layer): `settle_tie` Move entry, `draws: u32` on `Character`, server router, frontend Draw modal + W/L/D counter. Triggered by the 2026-05-28 live tie (wager `0xf2f3982266…`, fight `87ce91b9`) — 0.2 SUI orphaned, refunded via `admin_cancel_wager` (`9YPY7K9yNWeNbdvryhHyJAXVoyH3bTJtpsQ56sz5E37x`). |
+| 2026-05-28 (PM) | Autonomous overnight | **v5.1 contracts SHIPPED to testnet** — package `0x7853412fb905…` (now superseded; see next row). CharacterRegistry + OpenWagerRegistry + KioskRegistry + settle_tie + slot_type + draws field + rarity budgets + burn_character + create_or_get_player_kiosk. Server wiring landed (settleTieOnChain + updateCharacterDrawOnChain helpers + fight-room.ts draw branch). MAX_WAGER_SUI_MIST cap + WS rate-limit config + admin-endpoint network gating audit. Frontend assertTxSucceeded hardened for SDK 2.16. Move tests 35 → 64 PASS. Branch `feature/v5.1-contracts` @ HEAD. Cut-over protocol in `docs/V5.1_RELEASE_NOTES_2026-05-28.md`. v5.2 deferral list locked: sui::random, respec_character, settle_wager_attested. |
+| 2026-05-28 (EOD) | Session wrap | **v5.1 FINAL package live + cut-over executed + 13-slot expansion + 52 NFTs minted.** Three publishes happened in sequence — see `deployment.testnet-v5.1.json::supersedes`. Final package `0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717` is what the running testnet servers point at. 13-slot loadout LIVE: weapon / offhand / helmet / chest / gloves / boots / belt / ring_1 / ring_2 / ring_3 / necklace / pants / bracelets (pauldrons removed mid-session, ring_3 takes the third "new slot" spot). 26 Lv1 (Ponke set, Pinata `bafybeib36hi7qup…ln3ida`) + 26 Lv2 (Scavenger set, Pinata `bafybeidsjl6kih…zzv4oq`) NFTs minted into TREASURY + listed in TREASURY kiosk. Frontend cut-over: 13 slot tiles render, PRIMARY ATTRIBUTES bars react live to equip/unequip, session-aware `autoConnect` (fresh tab → picker; F5 mid-session → silent restore; explicit Disconnect → next refresh shows picker). Move tests 35 → 71 PASS (+36). Branch `feature/v5.1-contracts` @ `0ab7677` pushed. |

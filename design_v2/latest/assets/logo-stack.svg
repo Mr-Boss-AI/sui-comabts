@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" fill="none">
+  
+  <rect width="320" height="220" fill="#0a0d12"></rect>
+  <rect x="6" y="6" width="308" height="208" fill="none" stroke="#c89a3f" stroke-width="2"></rect>
+  <text x="60" y="102" class="wm" fill="#c89a3f">SUI</text>
+  <text x="14" y="192" class="wm" fill="#b53d2c" stroke="#c89a3f" stroke-width="2.5">COMBATS</text>
+</svg>

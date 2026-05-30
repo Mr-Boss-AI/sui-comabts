@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Form Inputs</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#15191f;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .field{display:flex;flex-direction:column;gap:6px;}
+  label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#8a8474;}
+  input,select{font-family:"Poppins";font-size:15px;padding:10px 14px;border:2px solid #e8e2d4;border-radius:10px;background:#15191f;color:#e8e2d4;outline:none;box-shadow:3px 3px 0 0 #000;}
+  input:focus{border-color:#b53d2c;box-shadow:3px 3px 0 0 #b53d2c;}
+  .yellow:focus{border-color:#c89a3f;box-shadow:3px 3px 0 0 #c89a3f;}
+  .err{color:#b53d2c;font-size:12px;font-weight:600;}
+  .hint{color:#8a8474;font-size:12px;}
+  .ig{display:flex;align-items:center;border:2px solid #e8e2d4;border-radius:10px;background:#15191f;box-shadow:3px 3px 0 0 #000;overflow:hidden;}
+  .ig span{padding:10px 12px;background:#0a0d12;color:#c89a3f;font-family:"JetBrains Mono";font-weight:700;font-size:13px;}
+  .ig input{border:0;box-shadow:none;flex:1;}
+</style></head><body>
+<div class="wrap">
+  <div class="field"><label>Fighter Name</label><input value="Ponke_the_Brawler"><span class="hint">3–24 chars, letters & digits.</span></div>
+  <div class="field"><label>Wager Stake</label>
+    <div class="ig"><span>SUI</span><input value="0.500" class="yellow"></div>
+    <span class="hint">10-minute auto-expiry. 95/5 split on settle.</span>
+  </div>
+  <div class="field"><label>Opponent address (optional)</label><input placeholder="0x… leave blank for open queue"></div>
+  <div class="field"><label>Rarity filter</label><select><option>All rarities</option><option>Common</option><option>Rare</option><option>Legendary</option></select></div>
+</div>
+</body></html>

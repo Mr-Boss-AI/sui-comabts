@@ -4,24 +4,88 @@ import { useState } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { Navbar } from "./navbar";
-import { TownNav } from "./town-hub";
 import { CharacterCreation } from "@/components/character/character-creation";
+import { LandingPage } from "@/components/landing/landing-page";
+import type { AuthPhase } from "@/hooks/useGameStore";
 import { CharacterProfile } from "@/components/character/character-profile";
 import { FightArena } from "@/components/fight/fight-arena";
 import { MatchmakingQueue } from "@/components/fight/matchmaking-queue";
 import { SpectateView } from "@/components/fight/spectate-view";
+import { SpectatorLanding } from "@/components/fight/spectator-landing";
 import { Inventory } from "@/components/items/inventory";
-import { NpcShop } from "@/components/items/npc-shop";
 import { ChatPanel } from "@/components/social/chat-panel";
-import { PlayerList } from "@/components/social/player-list";
 import { ChallengePopup } from "@/components/social/challenge-popup";
 import { Leaderboard } from "@/components/social/leaderboard";
 import { FightHistory } from "@/components/social/fight-history";
+import { TavernRoom } from "@/components/social/tavern-room";
+import { PlayerProfileModal } from "@/components/social/player-profile-modal";
+import { FightRequestToasts } from "@/components/social/fight-request-toasts";
+import { DmToasts } from "@/components/social/dm-toasts";
+import { DmPanel } from "@/components/social/dm-panel";
 import { MarketplaceBrowser } from "@/components/marketplace/marketplace-browser";
+import { MyKioskPanel } from "@/components/marketplace/my-kiosk-panel";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorToast } from "@/components/ui/error-toast";
+import { LevelUpModal } from "@/components/character/level-up-modal";
+import { TwoHandedConflictModal } from "@/components/character/two-handed-conflict-modal";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+
+/**
+ * Pre-character gating UI. Render only when `state.character` is null — once
+ * the server confirms a character, the game UI takes over. Closes layer 1 of
+ * the 2026-04-30 duplicate-mint bug: <CharacterCreation /> is never rendered
+ * as a fallback during the auth-flicker window; it shows up only after the
+ * chain check has DEFINITIVELY returned no character.
+ */
+function PreCharacterGate({
+  phase,
+  onRetry,
+}: {
+  phase: AuthPhase;
+  onRetry: () => void;
+}) {
+  if (phase === "no_character") {
+    return <CharacterCreation />;
+  }
+  if (phase === "chain_check_failed") {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 p-6 text-center gap-4">
+        <div className="text-3xl">⚠️</div>
+        <h2 className="text-xl font-bold text-zinc-100">Couldn&apos;t reach the Sui network</h2>
+        <p className="text-sm text-zinc-400 max-w-md">
+          We need to check whether this wallet already has a fighter on chain
+          before we can show you the create screen. The RPC node didn&apos;t
+          answer.
+        </p>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
+        </Button>
+        <p className="text-xs text-zinc-600 max-w-md">
+          If this keeps happening, your network blocks Sui&apos;s public
+          fullnode or the testnet RPC is degraded. Check
+          <code className="mx-1 px-1 py-0.5 bg-zinc-800 rounded text-zinc-400">
+            fullnode.testnet.sui.io
+          </code>
+          and refresh.
+        </p>
+      </div>
+    );
+  }
+  // "auth_pending" or "chain_check_pending" — both render the same neutral
+  // loading screen. Distinguishing them in copy doesn't help the user; what
+  // matters is that the create form is not rendered.
+  const message =
+    phase === "auth_pending"
+      ? "Signing you in…"
+      : "Checking the chain for your fighter…";
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 p-6 gap-4">
+      <div className="h-10 w-10 rounded-full border-2 border-zinc-700 border-t-emerald-400 animate-spin" />
+      <p className="text-sm text-zinc-400">{message}</p>
+    </div>
+  );
+}
 
 function HowToPlayButton() {
   const [open, setOpen] = useState(false);
@@ -88,9 +152,23 @@ function ResetCharacterButton() {
 
   if (confirming) {
     return (
-      <div className="rounded border border-red-900/40 bg-red-950/20 p-3 space-y-2">
-        <p className="text-xs text-red-300">This will delete your character and let you create a new one under the current on-chain package. Your old character data will be lost.</p>
-        <div className="flex gap-2">
+      <div
+        style={{
+          background: "var(--sc-panel-2)",
+          border: "1px solid var(--sc-blood-deep)",
+          borderLeft: "3px solid var(--sc-blood)",
+          padding: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          fontFamily: "var(--font-ui)",
+        }}
+      >
+        <p style={{ margin: 0, fontSize: 11, color: "var(--sc-blood)", lineHeight: 1.45 }}>
+          This will delete your character and let you create a new one under
+          the current on-chain package. Your old character data will be lost.
+        </p>
+        <div style={{ display: "flex", gap: 6 }}>
           <Button variant="danger" size="sm" onClick={handleReset}>Confirm Reset</Button>
           <Button variant="secondary" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
         </div>
@@ -101,7 +179,22 @@ function ResetCharacterButton() {
   return (
     <button
       onClick={() => setConfirming(true)}
-      className="w-full text-xs text-zinc-600 hover:text-red-400 transition-colors py-2"
+      style={{
+        width: "100%",
+        background: "transparent",
+        border: 0,
+        color: "var(--fg-3)",
+        fontFamily: "var(--font-ui)",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "var(--ls-stamp)",
+        textTransform: "uppercase",
+        padding: "8px 0",
+        cursor: "pointer",
+        transition: "color var(--d-fast)",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--sc-blood)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--fg-3)"; }}
     >
       Reset Character (migrate to current package)
     </button>
@@ -114,76 +207,21 @@ function AreaContent() {
 
   if (!character) return null;
 
+  // Phase 2 layout sweep — each screen owns its own ScreenLayout
+  // wrapper + TopBanner + composition. game-screen just routes to
+  // the right top-level component; no more per-screen grid wrappers
+  // here (they'd fight the screen's own 3-column / podium / etc).
   switch (currentArea) {
     case "character":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 space-y-4">
-            <CharacterProfile character={character} />
-            <FightHistory />
-          </div>
-          <div className="space-y-4">
-            <Inventory />
-            <ResetCharacterButton />
-          </div>
-        </div>
-      );
+      return <CharacterProfile character={character} extras={<ResetCharacterButton />} />;
     case "arena":
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div />
-            <HowToPlayButton />
-          </div>
-          <MatchmakingQueue />
-        </div>
-      );
+      return <MatchmakingQueue />;
     case "marketplace":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <MarketplaceBrowser />
-          </div>
-          <div className="space-y-4">
-            <NpcShop />
-            <Inventory />
-          </div>
-        </div>
-      );
+      return <MarketplaceBrowser />;
     case "tavern":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Card className="h-[500px] flex flex-col">
-              <CardHeader>
-                <span className="font-semibold">Tavern Chat</span>
-              </CardHeader>
-              <CardBody className="flex-1 p-0 min-h-0">
-                <ChatPanel />
-              </CardBody>
-            </Card>
-          </div>
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <span className="font-semibold">Players</span>
-              </CardHeader>
-              <CardBody>
-                <PlayerList />
-              </CardBody>
-            </Card>
-          </div>
-        </div>
-      );
+      return <TavernRoom />;
     case "hall_of_fame":
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Leaderboard />
-          </div>
-          <div />
-        </div>
-      );
+      return <Leaderboard />;
     default:
       return null;
   }
@@ -191,29 +229,40 @@ function AreaContent() {
 
 export function GameScreen() {
   const account = useCurrentAccount();
-  const { state } = useGame();
-  const { character, fight, spectatingFight } = state;
+  const { state, dispatch } = useGame();
+  const { character, fight, spectatingFight, authPhase, spectatorMode } = state;
 
-  // Not connected
+  // Not connected — two sub-flows depending on guest-spectator intent.
   if (!account) {
+    // Guest is watching a fight. <SpectateView /> renders against
+    // `state.spectatingFight` regardless of auth, so we just pass
+    // through. The Leave button in SpectateView drops
+    // `spectatingFight` back to null, which lands us in the picker
+    // branch below for the next pick.
+    if (spectatorMode && spectatingFight) {
+      return (
+        <div className="flex flex-col flex-1">
+          <Navbar />
+          <ErrorToast />
+          <SpectateView />
+        </div>
+      );
+    }
+    // Guest picked "Watch a Fight" but hasn't selected one yet.
+    if (spectatorMode) {
+      return (
+        <div className="flex flex-col flex-1">
+          <ErrorToast />
+          <SpectatorLanding />
+        </div>
+      );
+    }
+    // Pure landing — wallet-connect hero.
     return (
       <div className="flex flex-col flex-1">
         <Navbar />
         <ErrorToast />
-        <div className="flex flex-col flex-1 items-center justify-center gap-8 p-4">
-          <div className="text-center">
-            <h1 className="text-5xl font-black tracking-tight mb-3">
-              SUI<span className="text-emerald-400">Combats</span>
-            </h1>
-            <p className="text-zinc-400 text-lg max-w-md mx-auto">
-              A blockchain PvP arena — connect your wallet, create a fighter,
-              gear up, and battle for SUI.
-            </p>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-sm text-zinc-500">Connect your Sui wallet to begin</p>
-          </div>
-        </div>
+        <LandingPage />
       </div>
     );
   }
@@ -252,13 +301,21 @@ export function GameScreen() {
     );
   }
 
-  // No character yet
+  // No character yet — gate via the explicit auth-phase state machine.
+  // CharacterCreation is reachable only when authPhase === "no_character",
+  // i.e. the chain check has DEFINITIVELY confirmed the wallet has no
+  // existing Character NFT. See game-provider.tsx for the transitions.
   if (!character) {
     return (
       <div className="flex flex-col flex-1">
         <Navbar />
         <ErrorToast />
-        <CharacterCreation />
+        <PreCharacterGate
+          phase={authPhase}
+          onRetry={() =>
+            dispatch({ type: "SET_AUTH_PHASE", phase: "chain_check_pending" })
+          }
+        />
       </div>
     );
   }
@@ -268,14 +325,46 @@ export function GameScreen() {
     <div className="flex flex-col flex-1">
       <Navbar />
       <ErrorToast />
-      <div className="max-w-7xl mx-auto w-full px-4 py-4 space-y-3">
-        <div className="bg-amber-900/30 border border-amber-700/40 rounded-lg px-4 py-2 text-xs text-amber-300/80 text-center">
-          Testnet demo — characters and items reset on server restart
+      <LevelUpModal />
+      <TwoHandedConflictModal />
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Outer chrome — testnet banner + nav at full viewport width.
+            Each Area-content screen below owns its own ScreenLayout
+            wrapper so the 1440px max-width + side padding stays
+            consistent with the design system spec. */}
+        <div
+          style={{
+            background: "var(--sc-panel-2)",
+            borderBottom: "1px solid var(--sc-blood-deep)",
+            color: "var(--fg-2)",
+            padding: "8px 18px",
+            fontFamily: "var(--font-ui)",
+            fontWeight: 600,
+            fontSize: 11,
+            letterSpacing: "0.04em",
+            textAlign: "center",
+            boxShadow: "var(--sh-plate-sm)",
+          }}
+        >
+          <span style={{ color: "var(--sc-blood)", fontWeight: 800 }}>TESTNET DEMO</span>
+          <span style={{ color: "var(--fg-3)", margin: "0 8px" }}>—</span>
+          characters and items reset on server restart
         </div>
-        <TownNav />
+        <div style={{ height: 16 }} />
         <AreaContent />
       </div>
       <ChallengePopup />
+      {/* Bucket 3 Tavern global mounts — surface above every area. */}
+      <FightRequestToasts />
+      <DmToasts />
+      <PlayerProfileModal />
+      <DmPanel />
     </div>
   );
 }

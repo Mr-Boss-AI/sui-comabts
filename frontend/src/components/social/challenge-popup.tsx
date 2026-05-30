@@ -26,13 +26,39 @@ export function ChallengePopup() {
   }
 
   return (
-    <div className="fixed top-4 right-4 z-50 bg-zinc-900 border border-amber-600 rounded-xl shadow-2xl shadow-amber-900/30 p-4 max-w-sm animate-bounce-subtle">
-      <div className="text-sm font-medium mb-1">Challenge!</div>
-      <p className="text-zinc-300 text-sm">
-        <span className="text-amber-400 font-bold">{pendingChallenge.fromName}</span>{" "}
+    <div
+      style={{
+        position: "fixed",
+        top: 16,
+        right: 16,
+        zIndex: 50,
+        background: "var(--sc-panel)",
+        border: "2px solid var(--sc-bronze)",
+        boxShadow: "4px 4px 0 0 var(--sc-bronze-deep), var(--rim-top)",
+        padding: 14,
+        maxWidth: 360,
+        fontFamily: "var(--font-ui)",
+        color: "var(--sc-parchment)",
+        animation: "bounce-subtle 2s ease-in-out infinite",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 16,
+          color: "var(--sc-bronze)",
+          marginBottom: 4,
+        }}
+      >
+        Challenge!
+      </div>
+      <p style={{ margin: 0, fontSize: 13, color: "var(--sc-parchment)" }}>
+        <span style={{ color: "var(--sc-bronze)", fontWeight: 800 }}>
+          {pendingChallenge.fromName}
+        </span>{" "}
         wants to fight ({pendingChallenge.fightType})
       </p>
-      <div className="flex gap-2 mt-3">
+      <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
         <Button size="sm" onClick={accept}>
           Accept
         </Button>

@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Buttons — Secondary</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;background:#15191f;font-family:"Poppins";color:#e8e2d4;}
+  .wrap{padding:24px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;}
+  .btn{font-family:"Poppins";font-weight:700;text-transform:uppercase;letter-spacing:.05em;border:2px solid #e8e2d4;border-radius:12px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:14px;padding:10px 22px;}
+  .out{background:#15191f;color:#e8e2d4;}
+  .ghost{background:transparent;color:#e8e2d4;border-color:transparent;}
+  .ghost:hover{border-color:#e8e2d4;background:#15191f;}
+  .danger-out{background:#15191f;color:#b53d2c;border-color:#b53d2c;}
+  .ok-out{background:#15191f;color:#5a8a3a;border-color:#5a8a3a;}
+  .ico{font-family:"JetBrains Mono";font-weight:900;}
+  .meta{width:100%;font-family:"JetBrains Mono";font-size:10px;color:#8a8474;margin-top:8px;}
+</style></head><body>
+<div class="wrap">
+  <button class="btn out">Cancel</button>
+  <button class="btn out"><span class="ico">↻</span> Refresh</button>
+  <button class="btn danger-out">Delete Character</button>
+  <button class="btn ok-out">✓ Confirm</button>
+  <button class="btn ghost">Skip</button>
+  <button class="btn ghost"><span class="ico">?</span> How to play</button>
+  <p class="meta">Outline / danger-outline / ghost variants. No sticker shadow on secondaries — they live next to a primary that already has one.</p>
+</div>
+</body></html>

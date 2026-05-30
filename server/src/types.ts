@@ -72,6 +72,13 @@ export interface Item {
   itemType: ItemType;
   rarity: Rarity;
   levelReq: number;
+  /** v5.1 — chain `Item.slot_type`. 0=mainhand, 1=offhand, 2=both_hands.
+   *  Mirrors `item.move SLOT_*` constants and is carried through the wire
+   *  via utils/wire-sanitize.ts. Optional because legacy NPC loot generated
+   *  in `game/loot.ts` predates chain enforcement — `undefined` is treated
+   *  as MAINHAND by the frontend, which is the only sane default for
+   *  non-weapon armor pieces. New on-chain items always populate this. */
+  slotType?: number;
   statBonuses: StatBonuses;
   minDamage?: number;
   maxDamage?: number;
@@ -92,6 +99,11 @@ export interface EquipmentSlots {
   ring1: Item | null;
   ring2: Item | null;
   necklace: Item | null;
+  // v5.1 (2026-05-28 PM, final) — 3 new slots: ring_3, pants, bracelets.
+  // Optional so wire payloads that pre-date the schema still type-check.
+  ring3?: Item | null;
+  pants?: Item | null;
+  bracelets?: Item | null;
 }
 
 // === Character ===
@@ -100,15 +112,34 @@ export interface Character {
   id: string;
   name: string;
   level: number;
+  /** CUMULATIVE total XP earned (matches chain `Character.xp`). Never resets on level-up. */
   xp: number;
-  xpToNextLevel: number;
   walletAddress: string;
+  /**
+   * The on-chain Character NFT object ID for this server-side record.
+   * Resolved once via `CharacterCreated` event scan at restore/create time
+   * and persisted in Supabase. Every later admin call (`update_after_fight`,
+   * `set_fight_lock`, DOF reads) targets THIS object id directly — never
+   * re-scans events. Wallets with multiple Characters (legacy / migration)
+   * always pin to the one we hydrated, not "whichever was newest at scan
+   * time" (which is what `findCharacterObjectId(wallet)` returns and is
+   * therefore unsafe on hot paths).
+   *
+   * `undefined` only for characters created before this field was added
+   * (server reconciles by re-scanning on next login).
+   */
+  onChainObjectId?: string;
   stats: CharacterStats;
   equipment: EquipmentSlots;
   inventory: Item[];
   gold: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter. Chain-side `Character.draws: u32`
+   *  is the source of truth; this field mirrors it so wire payloads
+   *  (and the in-memory leaderboard) can render W/L/D consistently.
+   *  Incremented by `update_after_fight_draw` admin entry; initial 0. */
+  draws: number;
   rating: number;
   unallocatedPoints: number;
   fightHistory: string[];
@@ -172,6 +203,20 @@ export interface FightState {
   spectators: Set<string>;
   turnActions: Map<string, TurnAction>;
   turnTimer?: ReturnType<typeof setTimeout>;
+  /** Absolute Date.now() ms when the current turn expires. Sent to clients
+   *  via `turn_start` so they can compute the countdown locally. Updated
+   *  on `timer_resumed` so the client UI re-syncs after a pause. */
+  turnDeadline?: number;
+  /** True while the turn timer is paused due to one or both players being
+   *  in the reconnect-grace window. While paused, the server-side
+   *  setTimeout is cleared and `turnPausedRemainingMs` is the duration
+   *  the timer will resume with. */
+  turnPaused?: boolean;
+  turnPausedRemainingMs?: number;
+  /** Wallets currently disconnected and inside the reconnect-grace
+   *  window. The Set is the primary source of truth for "should the turn
+   *  timer be paused" — non-empty means paused. */
+  disconnectedWallets: Set<string>;
   startedAt: number;
   finishedAt?: number;
 }
@@ -230,7 +275,14 @@ export interface LeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
+  /** v5.1 — mutual-KO outcome counter mirrored from chain Character.draws. */
+  draws: number;
   level: number;
+  /** Bucket 3 Hall of Fame — used by the frontend's build classifier
+   *  (Crit / Evasion / Tank / Hybrid). Optional so the wire stays
+   *  backward-compat with any older client; the classifier returns
+   *  'hybrid' when stats are missing. */
+  stats?: CharacterStats;
 }
 
 // === Fight History ===
