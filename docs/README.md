@@ -34,6 +34,7 @@ guidance.
 | [`V5_QA_AUDIT_AND_V5.1_SCOPE_2026-05-28.md`](V5_QA_AUDIT_AND_V5.1_SCOPE_2026-05-28.md) | **Primary v5.1 spec source.** Audit of v5.0 gaps + v5.1 scope decisions. Read this before touching the v5.1 contracts. |
 | [`V5.1_RELEASE_NOTES_2026-05-28.md`](V5.1_RELEASE_NOTES_2026-05-28.md) | v5.1 release notes — cut-over protocol, what changed, deployment IDs. |
 | [`V5.1_TWO_HANDED_FLOW.md`](V5.1_TWO_HANDED_FLOW.md) | End-to-end two-handed weapon flow (chain `slot_type` → server → frontend layers → educational modal). Closes the deleted `TWO_HANDED_NAMES` allowlist; pinned by 5 QA gauntlets. |
+| [`V5.2_WAGER_FAIRNESS_SPEC.md`](V5.2_WAGER_FAIRNESS_SPEC.md) | **v5.2 spec + the Move contract has been BUILT** (2026-05-29 EOD). Contract-only redesign of `accept_wager`: ±1 level bracket + creator-approval handshake via new `STATUS_PENDING_APPROVAL` state, abort codes 12-17. Fresh `sui client publish` scheduled for 2026-05-30. |
 
 ## Archive (`docs/archive/`)
 

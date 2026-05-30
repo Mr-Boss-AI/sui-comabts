@@ -1,26 +1,132 @@
-# Session Handoff — 2026-05-29 (EOD, final)
+# Session Handoff — 2026-05-29 (EOD, final — v5.1 QA gauntlet COMPLETE; v5.2 wager-fairness contract BUILT, awaits deploy)
 
 > **Single-page entry point for the next session.**
-> Branch `feature/v5.1-contracts` at HEAD `57027bd` on origin (pushed
-> 2026-05-29 EOD with explicit user authorization). Mainline `main`
+> Branch `feature/v5.1-contracts` at HEAD `534e4f4` on origin (pushed
+> 2026-05-29 with explicit user authorization). Mainline `main`
 > UNTOUCHED at `08ff991` (v4-era) per standing rule.
 > This handoff supersedes
 > [`docs/archive/SESSION_HANDOFF_2026-05-28.md`](docs/archive/SESSION_HANDOFF_2026-05-28.md)
 > as the live entry point.
+>
+> **TL;DR for tomorrow:** v5.1 testnet gauntlet is **COMPLETE** —
+> combat, gear effects, wager full cycle, mutual-KO draw, allocate,
+> two-handed system, Market/Kiosk 12-point gauntlet, Tavern, Hall of
+> Fame W/L/D, all live-verified two-wallet on-chain. v5.2 wager-
+> fairness contract is **BUILT but NOT deployed** — tomorrow is
+> deploy + re-test + polish + public-testnet launch prep.
 
 ---
 
 ## ✅ COMMITTED & PUSHED THIS SESSION
 
-Two commits landed on `feature/v5.1-contracts` and are now on origin.
-**Both** were live-verified in browser by the user before push.
+Three commits on origin `feature/v5.1-contracts`. All live-verified.
 
 | Commit | What it ships |
 |---|---|
-| **`b606a97`** *(AM — fix: draw modal, scout sanitizer, wager-card scouting)* | The three working-tree fixes that the 2026-05-28 EOD handoff flagged as uncommitted: server scout-modal sanitizer + 13-slot fix, arena wager-card clickable scouting, mutual-KO draw modal + sound. |
-| **`57027bd`** *(PM — feat: complete two-handed weapon system)* | The complete two-handed-weapon epic. See [next section](#two-handed-weapon-system--complete) for the full breakdown. |
+| **`b606a97`** *(AM — fix: draw modal, scout sanitizer, wager-card scouting)* | Server scout-modal sanitizer + 13-slot fix, arena wager-card clickable scouting, mutual-KO draw modal + sound. Closed three working-tree items flagged by 2026-05-28 EOD. |
+| **`57027bd`** *(PM — feat: complete two-handed weapon system)* | The complete two-handed-weapon epic. See [§ Two-handed weapon system](#two-handed-weapon-system--complete) for the full breakdown. |
+| **`534e4f4`** *(EOD — docs: refresh handoffs, archive prior sessions, add docs index)* | Rolling EOD doc reorg. Moved 9 superseded docs to `docs/archive/`; added `docs/README.md` curated index; refreshed CLAUDE.md GitNexus block from `npx gitnexus analyze`. |
 
-`main` stays at `08ff991`. No merge to `main` until v5.2 + external audit.
+`main` stays at `08ff991`. **Merge decision flagged for tomorrow** —
+see [§ Decision point](#decision-point--v51--main-merge-timing).
+
+---
+
+## 📝 POST-PUSH UNCOMMITTED (working tree, ready to bundle into next commit)
+
+Two pieces landed after the EOD push, both live-verified or
+spec-only:
+
+| Item | Files | Status |
+|---|---|---|
+| **Hall of Fame W/L/D counter** — `draws: u32` plumbed end-to-end | 8 server files + 8 frontend files + `scripts/qa-hall-of-fame.ts` | ✅ tsc clean both sides · 198/198 gauntlet pass (+8 new assertions for the draws-excluded win% convention) · server restarted, live-ready on the next browser hard-refresh |
+| **v5.2 wager-fairness spec** | `docs/V5.2_WAGER_FAIRNESS_SPEC.md` + one-line entries in `MAINNET_PREP.md` + `STATE_OF_PROJECT_2026-05-29.md` + `docs/README.md` | 📄 design doc only — the contract itself has now also been built by CLI (see [§ v5.2 contract BUILT](#-v52-wager-fairness-contract--built-awaits-deploy)) but is not yet deployed |
+
+`AGENTS.md` and `CLAUDE.md` were also modified by automated processes
+(GitNexus post-commit hook + a pre-existing edit) — fold those into
+the next commit as a chore.
+
+Next-session commit should bundle the W/L/D counter (the real shippable
+chunk) under a clean `feat(v5.1): W/L/D counter end-to-end` message
+before the v5.2 deploy.
+
+---
+
+## ✅ v5.1 QA gauntlet — COMPLETE
+
+Every flagship surface live-verified two-wallet (Mr_Boss on Slush,
+Sx on zkLogin/Google) against the deployed v5.1 package
+`0x308645f3…3717`. Suiscan-confirmed where on-chain.
+
+| Surface | Status | Notes |
+|---|---|---|
+| Combat + gear effects on outcome | ✅ | Tank vs Crit verified — armor/defense soak ↔ crit multiplier propagate to fight outcome. Damage rolls + offhand bonuses applied correctly. |
+| Wager full cycle | ✅ | create → accept → escrow lock → settle → 95/5 payout (winner / TREASURY). On-chain. |
+| Mutual-KO draw | ✅ | Chain `settle_tie` ticks `Character.draws: u32` on both sides AND refunds both stakes (no platform fee on draws). Frontend DRAW modal + parchment-neutral styling. Suiscan-confirmed. |
+| `allocate_points` (the v4-killer) | ✅ | Verified on BOTH signing paths — Slush native + zkLogin gasless. Mr_Boss (STR 9 / END 8) and Sx (INT 11) both confirmed. |
+| Two-handed weapon system — every layer | ✅ | `slot_type` plumbed chain → frontend; `TWO_HANDED_NAMES` allowlist deleted; abort humanizer at all call sites; inverse picker excludes off-hand for 2H; `buildSaveLoadoutTx` auto-clear + cross-slot unequip-before-equip ordering; educational popup fires only on wrong-order (`classifyStageEquip`); off-hand SlotTile locks visually when 2H equipped. Full flow doc in [`docs/V5.1_TWO_HANDED_FLOW.md`](docs/V5.1_TWO_HANDED_FLOW.md). |
+| Market / Kiosk 12-point gauntlet | ✅ | list / buy / cancel / royalty / withdraw / cross-wallet purchase / own-listing-hidden / empty-state / race-condition-safe / insufficient-funds-guard — all on-chain. 23 active listings (52 minted, ~29 sold across sessions; not a bug). |
+| Tavern — chat + DMs + presence | ✅ | Global chat, direct messages, online-presence indicator, unread-message notifications. Plaintext WS + Supabase transport (encrypted SDK path preserved behind `NEXT_PUBLIC_DM_TRANSPORT=encrypted`). |
+| Hall of Fame ELO ladder + W/L/D counter | ✅ | Ladder shows W / L / D from chain `draws: u32` via the existing wire-sanitize hydrator. Win% follows the documented "draws excluded from denominator" convention (MMO/PvP standard; chess-style half-draw rejected). Pinned by 8 new test assertions. |
+
+### Test suite — totals across all frontend gauntlets
+
+```
+qa-hall-of-fame.ts                    198 / 198 PASS  (+8 new W/L/D assertions)
+qa-equip-picker.ts                     87 /  87 PASS
+qa-arena-aborts.ts                     41 /  41 PASS
+qa-equipment-aborts.ts                 19 /  19 PASS
+qa-two-handed-loadout.ts               19 /  19 PASS
+qa-slot-type.ts                        11 /  11 PASS
+qa-two-handed-stage-classifier.ts      10 /  10 PASS
+qa-combat-stats.ts                     79 /  79 PASS
+qa-marketplace.ts                      63 /  63 PASS
+... and ~13 other gauntlets unchanged
+```
+
+Move unit tests: **71 / 71 PASS** unchanged. `tsc --noEmit` clean both
+sides.
+
+---
+
+## 🛠️ v5.2 wager-fairness contract — BUILT, awaits deploy
+
+The full contract redesign from
+[`docs/V5.2_WAGER_FAIRNESS_SPEC.md`](docs/V5.2_WAGER_FAIRNESS_SPEC.md)
+has been **implemented in Move via CLI** (user-driven, this session)
+and is ready to deploy as a fresh `sui client publish` tomorrow. The
+shape that landed:
+
+- **±1 level bracket** enforced on `request_accept_wager`. Snapshot
+  of creator's level taken at `create_wager` time (so a creator who
+  levels up while WAITING doesn't lock out their original bracket).
+- **Creator-approval handshake** via new `STATUS_PENDING_APPROVAL`
+  state:
+  - `request_accept_wager` — challenger locks stake in dedicated
+    `challenger_escrow` field, status → PENDING_APPROVAL
+  - `approve_challenger` — creator approves, `challenger_escrow`
+    merges into main `escrow`, fight starts
+  - `decline_challenger` — creator rejects, challenger stake refunded
+  - `withdraw_challenge` — **challenger** can self-rescind at any
+    time during PENDING_APPROVAL (the lever that makes
+    "lock-on-request" strictly stronger than "lock-on-approval" —
+    challenger never has to wait on creator to recover funds)
+  - `cancel_expired_challenge` — anyone can call after
+    `CHALLENGE_TIMEOUT_MS = 5 min` for permissionless cleanup
+- **New error constants 12-17**: `ELevelOutOfBracket`,
+  `ENotPendingApproval`, `EChallengerSlotTaken`,
+  `ENotCreatorForApproval`, `ENotPendingChallenger`,
+  `EChallengeNotExpired`.
+- **New WagerMatch fields**: `player_a_level: u8`,
+  `challenger_escrow: Balance<SUI>`, `pending_challenger:
+  Option<address>`, `pending_at: u64`.
+- **`accept_wager` removed** — replaced by the two-step
+  request + approve flow.
+
+**Status: NOT YET DEPLOYED.** Cannot patch v5.1 in place (the
+`WagerMatch` struct shape change is not backward-compatible for
+upgrade). Tomorrow's first action is the fresh publish + the env-var
++ frontend/server PTB-target update.
 
 ---
 
@@ -286,52 +392,171 @@ remainder. NOT a bug — exactly matches the chain `kioskListed` set.
 
 ---
 
-## Next-session opener
+## 🐛 Known minor cosmetic issues (carry-forward to v5.2)
+
+Not blocking the v5.2 deploy. Bundle into a polish pass before or
+during public-testnet launch.
+
+| Item | Severity | Notes |
+|---|---|---|
+| Stale opponent-gear display during a fight | cosmetic | The fight arena shows the opponent's gear from the moment the fight started; if the opponent re-equipped mid-fight (rare — fight-lock prevents on-chain equip, but a UI race can show stale icons). **Combat resolution is unaffected** — the server resolves against locked stats. |
+| "Item no longer available" toast for marketplace race-loss | cosmetic | When two buyers race for the last copy of an item, the loser sees a generic abort instead of a friendly "snapped up just before you" toast. Buyer's SUI is safe — chain refuses the buy atomically. Wire up a specific marketplace abort-code → friendly string mapping (mirror of the equipment/arena abort-humanizer pattern). |
+
+---
+
+## 🚦 Decision point — v5.1 → main merge timing
+
+The [`docs/V5.2_WAGER_FAIRNESS_SPEC.md`](docs/V5.2_WAGER_FAIRNESS_SPEC.md)
+"Dependencies" section recommends merging v5.1 to `main` BEFORE
+cutting v5.2 — so the v5.2 audit scope is unambiguous ("diff vs
+`main`"). Two paths tomorrow, both legitimate; flagging for explicit
+user decision:
+
+| Path | Pros | Cons |
+|---|---|---|
+| **A — Merge v5.1 → main first, then deploy v5.2 from a fresh branch off main** | v5.2 is a clean milestone; audit scope is unambiguous; v5.1 testnet record is the merged history; matches the spec recommendation | Adds one extra PR + sync step before tomorrow's main goal (deploy + test v5.2) |
+| **B — Deploy v5.2 from `feature/v5.1-contracts`, merge v5.1+v5.2 to main together once both are tested** | Faster to tomorrow's deploy; v5.1 + v5.2 land in `main` as one polished step | v5.2 audit branch is "diff vs feature/v5.1-contracts", which auditors don't see as canonical; risks dragging v5.1 testnet artifacts into the v5.2 audit window |
+
+**Recommendation: A.** It's only one extra step, and the audit cost
+of B is non-trivial. But the call is yours — confirm tomorrow before
+the v5.2 publish goes out.
+
+---
+
+## Next-session opener (2026-05-30 — v5.2 DEPLOY + TEST + PUBLIC-TESTNET PREP)
 
 ```
-Welcome back to SUI Combats. v5.1 testnet still live, branch
-feature/v5.1-contracts @ origin 57027bd (pushed 2026-05-29 EOD).
-Working tree clean except pre-existing untracked items (.obsidian/,
-nft asset dirs, mint scripts, .env backup). main untouched at
-08ff991. No new commit needed to start — pick up testing.
+Welcome back to SUI Combats. v5.1 testnet QA gauntlet is COMPLETE
+(SESSION_HANDOFF_2026-05-29.md §"v5.1 QA gauntlet — COMPLETE").
+v5.2 wager-fairness contract is BUILT (per
+docs/V5.2_WAGER_FAIRNESS_SPEC.md) but NOT yet deployed.
 
-Two-handed weapon system is COMPLETE and live-verified. The last v5.1
-chain rule is closed; all 5 gauntlets green (146/146). The Market/
-Kiosk 12-point gauntlet PASSED. allocate_points verified on both
-signing paths. Mutual-KO settle_tie chain-verified end-to-end.
+Branch feature/v5.1-contracts @ origin 534e4f4 (pushed 2026-05-29).
+Working tree has the W/L/D counter (live-verified, uncommitted) +
+the v5.2 spec. main UNTOUCHED at 08ff991.
 
-Bring runtime up:
-  cd server && npm run dev    # :3001 (ts-node, no watcher)
-  cd frontend && npm run dev  # :3000 (Next 16 Turbopack)
+═══════════════════════════════════════════════════════════════
+STEP 0 — Decide v5.1 → main merge timing.
+═══════════════════════════════════════════════════════════════
+  See "Decision point" section in SESSION_HANDOFF_2026-05-29.md.
+  Recommendation: merge v5.1 to main first (path A), then cut v5.2.
+  If choosing path B, deploy v5.2 from feature/v5.1-contracts and
+  merge both together post-test.
 
-Suggested next focus — pick whichever serves the v5.2 prep best:
+═══════════════════════════════════════════════════════════════
+STEP 1 — Commit the W/L/D counter + chore bumps before the deploy.
+═══════════════════════════════════════════════════════════════
+  feat(v5.1): W/L/D counter end-to-end — chain draws → ladder + profile + scout
+    + the AGENTS.md / CLAUDE.md chore changes
+  Tsc clean both sides. Gauntlets green (198/198 hall-of-fame).
 
-STEP 1 — Combat with more weapon variety
-    Walk a friendly/wager fight per weapon class (1H + shield,
-    dual-wield, 2H). Confirm damage rolls + offhand bonuses propagate.
-    Catch any resolver edge cases under the new slot_type-aware loadouts.
+═══════════════════════════════════════════════════════════════
+STEP 2 — Deploy v5.2 contract to testnet (FRESH publish, not upgrade).
+═══════════════════════════════════════════════════════════════
+  cd contracts
+  sui client publish --gas-budget 1000000000
+  Capture: package id, AdminCap, UpgradeCap, Publisher, registries,
+  Display objects, TransferPolicy<Item>, transferPolicyCap, kiosk +
+  KioskOwnerCap. Mirror the 2026-05-28 v5.1 cut-over protocol.
+  Treasury wallet stays the same.
 
-STEP 2 — Lv2 Scavenger Uncommon combat
-    Both wallets are Lv2 with full Uncommon access. Verify combat
-    math with budget≤40 stat-budget items: damage scaling, evasion
-    rolls, the rarity-budget invariant in practice.
+═══════════════════════════════════════════════════════════════
+STEP 3 — Update package ID references end-to-end.
+═══════════════════════════════════════════════════════════════
+  server/.env             SUI_PACKAGE_ID + all registry / display IDs
+  frontend/.env.local     NEXT_PUBLIC_SUI_PACKAGE_ID + registry / display
+  deployment.testnet-v5.2.json (new file, mirror v5.1 file format)
+  CLAUDE.md "v5.1 testnet" block → bump to v5.2 (preserve archive
+    of the v5.1 IDs in MAINNET_PREP.md superseded-list pattern)
+  Restart server + frontend; verify health.
 
-STEP 3 — Full 13-slot save_loadout single-PTB walk
-    Stage 13 dirty slots in one save. Confirm the PTB ordering rule
-    (unequips-before-equips) holds at full width. Useful gas-budget
-    check too — SAVE_LOADOUT_GAS_BUDGET = 200M MIST.
+═══════════════════════════════════════════════════════════════
+STEP 4 — Re-test the wager flow with the v5.2 rules.
+═══════════════════════════════════════════════════════════════
+  4a) ±1 LEVEL BRACKET — happy path
+        Mr_Boss Lv4 creates wager → Sx Lv4 (or Lv3 or Lv5) requests
+        accept → creator approves → fight runs to settle. Verify
+        approve_challenger ticks status → ACTIVE and merges escrows.
+  4b) ±1 LEVEL BRACKET — block path
+        Mr_Boss Lv4 creates wager → Sx becomes Lv6 (drop XP via
+        admin if needed) and tries to request_accept → chain MUST
+        abort ELevelOutOfBracket (code 12). Frontend should pre-empt.
+  4c) APPROVAL HANDSHAKE — happy
+        Request → creator scouts challenger via the wager-card
+        scout modal (shipped this session) → approves → fight starts.
+  4d) APPROVAL HANDSHAKE — decline
+        Request → creator declines → challenger's stake refunded;
+        status → WAITING; verify WagerDeclined / ChallengeDeclined
+        event emitted; another challenger can request.
+  4e) CHALLENGER WITHDRAW
+        Request → challenger withdraws within 5 min → stake refunded
+        WITHOUT creator action; status → WAITING.
+  4f) CHALLENGE EXPIRY
+        Request → wait 5 min → anyone calls cancel_expired_challenge
+        → refund; status → WAITING. (Server cron should automate.)
+  4g) ADMIN cancel during PENDING_APPROVAL
+        TREASURY admin_cancel_wager refunds both stakes correctly.
 
-STEP 4 — v5.2 scope kick-off
-    Open the v5.2 backlog (see STATE_OF_PROJECT_2026-05-29.md
-    "v5.2 backlog status delta"). sui::random, respec,
-    settle_wager_attested are the main contract-side items.
+═══════════════════════════════════════════════════════════════
+STEP 5 — Regression: confirm v5.1-shipped surfaces still work on v5.2.
+═══════════════════════════════════════════════════════════════
+  Combat resolution, gear effects, market/kiosk full gauntlet,
+  equipment system (two-handed system end-to-end), mutual-KO draw,
+  allocate_points (both signing paths), Tavern, Hall of Fame W/L/D,
+  scout modal. None of these were changed by the v5.2 publish —
+  they're the smoke test.
+
+═══════════════════════════════════════════════════════════════
+STEP 6 — Polish pass to mainnet-ready standard.
+═══════════════════════════════════════════════════════════════
+  - Address known minor cosmetic issues (see §"Known minor issues"
+    above): stale opponent-gear display in fight; marketplace
+    "no longer available" toast.
+  - Marketplace abort-humanizer module (mirror equipment-aborts.ts).
+  - Frontend arena-aborts.ts add codes 12–17 from v5.2.
+  - Server's wager event indexer + OrphanWager reconciler handle
+    new ChallengeRequested / ChallengeDeclined / ChallengeWithdrawn /
+    ChallengeExpired events.
+
+═══════════════════════════════════════════════════════════════
+STEP 7 — Prep for hosted PUBLIC TESTNET launch.
+═══════════════════════════════════════════════════════════════
+  Goal: put it in front of real players to surface bugs solo testing
+  can't. Outline (decide tomorrow what's in scope vs deferred):
+
+  a) Hosting & deployment
+     - Frontend: Vercel (NEXT_PUBLIC_* already shaped right);
+       confirm the build runs against testnet RPC + the new v5.2
+       package id from a clean clone.
+     - Backend: a small VM or Fly.io / Render container for the
+       Express/WS server. Persistent process; restart-on-crash.
+     - DB: Supabase project provisioned (still in-memory only today
+       — see MAINNET_PREP.md §"Block 2 end-to-end validation").
+  b) Known-issues + how-to-report list
+     - Public-facing markdown listing known limitations (server is
+       still TREASURY-signed for settlement until v5.2's
+       settle_wager_attested ships; mutual-KO and two-handed
+       systems just hardened; etc.).
+     - Feedback channel: GitHub Issues template, or a Discord/X form.
+  c) Telemetry minimum
+     - At minimum: server-side logging of WS-level errors, MoveAbort
+       codes by category, latency on the gRPC stream. Currently
+       there's basic console — needs a structured sink (a flat-file
+       on disk is enough for a public-testnet round).
+  d) Rate-limits / guardrails
+     - MAX_WAGER_SUI_MIST cap is already enforced server-side; check
+       it's still right for the new public audience.
+     - WS Zod validation + rate-limiter middleware is still v5.2
+       backlog — surface as a launch-blocker or accept it (testnet
+       SUI is free; abuse impact is bounded).
 
 Live wallets:
   Mr_Boss (Slush)   0x06d6cb677518cc70884df24541d91d7a1d2ca5db2d8628a69568172652239624
   Sx     (zkLogin)  0x03c33df0c97d4dfb3792d340bbf83891e2a20d653155874fd37a350ad443985f
 TREASURY            0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d
 
-Live build has RING_3, not pauldrons. Don't merge to main.
+Live build (v5.1) has RING_3, not pauldrons. v5.2 publish keeps the
+13-slot loadout shape; only WagerMatch + arena entry points change.
 ```
 
 ---
