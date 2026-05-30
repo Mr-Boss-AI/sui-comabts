@@ -1,24 +1,38 @@
 /**
  * Effective unallocated stat-points for the allocate UI.
  *
- * Why this exists: the server's `applyXp` optimistically increments
- * `character.unallocatedPoints` the instant a fight ends, but the on-chain
- * `update_after_fight` (which actually grants the points to the Character
- * NFT) runs through the treasury queue and lands ~5–25 s later (after
- * `settle_wager` + opponent's `update_after_fight` + retries). That window
- * is wide enough for a player to open the allocate modal, see "+3 points
- * to allocate", click Allocate, and watch Slush dry-run against the
- * still-old chain object — which aborts with `ENotEnoughPoints` (code 2)
- * because chain `unallocated_points` is still 0.
+ * The chain `allocate_points` Move call asserts
+ * `total <= character.unallocated_points` — the on-chain Character is
+ * the authoritative gate. The UI's "available" count therefore takes
+ * the chain value when present, falling back to the server-side mirror
+ * only when chain hasn't been hydrated for this session.
  *
- * Reproduced live 2026-05-02: Sx_v5.1 hit abort code 2 trying to spend
- * 3 points the server had granted but chain hadn't received yet.
+ * History — TWO races this helper must handle correctly:
  *
- * Fix: clamp the UI's "available" to `min(server, chain)`. Chain is the
- * contract's source of truth for `allocate_points`; offering the user
- * more than chain has lets them stage a doomed transaction. Once
- * `update_after_fight` lands, server and chain agree, and the floor
- * stops mattering.
+ *  Race A (original v5.1, 2026-05-02 live test): server-side `applyXp`
+ *  optimistically increments `character.unallocatedPoints` the instant a
+ *  fight ends, but the on-chain `update_after_fight` runs through the
+ *  treasury queue and lands ~5–25 s later. Pre-helper UX: a user could
+ *  open the modal mid-window, click Allocate, watch the wallet dry-run
+ *  abort with `ENotEnoughPoints (2)` because the chain still has 0.
+ *  Pre-2026-05-30 fix: `min(server, chain)`. New fix: same outcome —
+ *  taking chain directly returns 0 in this race, equally safe.
+ *
+ *  Race B (v5.2, 2026-05-30 live QA): the SYMMETRIC case — the chain
+ *  update lands and the server's in-memory `unallocatedPoints` is
+ *  synced (fight-room.ts:688), but the server only emits
+ *  `character_updated_onchain` (a chain-refetch trigger) — not a fresh
+ *  `character_data`. The frontend's `state.character.unallocatedPoints`
+ *  therefore stays at 0 while `state.onChainCharacter.unallocatedPoints`
+ *  refetches to 3. Pre-fix `min(0, 3) = 0` made the modal show
+ *  "Remaining: 0" and refuse to allocate, even though the chain WOULD
+ *  accept up to 3. Post-fix: trust chain → 3 → modal shows 3 → wallet
+ *  popup → chain accepts → done.
+ *
+ * Race B is independently addressed in fight-room.ts by pushing a fresh
+ * `character_data` after the chain update lands — but THIS helper
+ * remains the canonical defence (the WS push could still race the modal
+ * open if the user is fast on the click; chain is always-correct).
  *
  * Pure function so the qa gauntlet can pin every edge case.
  */
@@ -26,14 +40,15 @@ export function effectiveUnallocatedPoints(
   serverPoints: number | undefined | null,
   chainPoints: number | undefined | null,
 ): number {
-  const s = sanitize(serverPoints);
   // No chain data yet (the on-chain Character NFT hasn't been hydrated for
   // this session — e.g. RPC down at boot). Fall back to the server value.
   // The wallet popup will fail anyway on missing characterObjectId before
   // it gets near the dry-run, so we don't risk a doomed tx here.
-  if (chainPoints == null) return s;
-  const c = sanitize(chainPoints);
-  return Math.min(s, c);
+  if (chainPoints == null) return sanitize(serverPoints);
+  // Chain is the binding gate for allocate_points — trust it directly.
+  // Handles both Race A (chain==0, server==3 → return 0, safe) and
+  // Race B (chain==3, server==0 → return 3, correct).
+  return sanitize(chainPoints);
 }
 
 function sanitize(value: number | undefined | null): number {

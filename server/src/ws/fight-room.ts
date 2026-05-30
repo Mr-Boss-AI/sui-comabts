@@ -3,6 +3,7 @@ import { CONFIG, GAME_CONSTANTS } from '../config';
 import { settleWagerOnChain } from '../utils/sui-settle';
 import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain, settleTieOnChain, updateCharacterDrawOnChain, adminCancelWagerOnChain } from '../utils/sui-settle';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
+import { sanitizeCharacter } from '../utils/wire-sanitize';
 import {
   applyXp,
   checkFightEnd,
@@ -688,6 +689,19 @@ function finishFight(
             winnerCharRef.unallocatedPoints = effects.newUnallocatedPoints;
           }
           updateCharacter(winnerCharRef);
+          // v5.2 (2026-05-30) — push a fresh `character_data` to the
+          // winner BEFORE the chain-refetch trigger. The server's
+          // in-memory `winnerCharRef` now mirrors chain truth (xp,
+          // rating, wins, losses, level, unallocatedPoints all just
+          // synced from `effects`). Without this push the frontend's
+          // `state.character.unallocatedPoints` stays at 0 until the
+          // next `get_character` request — which means the
+          // StatAllocateModal would render with the stale 0 even
+          // though chain has the points.
+          sendToWallet(winnerCharRef.walletAddress, {
+            type: 'character_data',
+            character: sanitizeCharacter(winnerCharRef),
+          });
           sendToWallet(winnerCharRef.walletAddress, { type: 'character_updated_onchain' });
           if (effects.leveledUp) {
             const levelsGained = effects.newLevel - winnerLevelBefore;
@@ -723,6 +737,11 @@ function finishFight(
             loserCharRef.unallocatedPoints = effects.newUnallocatedPoints;
           }
           updateCharacter(loserCharRef);
+          // v5.2 (2026-05-30) — fresh character_data push, see winner branch.
+          sendToWallet(loserCharRef.walletAddress, {
+            type: 'character_data',
+            character: sanitizeCharacter(loserCharRef),
+          });
           sendToWallet(loserCharRef.walletAddress, { type: 'character_updated_onchain' });
           if (effects.leveledUp) {
             const levelsGained = effects.newLevel - loserLevelBefore;

@@ -53,7 +53,7 @@ import { getWagerStatus, getWagerAcceptedAt, adminCancelWagerOnChain, findCharac
 import { decideAcceptOutcome, resolveChallengerWallet } from './wager-accept-gate';
 import { evaluateServerBusy } from './busy-state';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
-import { sanitizeEquipment } from '../utils/wire-sanitize';
+import { sanitizeEquipment, sanitizeCharacter } from '../utils/wire-sanitize';
 import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
   createFight,
@@ -2022,41 +2022,10 @@ function handleAllocatePoints(client: ConnectedClient, msg: ClientMessage): void
 // via ws/tavern-handlers.ts). The 13-slot guarantee — every wire payload
 // carries exactly the v5.1 slot keys — also lives there.
 
-function sanitizeCharacter(character: any): Record<string, any> {
-  const unallocatedPoints = character.unallocatedPoints || 0;
-  if (unallocatedPoints > 0) {
-    console.log(`[Character] Sending ${character.name} with ${unallocatedPoints} unallocated points`);
-  }
-  return {
-    id: character.id,
-    name: character.name,
-    level: character.level,
-    xp: character.xp,
-    walletAddress: character.walletAddress,
-    // BUG E fix (2026-05-02 retest #2): expose the server-pinned canonical
-    // chain Character NFT id so the frontend reads chain truth from the
-    // SAME object the server is using. Without this, wallets that have
-    // multiple CharacterCreated events on chain (mr_boss has 3:
-    // Mr_Boss_v5, Mr_Boss_v5.1, "mee") would have the frontend's
-    // `fetchCharacterNFT` descending-scan return the NEWEST event ("mee")
-    // while the server pins the canonical Mr_Boss_v5.1 — producing a
-    // permanent server/chain disagreement (clamp showed 0 unallocated
-    // because "mee" has 0, even though Mr_Boss_v5.1 had 6).
-    onChainObjectId: character.onChainObjectId ?? null,
-    stats: {
-      strength: character.stats.strength,
-      dexterity: character.stats.dexterity,
-      intuition: character.stats.intuition,
-      endurance: character.stats.endurance,
-    },
-    unallocatedPoints,
-    equipment: sanitizeEquipment(character.equipment),
-    wins: character.wins,
-    losses: character.losses,
-    draws: character.draws,
-    rating: character.rating,
-  };
-}
+// sanitizeCharacter moved to utils/wire-sanitize.ts (2026-05-30) so
+// fight-room.ts can push a fresh `character_data` after post-fight
+// chain updates without re-importing handler.ts (would close the cycle
+// handler.ts → fight-room.ts → handler.ts). Behaviour 1-for-1 the same.
 
 // === Exports ===
 

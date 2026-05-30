@@ -74,6 +74,12 @@ app.get('/api/character/:walletAddress', (req, res) => {
       wins: character.wins,
       losses: character.losses,
       draws: character.draws,
+      // v5.2 (2026-05-30) — the field was missing from this serializer,
+      // surfaced in the post-level-up stat-allocate bug live-QA. Aligns
+      // this REST response with sanitizeCharacter (handler.ts:2025) so
+      // any caller of /api/character (admin tools, scripts) sees the
+      // same shape as the WS `character_data` payload.
+      unallocatedPoints: character.unallocatedPoints,
       rating: character.rating,
     },
   });
