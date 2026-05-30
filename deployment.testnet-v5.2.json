@@ -1,0 +1,208 @@
+{
+  "version": "5.2.0-wager-fairness",
+  "network": "testnet",
+  "chainId": "4c78adac",
+  "publishedAt": "2026-05-30",
+  "publishDigest": "DydwCsLiaAU8j5JoPJwbQLNiK5cwnHThSMN4ULJxrM14",
+  "packageId": "0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f",
+
+  "source": {
+    "commit": "406c5c8",
+    "branch": "feature/v5.2-wager-fairness",
+    "_note": "All v5.2 source frozen at this commit. Move suite 105/105 PASS pre-publish."
+  },
+
+  "supersedes": [
+    {
+      "packageId": "0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717",
+      "version": "5.1.0-13slot-ring3",
+      "deployJson": "deployment.testnet-v5.1.json",
+      "reason": "v5.2 wager-fairness rewrite. WagerMatch struct shape changed — added 4 fields (player_a_level, challenger_escrow, pending_challenger, pending_at). accept_wager replaced with the full handshake (request_accept_wager + approve_challenger + decline_challenger + withdraw_challenge + cancel_expired_challenge). New STATUS_PENDING_APPROVAL state. Abort codes 12-23 added. reclaim_stalled_wager participant escape hatch closes the centralized-referee single-point-of-failure. Struct field additions are not backward-compatible upgrades on Sui — fresh package id required, not an UpgradeCap-driven upgrade."
+    }
+  ],
+
+  "shared": {
+    "characterRegistry": "0x84c78a861f3ee2d2299fec507640605c71e313bfbea340bd490a19a04d8492ff",
+    "openWagerRegistry": "0xabf10378c0b8a65f883098440cfcb68809f14f66fcdb1278106dbd88bf086e16",
+    "kioskRegistry": "0xbc5f55674711b69ea830603d715853f50e40028702be9e837aaf8afd50bc3efe"
+  },
+
+  "caps": {
+    "adminCap": "0x41475565a81cf769948ea1268d850fc144c7e995d91017d4115730dc5d617c44",
+    "upgradeCap": "0xdb6d2be80538cc43a2b9aed8299a3e97f4804bba07f656c42baf604ca4a36212",
+    "publisher": "0x4010478364ea545645200d43c6080c5f48218b45bbbc9b82d9a4748aece2bd9e"
+  },
+
+  "transferPolicy": {
+    "_status": "PENDING — TransferPolicy<Item> not yet created by the publish itself. Requires separate PTB using the Publisher cap to (a) create the policy, (b) add the royalty rule via royalty_rule::add_to_policy, and (c) transfer the resulting TransferPolicyCap to TREASURY. v5.1 had this at 0x0483cd85…13f69f; v5.2 needs its own because TransferPolicy is typed by the new package's Item type.",
+    "_v51_reference": {
+      "transferPolicy": "0x0483cd855318921a330ff2d8967fb925382d76c7360a29a5d2bbf676bd13f69f",
+      "transferPolicyCap": "0xee5a808c9aa22daf8c57420fa06e9ae0073b0d6a22e55a8be7c84da3f6ed31c8"
+    }
+  },
+
+  "display": {
+    "_status": "PENDING — Display<Character> and Display<Item> not yet created. Requires separate PTBs using the Publisher cap. v5.1 had these at 0x94a85532…fc0885 (character) and 0x32bdda84…a5aa658 (item).",
+    "_v51_reference": {
+      "character": "0x94a855326a01a91e247a8062d9c475eddf5770829f52d7dbfceef535a5fc0885",
+      "item": "0x32bdda84dd589ed21e804171b924cc5b3676f97b35b55dff2d064d035a5aa658"
+    }
+  },
+
+  "treasury": "0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d",
+
+  "modules": [
+    "arena",
+    "character",
+    "equipment",
+    "item",
+    "marketplace",
+    "royalty_rule"
+  ],
+
+  "gas": {
+    "computationCostMist": 1680000,
+    "storageCostMist": 184953600,
+    "storageRebateMist": 978120,
+    "nonRefundableStorageFeeMist": 9880,
+    "netCostMist": 185655480,
+    "netCostSui": 0.18565548,
+    "treasuryBalanceBeforeSui": 2.35,
+    "treasuryBalanceAfterSui": 2.17,
+    "gasObjectId": "0x75914b66cebc3094cbe5e6039514153897892700241f7b18b8a31d423fdddea1"
+  },
+
+  "v5_2_scope": {
+    "summary": "Wager fairness ONLY — level bracket + creator approval + referee-liveness escape hatch. Scope locked by 2026-05-30 user direction; bundling decision (settle_wager_attested / sui::random / respec_character) deferred to v5.2.x or v5.3 publish.",
+    "wagerMatch_newFields": [
+      "player_a_level: u8 — snapshot at create_wager",
+      "challenger_escrow: Balance<SUI> — empty outside PENDING_APPROVAL",
+      "pending_challenger: Option<address>",
+      "pending_at: u64"
+    ],
+    "newStatus": "STATUS_PENDING_APPROVAL = 3",
+    "newFunctions": [
+      "request_accept_wager (REPLACES accept_wager)",
+      "approve_challenger",
+      "decline_challenger",
+      "withdraw_challenge",
+      "cancel_expired_challenge",
+      "reclaim_stalled_wager"
+    ],
+    "removedFunctions": ["accept_wager"],
+    "newEvents": [
+      "ChallengeRequested",
+      "ChallengeDeclined",
+      "ChallengeWithdrawn",
+      "ChallengeExpired",
+      "WagerReclaimed"
+    ],
+    "newAbortCodes": {
+      "12": "ELevelOutOfBracket",
+      "13": "ENotPendingApproval",
+      "14": "EChallengerSlotTaken (defensive — unreachable via public API; tested via test_only force_status helper)",
+      "15": "ENotCreatorForApproval",
+      "16": "ENotPendingChallenger",
+      "17": "EChallengeNotExpired",
+      "18": "ENotActiveForReclaim",
+      "19": "EWagerNotStalled",
+      "20": "ENotWagerParticipant",
+      "21": "ECreatorFightLocked (judgment call — V5.2 spec §14.1)",
+      "22": "ENotCharacterOwner (judgment call — V5.2 spec §14.1)",
+      "23": "EWrongExpiryEntrypoint (judgment call — V5.2 spec §14.1; routes PENDING_APPROVAL callers to cancel_expired_challenge)"
+    },
+    "newConstants": {
+      "CHALLENGE_TIMEOUT_MS": 300000,
+      "WAGER_RESOLUTION_TIMEOUT_MS": 1800000,
+      "LEVEL_BRACKET": 1
+    },
+    "unchangedFromV51": [
+      "character module (struct, mint, fight-result, allocate_points, fight-lock)",
+      "equipment module (13-slot loadout, slot_type enforcement, save_loadout, fight-lock)",
+      "item module (mint_item_admin, rarity stat budgets, slot_type rules)",
+      "marketplace module (kiosk surfaces, royalty fee)",
+      "royalty_rule module",
+      "arena: settle_wager, settle_tie, cancel_wager, admin_cancel_wager (WAITING/ACTIVE arms), cancel_expired_wager (WAITING/ACTIVE arms), OpenWagerRegistry"
+    ],
+    "notBundled_pendingFutureRelease": [
+      "settle_wager_attested — dual-sig settlement closing the TREASURY-key-holder trust assumption",
+      "sui::random-based loot RNG",
+      "respec_character — 5 SUI sink + 24h cooldown",
+      "Confirm-modal gate (frontend, not chain)",
+      "Settlement retry / journal (server, not chain)",
+      "WS Zod validation + rate-limiter (server, not chain)"
+    ]
+  },
+
+  "tests": {
+    "total": 105,
+    "passed": 105,
+    "failed": 0,
+    "byModule": {
+      "arena_tests": 51,
+      "character_tests": 20,
+      "equipment_tests": 20,
+      "item_tests": 14
+    },
+    "_note": "Every abort code 12-20 + 21/22/23 has a direct triggering test. Funds-invariant tests use odd-MIST stakes (777_777_777 / 333_333_333 / 123_456_789) to verify no rounding loss on merge / split / refund."
+  },
+
+  "slots": {
+    "_comment": "13-slot loadout, unchanged from v5.1.",
+    "count": 13,
+    "all": [
+      "weapon",
+      "offhand",
+      "helmet",
+      "chest",
+      "gloves",
+      "boots",
+      "belt",
+      "ring_1",
+      "ring_2",
+      "ring_3",
+      "necklace",
+      "pants",
+      "bracelets"
+    ]
+  },
+
+  "item_types": {
+    "_comment": "Unchanged from v5.1.",
+    "WEAPON": 1,
+    "SHIELD": 2,
+    "HELMET": 3,
+    "CHEST": 4,
+    "GLOVES": 5,
+    "BOOTS": 6,
+    "BELT": 7,
+    "RING": 8,
+    "NECKLACE": 9,
+    "PANTS": 10,
+    "BRACELETS": 11
+  },
+
+  "rarity_stat_budgets": {
+    "_comment": "Unchanged from v5.1. Sum of all *_bonus fields + max_damage capped per rarity in mint_item_admin.",
+    "COMMON": 20,
+    "UNCOMMON": 40,
+    "RARE": 70,
+    "EPIC": 110,
+    "LEGENDARY": 160
+  },
+
+  "pendingPostPublish": [
+    "Create TransferPolicy<Item> + add royalty_rule + transfer TransferPolicyCap to TREASURY (separate PTB; ~0.003 SUI based on v5.1)",
+    "Create Display<Character> + Display<Item> using the Publisher cap (separate PTBs; ~0.006 SUI based on v5.1)",
+    "Wire frontend + server config to new package id + new shared object ids + new caps (STEP 3, gated on user direction)",
+    "Mint v5.2 catalog into TREASURY kiosk OR migrate / re-list from v5.1 kiosk",
+    "Two-wallet live QA against v5.2 testnet — flagship paths from STATE_OF_PROJECT (full wager cycle, mutual-KO settle_tie, level-bracket abort copy, creator approval flow, reclaim_stalled_wager dry-run)"
+  ],
+
+  "rollback": {
+    "_strategy": "v5.1 (0x308645f3…3717) remains live on testnet — its package bytecode and shared objects are untouched. To revert v5.2: point frontend/server back to the v5.1 package id + shared objects in deployment.testnet-v5.1.json. No on-chain cleanup needed; v5.2 objects become unreferenced but harmless. Both packages can run in parallel during the cut-over (v5.1 wagers settle under v5.1, new wagers under v5.2 — same pattern as the v5.0→v5.1 cutover).",
+    "v51_packageId": "0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717",
+    "v51_deployJson": "deployment.testnet-v5.1.json",
+    "v51_baselineTag": "v5.1"
+  }
+}
