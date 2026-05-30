@@ -50,7 +50,7 @@ import {
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { getWagerStatus, getWagerAcceptedAt, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint, waitForWagerTxFinality } from '../utils/sui-settle';
-import { decideAcceptOutcome } from './wager-accept-gate';
+import { decideAcceptOutcome, resolveChallengerWallet } from './wager-accept-gate';
 import { evaluateServerBusy } from './busy-state';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import { sanitizeEquipment } from '../utils/wire-sanitize';
@@ -1845,10 +1845,32 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     // any remaining stragglers for either player.
     const entry = targetEntry!; // proceed guarantees targetInLobby was defined
 
+    // v5.2 — challenger wallet resolution. In v5.1 the caller IS the
+    // challenger (they signed accept_wager). In v5.2 the caller is the
+    // CREATOR (they signed approve_challenger) and the challenger comes
+    // from the lobby entry's pendingChallenger (server-cached by the
+    // earlier wager_request_accepted handshake). Pure helper centralises
+    // the dispatch so the gauntlet tests both flows.
+    const challengerRes = resolveChallengerWallet({
+      callerWallet: client.walletAddress!,
+      creatorWallet: entry.creatorWallet,
+      pendingChallengerWallet: entry.pendingChallenger?.wallet,
+    });
+    if (!challengerRes.ok) {
+      gateExit(`challenger-resolve-failed:${challengerRes.reason.slice(0, 60)}`, challengerRes.reason);
+      return;
+    }
+    const challengerWallet = challengerRes.wallet;
+    console.log(
+      `[handleWagerAccepted] challenger resolved via ${challengerRes.flow}: ` +
+      `${challengerWallet.slice(0, 14)} (caller=${client.walletAddress!.slice(0, 14)}, ` +
+      `creator=${entry.creatorWallet.slice(0, 14)})`,
+    );
+
     dbInsertWagerInFlight({
       wager_match_id: wagerMatchId,
       player_a: entry.creatorWallet,
-      player_b: client.walletAddress,
+      player_b: challengerWallet,
       accepted_at_ms: Date.now(),
     }).catch((err) => {
       console.error('[Wager] dbInsertWagerInFlight failed:', err?.message || err);
@@ -1858,9 +1880,11 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     wagerLobby.delete(wagerMatchId);
     broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
 
-    // Get characters and start the fight
+    // Get characters and start the fight. Resolve from the chain
+    // participant addresses, NOT the caller — in v5.2 the caller is the
+    // creator (=player_a), not the challenger.
     const charA = getCharacterByWallet(entry.creatorWallet);
-    const charB = getCharacterByWallet(client.walletAddress);
+    const charB = getCharacterByWallet(challengerWallet);
 
     if (!charA || !charB) {
       gateExit(
@@ -1893,9 +1917,13 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
       acceptedAtMs,
     );
 
-    // Auto-cancel any remaining open wagers for either player (safety net for race conditions)
+    // Auto-cancel any remaining open wagers for either player (safety net
+    // for race conditions). v5.2 — use the resolved challengerWallet rather
+    // than client.walletAddress; in the v5.2 approve flow the caller IS
+    // the creator, so the old check only swept creator stragglers and
+    // missed the challenger's.
     for (const [id, lobbyEntry] of wagerLobby) {
-      if (lobbyEntry.creatorWallet === entry.creatorWallet || lobbyEntry.creatorWallet === client.walletAddress) {
+      if (lobbyEntry.creatorWallet === entry.creatorWallet || lobbyEntry.creatorWallet === challengerWallet) {
         wagerLobby.delete(id);
         broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
         adminCancelWagerOnChain(id).catch((err) => {
