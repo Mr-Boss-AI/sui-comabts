@@ -86,6 +86,14 @@ module sui_combats::arena {
     /// refer to this as "ENotOwner" but that's character::ENotOwner
     /// (= 5); arena.move's namespace needs its own non-colliding code.
     const ENotCharacterOwner: u64 = 22;
+    /// v5.2 — cancel_expired_wager called on a PENDING_APPROVAL wager.
+    /// That state has its own dedicated expiry path
+    /// (cancel_expired_challenge, with CHALLENGE_TIMEOUT_MS = 5 min vs
+    /// MATCH_EXPIRY_MS = 10 min). Explicitly routes the caller to the
+    /// right entry point rather than letting them fall through to a
+    /// misleading ENoOpponent abort. Added 2026-05-30 to tie off the
+    /// last v5.2 spec deviation before publish.
+    const EWrongExpiryEntrypoint: u64 = 23;
 
     // ===== Status constants =====
     const STATUS_WAITING: u8 = 0;
@@ -738,10 +746,15 @@ module sui_combats::arena {
     /// Anyone can refund an expired wager.
     /// WAITING + past MATCH_EXPIRY_MS: refund player_a.
     /// ACTIVE + past SETTLEMENT_TIMEOUT_MS: 50/50 split.
-    /// PENDING_APPROVAL is handled by the dedicated
-    /// cancel_expired_challenge (different timeout, different event);
-    /// callers reaching this path on a PENDING_APPROVAL wager abort at
-    /// the ACTIVE-branch's ENoOpponent (player_b is None until approve).
+    /// PENDING_APPROVAL is NOT in scope — that state has its own
+    /// dedicated expiry path via `cancel_expired_challenge`
+    /// (CHALLENGE_TIMEOUT_MS = 5 min vs MATCH_EXPIRY_MS = 10 min).
+    /// Callers hitting this entry with a PENDING_APPROVAL wager abort
+    /// with `EWrongExpiryEntrypoint (= 23)` so the failure surface is
+    /// "use cancel_expired_challenge instead" rather than a misleading
+    /// ENoOpponent. Frontend should pre-route PENDING_APPROVAL callers
+    /// to `cancel_expired_challenge`; the chain assertion is the
+    /// trustless backstop.
     public fun cancel_expired_wager(
         wager: &mut WagerMatch,
         registry: &mut OpenWagerRegistry,
@@ -749,6 +762,9 @@ module sui_combats::arena {
         ctx: &mut TxContext,
     ) {
         assert!(wager.status != STATUS_SETTLED, EMatchAlreadySettled);
+        // v5.2 — Route PENDING_APPROVAL callers to cancel_expired_challenge
+        // before they hit the WAITING/ACTIVE branches.
+        assert!(wager.status != STATUS_PENDING_APPROVAL, EWrongExpiryEntrypoint);
 
         let now = clock::timestamp_ms(clock);
         let match_id = object::id(wager);
@@ -770,7 +786,8 @@ module sui_combats::arena {
                 refund: refund_amount,
             });
         } else {
-            // STATUS_ACTIVE (or PENDING_APPROVAL — see docstring).
+            // STATUS_ACTIVE — only remaining option after the assertions
+            // above.
             assert!(now >= wager.accepted_at + SETTLEMENT_TIMEOUT_MS, ENotExpired);
             assert!(option::is_some(&wager.player_b), ENoOpponent);
             let player_b_addr = *option::borrow(&wager.player_b);

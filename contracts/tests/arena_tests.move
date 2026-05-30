@@ -1117,6 +1117,37 @@ module sui_combats::arena_tests {
         ts::end(scenario);
     }
 
+    /// v5.2 — cancel_expired_wager on a PENDING_APPROVAL wager aborts
+    /// EWrongExpiryEntrypoint (23). Routes the caller to the dedicated
+    /// cancel_expired_challenge entry instead of letting them fall
+    /// through to a misleading ENoOpponent (10).
+    #[test]
+    #[expected_failure(abort_code = 23, location = sui_combats::arena)]
+    fun test_cancel_expired_wager_on_pending_approval_aborts() {
+        let mut scenario = ts::begin(ALICE);
+        let mut clock = bootstrap(&mut scenario);
+        let alice_char = mint_character_at_level(&mut scenario, ALICE, 1, &clock);
+        let bob_char = mint_character_at_level(&mut scenario, BOB, 1, &clock);
+        create_wager_helper(&mut scenario, ALICE, alice_char, STAKE_1_SUI, &clock);
+        request_accept_helper(&mut scenario, BOB, bob_char, STAKE_1_SUI, &clock);
+
+        // Fast-forward past both CHALLENGE_TIMEOUT_MS and SETTLEMENT_TIMEOUT_MS
+        // so a timing assertion wouldn't be what fires — we expect the
+        // STATE check to abort first with code 23.
+        clock::increment_for_testing(&mut clock, arena::wager_resolution_timeout_ms() + 1);
+
+        ts::next_tx(&mut scenario, EVE);
+        {
+            let mut wager = ts::take_shared<WagerMatch>(&scenario);
+            let mut wager_registry = ts::take_shared<OpenWagerRegistry>(&scenario);
+            arena::cancel_expired_wager(&mut wager, &mut wager_registry, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(wager_registry);
+            ts::return_shared(wager);
+        };
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
     /// cancel_expired_wager before MATCH_EXPIRY_MS aborts ENotExpired (9).
     #[test]
     #[expected_failure(abort_code = 9, location = sui_combats::arena)]
