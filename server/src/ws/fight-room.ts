@@ -143,6 +143,12 @@ function buildFightStatePayload(fight: FightState): Record<string, any> {
     turn: fight.turn,
     log: fight.turnResults,
     wagerAmount: fight.wagerAmount,
+    // v5.2 — wager identifiers surfaced for the frontend
+    // ReclaimStalledWagerBanner. Undefined for friendly/ranked. The
+    // accepted-at timestamp anchors the 30-min reclaim_stalled_wager
+    // visibility gate; mirrored from chain WagerMatch.accepted_at.
+    wagerMatchId: fight.wagerMatchId,
+    wagerAcceptedAtMs: fight.wagerAcceptedAtMs,
     // Timer state — populated so a `fight_resumed` payload rehydrates
     // the client UI exactly where it was: countdown deadline, pause
     // flag, and frozen remaining ms (when paused).
@@ -158,7 +164,18 @@ export async function createFight(
   characterA: Character,
   characterB: Character,
   fightType: FightType,
-  wagerAmount?: number
+  wagerAmount?: number,
+  /** v5.2 — for wager fights, the on-chain WagerMatch id whose escrow
+   *  this fight will settle. Required to surface the
+   *  ReclaimStalledWagerBanner on the client. Undefined for friendly /
+   *  ranked. */
+  wagerMatchId?: string,
+  /** v5.2 — chain `WagerMatch.accepted_at` (ms unix) at the moment
+   *  approve_challenger landed. Anchors the 30-min reclaim timer in the
+   *  UI. Pass null on chain-read failure — the banner gracefully stays
+   *  hidden (no false-positive Reclaim button before the chain assertion
+   *  would let it through). */
+  wagerAcceptedAtMs?: number | null
 ): Promise<FightState> {
   // D3 (strict): re-read chain DOFs right before the combat snapshot. This is
   // the anti-cheat seam — even if the client lied about equipment at
@@ -204,6 +221,8 @@ export async function createFight(
     turnResults: [],
     status: 'active',
     wagerAmount,
+    wagerMatchId,
+    wagerAcceptedAtMs: wagerAcceptedAtMs ?? undefined,
     spectators: new Set(),
     turnActions: new Map(),
     disconnectedWallets: new Set(),

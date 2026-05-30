@@ -90,9 +90,9 @@
 
 3. **No periodic server-side janitor for `cancel_expired_challenge`.** The 5-min PENDING_APPROVAL timeout is permissionless — any participant (or the frontend "Clear expired" button) can fire it. We don't add a server-side cron for this (matches existing v5.1 behaviour for `cancel_expired_wager`). If real-world data shows stale pending wagers piling up, a janitor is a future enhancement.
 
-4. **`fight.wagerAcceptedAtMs` left server-side TODO.** The frontend ReclaimStalledWagerBanner gracefully degrades to hidden if the field is missing. Server needs to mirror chain `WagerMatch.accepted_at` into the `fight_start` payload — that's a small `fight-room.ts` change in the next session (likely 10 lines). Until then, the banner stays hidden in production; manual reclaim via dev-tools still works for the QA gauntlet's step 3.2.
+4. ~~`fight.wagerAcceptedAtMs` left server-side TODO.~~ **RESOLVED 2026-05-30 (STEP 5 addendum).** New `getWagerAcceptedAt(wagerMatchId)` in `server/src/utils/sui-settle.ts` reads chain `WagerMatch.accepted_at` directly. `createFight` extended with `wagerMatchId?` and `wagerAcceptedAtMs?` parameters (no longer set post-create). `buildFightStatePayload` surfaces both. Frontend banner activates on real fight state with deterministic 30-min countdown anchored to chain timestamp. Eligibility logic extracted to pure `computeReclaimEligibility(fight, viewerWallet, nowMs)` in `wager-constants.ts`; new `qa-reclaim-eligibility.ts` gauntlet (14 assertions) drives every boundary deterministically with injected clock.
 
-5. **Test scaffolding additions:** `qa-wager-constants.ts` (NEW, 19 assertions) pins the chain-mirror + no-magic-numbers contract. Other gauntlets touched (`qa-arena-aborts`, `qa-wager-accept-gate`, `qa-wager-accept-race`, `qa-create-wager-orphan-guard`) updated for the new flow shape.
+5. **Test scaffolding additions:** `qa-wager-constants.ts` (NEW, 19 assertions) pins the chain-mirror + no-magic-numbers contract; `qa-reclaim-eligibility.ts` (NEW, 14 assertions) pins the banner visibility gate. Other gauntlets touched (`qa-arena-aborts`, `qa-wager-accept-gate`, `qa-wager-accept-race`, `qa-create-wager-orphan-guard`) updated for the new flow shape.
 
 ---
 
@@ -125,6 +125,7 @@
 | `qa-create-wager-orphan-guard` | **15 / 0** *(was 9/6; updated for 7 sign sites)* |
 | `qa-wager-register` | 25 / 0 |
 | `qa-wager-constants` *(NEW)* | **19 / 0** — pins single-source-of-truth |
+| `qa-reclaim-eligibility` *(NEW)* | **14 / 0** — pins banner visibility gate (deterministic clock injection) |
 
 ### Build hygiene
 - `cd server && npx tsc --noEmit` — clean
@@ -173,9 +174,9 @@
 
 ## What's NOT done — explicit follow-ups
 
-1. **`fight.wagerAcceptedAtMs` server population.** The frontend ReclaimStalledWagerBanner is wired and ready; the server's `fight_start` payload needs to include `wagerMatchId` + `wagerAcceptedAtMs` (mirror chain `WagerMatch.accepted_at`). Small 10-line change in `server/src/ws/fight-room.ts` next session. Until then the banner stays hidden — graceful degrade. Manual reclaim via dev-tools / direct PTB still works for QA.
+1. ~~`fight.wagerAcceptedAtMs` server population.~~ **DONE 2026-05-30 (STEP 5 addendum).** Server now fetches chain `WagerMatch.accepted_at` via new `getWagerAcceptedAt` helper at fight-start, passes it through `createFight`, surfaces it in `buildFightStatePayload`. `wagerMatchId` also explicitly threaded through the same path (was being set post-create; now passed as a constructor arg). Banner activates off real fight state — no dev-tools needed.
 2. **Catalog mint.** No items minted into v5.2 TREASURY kiosk yet. v5.1 kiosk + items are untouched (different package type). For QA, players use existing v5.1 character + can buy items from v5.1 kiosk — but those Items can't be re-listed under v5.2's TransferPolicy. Migration is its own step; see scripts/mint-v5.1-13slot-catalog.ts for the pattern when ready.
-3. **Live two-wallet QA.** Everything is staged for the gauntlet in [`docs/V5.2_QA_GAUNTLET.md`](docs/V5.2_QA_GAUNTLET.md). When you return, that's the run-list.
+3. **Live two-wallet QA.** Everything is staged for the gauntlet in [`docs/V5.2_QA_GAUNTLET.md`](docs/V5.2_QA_GAUNTLET.md). When you return, that's the run-list — and reclaim is now live-testable (no dev-tools workaround needed).
 4. **Branch not pushed, not merged.** Standing rules respected.
 
 ---

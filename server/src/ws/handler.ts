@@ -49,7 +49,7 @@ import {
   getChatClients,
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
-import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint, waitForWagerTxFinality } from '../utils/sui-settle';
+import { getWagerStatus, getWagerAcceptedAt, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint, waitForWagerTxFinality } from '../utils/sui-settle';
 import { decideAcceptOutcome } from './wager-accept-gate';
 import { evaluateServerBusy } from './busy-state';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
@@ -1877,8 +1877,21 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
 
     console.log(`[Wager Lobby] ${charB.name} accepted ${charA.name}'s wager for ${entry.wagerAmount} SUI`);
 
-    const fight = await createFight(charA, charB, 'wager', entry.wagerAmount);
-    fight.wagerMatchId = wagerMatchId;
+    // v5.2 — mirror chain `WagerMatch.accepted_at` into FightState so the
+    // ReclaimStalledWagerBanner can anchor its 30-min timer against the
+    // actual chain accept (not the server's "fight started" clock — those
+    // skew by seconds due to probe + WS routing latency). A null read just
+    // hides the banner gracefully; manual reclaim still works via chain
+    // assertion (EWagerNotStalled = 19) which uses the real chain value.
+    const acceptedAtMs = await getWagerAcceptedAt(wagerMatchId);
+    const fight = await createFight(
+      charA,
+      charB,
+      'wager',
+      entry.wagerAmount,
+      wagerMatchId,
+      acceptedAtMs,
+    );
 
     // Auto-cancel any remaining open wagers for either player (safety net for race conditions)
     for (const [id, lobbyEntry] of wagerLobby) {

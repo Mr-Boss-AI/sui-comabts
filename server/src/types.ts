@@ -199,6 +199,13 @@ export interface FightState {
   winner?: string;
   wagerAmount?: number;
   wagerMatchId?: string;
+  /** v5.2 — chain `WagerMatch.accepted_at` (ms unix), captured at the
+   *  moment approve_challenger landed and the wager went STATUS_ACTIVE.
+   *  This is what the frontend ReclaimStalledWagerBanner anchors its
+   *  30-min countdown against. Read from chain via getWagerAcceptedAt
+   *  at fight-start; null if the chain read failed or this isn't a
+   *  wager fight (friendly / ranked never set it). */
+  wagerAcceptedAtMs?: number;
   stakedItemIds?: string[];
   spectators: Set<string>;
   turnActions: Map<string, TurnAction>;

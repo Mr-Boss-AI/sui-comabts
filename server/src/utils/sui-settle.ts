@@ -553,7 +553,8 @@ export async function findCharacterObjectId(walletAddress: string): Promise<stri
 }
 
 /**
- * Read a WagerMatch's status field. 0=waiting, 1=active, 2=settled. null on failure.
+ * Read a WagerMatch's status field. 0=waiting, 1=active, 2=settled,
+ * 3=pending_approval (v5.2). null on failure.
  */
 export async function getWagerStatus(wagerMatchId: string): Promise<number | null> {
   try {
@@ -566,6 +567,34 @@ export async function getWagerStatus(wagerMatchId: string): Promise<number | nul
     return Number(fields.status);
   } catch (err) {
     console.error('[getWagerStatus] RPC error:', (err as Error)?.message || err);
+    return null;
+  }
+}
+
+/**
+ * v5.2 — Read `WagerMatch.accepted_at` (ms unix timestamp). Returns null
+ * on RPC failure or if the field is missing/zero. Used at fight-start
+ * time to anchor the 30-min reclaim_stalled_wager timer to the actual
+ * chain accept moment — not the server's "fight started" moment, which
+ * could be seconds later (probe + WS routing latency).
+ *
+ * accept-at-zero is treated as null because the chain initialises this
+ * field to 0 in STATUS_WAITING; only the approve_challenger transition
+ * stamps a real timestamp.
+ */
+export async function getWagerAcceptedAt(wagerMatchId: string): Promise<number | null> {
+  try {
+    const obj = await client.getObject({
+      id: wagerMatchId,
+      options: { showContent: true },
+    });
+    const fields = (obj.data?.content as { fields?: Record<string, unknown> } | undefined)?.fields;
+    if (!fields) return null;
+    const raw = Number(fields.accepted_at);
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return raw;
+  } catch (err) {
+    console.error('[getWagerAcceptedAt] RPC error:', (err as Error)?.message || err);
     return null;
   }
 }

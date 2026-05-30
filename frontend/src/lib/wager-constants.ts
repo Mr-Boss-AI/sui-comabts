@@ -86,3 +86,63 @@ export const WAGER_STATUS = {
 } as const;
 
 export type WagerStatus = (typeof WAGER_STATUS)[keyof typeof WAGER_STATUS];
+
+// ============================================================================
+// ReclaimStalledWagerBanner — visibility eligibility
+// ============================================================================
+
+/** Minimal fight shape the eligibility helper reads. Decoupled from
+ *  the full FightState type so the unit test doesn't have to construct
+ *  a full FighterState graph. */
+export interface ReclaimEligibilityFight {
+  status: "waiting" | "active" | "finished";
+  wagerMatchId?: string;
+  wagerAcceptedAtMs?: number;
+  playerA: { walletAddress: string };
+  playerB: { walletAddress: string };
+}
+
+export type ReclaimEligibility =
+  | { show: false; reason: string }
+  | { show: true; wagerMatchId: string; elapsedMs: number };
+
+/** Decide whether the Reclaim Stalled Wager banner should render.
+ *
+ * Visible iff (in order):
+ *   - the fight is wager-typed (`wagerMatchId` populated by server)
+ *   - chain `WagerMatch.accepted_at` is known (`wagerAcceptedAtMs` populated)
+ *   - viewer is one of the two participants
+ *   - fight isn't already finished
+ *   - elapsed since accept >= WAGER_RESOLUTION_TIMEOUT_MS (30 min)
+ *
+ * The reason field is for telemetry / diagnostic logs — production UI
+ * just renders null when `show === false`.
+ *
+ * Pure (no Date.now() call inside) — caller injects `nowMs` so the
+ * unit test can drive boundary behaviour deterministically.
+ */
+export function computeReclaimEligibility(
+  fight: ReclaimEligibilityFight | null | undefined,
+  viewerWallet: string,
+  nowMs: number,
+): ReclaimEligibility {
+  if (!fight) return { show: false, reason: "no fight" };
+  if (!fight.wagerMatchId) return { show: false, reason: "not a wager fight" };
+  if (!fight.wagerAcceptedAtMs) {
+    return { show: false, reason: "wagerAcceptedAtMs not populated yet" };
+  }
+  if (fight.status === "finished") {
+    return { show: false, reason: "fight finished — settle path covered it" };
+  }
+  const isParticipant =
+    fight.playerA.walletAddress === viewerWallet ||
+    fight.playerB.walletAddress === viewerWallet;
+  if (!isParticipant) {
+    return { show: false, reason: "viewer is not a participant" };
+  }
+  const elapsedMs = nowMs - fight.wagerAcceptedAtMs;
+  if (!isReclaimable(elapsedMs)) {
+    return { show: false, reason: `elapsed ${elapsedMs}ms < 30 min` };
+  }
+  return { show: true, wagerMatchId: fight.wagerMatchId, elapsedMs };
+}

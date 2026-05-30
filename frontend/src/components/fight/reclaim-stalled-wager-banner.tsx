@@ -40,7 +40,7 @@ import { ARENA_ABORT_CODES } from "@/lib/arena-aborts";
 import {
   WAGER_RESOLUTION_TIMEOUT_MS,
   formatTimeoutMin,
-  isReclaimable,
+  computeReclaimEligibility,
 } from "@/lib/wager-constants";
 
 export function ReclaimStalledWagerBanner() {
@@ -48,9 +48,10 @@ export function ReclaimStalledWagerBanner() {
   const dAppKit = useDAppKit();
   const client = useCurrentClient() as SuiGrpcClient | null;
   const [signing, setSigning] = useState(false);
-  // Re-render every 30s to keep the elapsed counter (and the
-  // "X min remaining" copy) reasonably fresh without burning CPU.
-  const [, setTick] = useState(0);
+  // Re-render every 30s so (a) the elapsed counter copy stays fresh
+  // and (b) the boundary-cross (29m59s → 30m00s) flips the eligibility
+  // gate without waiting for an unrelated state change.
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(t);
@@ -59,25 +60,15 @@ export function ReclaimStalledWagerBanner() {
   const fight = state.fight;
   const viewerWallet = state.character?.walletAddress ?? "";
 
-  const eligibility = useMemo(() => {
-    if (!fight || !fight.wagerMatchId || !fight.wagerAcceptedAtMs) {
-      return { show: false as const };
-    }
-    const isParticipant =
-      fight.playerA.walletAddress === viewerWallet ||
-      fight.playerB.walletAddress === viewerWallet;
-    if (!isParticipant) return { show: false as const };
-    if (fight.status === "finished") return { show: false as const };
-    const elapsed = Date.now() - fight.wagerAcceptedAtMs;
-    if (!isReclaimable(elapsed)) {
-      return { show: false as const, elapsed };
-    }
-    return {
-      show: true as const,
-      wagerMatchId: fight.wagerMatchId,
-      elapsed,
-    };
-  }, [fight, viewerWallet]);
+  // Pure eligibility decision — lives in lib/wager-constants so the
+  // unit test (scripts/qa-reclaim-eligibility.ts) drives every branch
+  // with deterministic clock injection. `tick` in the dep array forces
+  // a fresh Date.now() read on the 30s timer.
+  const eligibility = useMemo(
+    () => computeReclaimEligibility(fight, viewerWallet, Date.now()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fight, viewerWallet, tick],
+  );
 
   if (!eligibility.show) return null;
 
@@ -118,7 +109,7 @@ export function ReclaimStalledWagerBanner() {
     }
   };
 
-  const elapsedMin = Math.floor(eligibility.elapsed / 60_000);
+  const elapsedMin = Math.floor(eligibility.elapsedMs / 60_000);
 
   return (
     <div
