@@ -9,13 +9,28 @@ import { useWalletBalance } from "@/hooks/useWalletBalance";
 import { useDAppKit, useCurrentClient } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
-import { buildCreateWagerTx, buildAcceptWagerTx, buildCancelWagerTx } from "@/lib/sui-contracts";
+import {
+  buildCreateWagerTx,
+  buildRequestAcceptWagerTx,
+  buildApproveChallengerTx,
+  buildDeclineChallengerTx,
+  buildWithdrawChallengeTx,
+  buildCancelExpiredChallengeTx,
+  buildCancelWagerTx,
+} from "@/lib/sui-contracts";
 import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register";
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager, canAcceptWagerWithBalance } from "@/lib/wager-accept-gate";
 import { assertTxSucceeded, extractTxDigest, humanizeChainError } from "@/lib/tx-result";
 import { ARENA_ABORT_CODES } from "@/lib/arena-aborts";
 import { simulateWagerTx } from "@/lib/wager-preflight";
+import {
+  WAGER_STATUS,
+  CHALLENGE_TIMEOUT_MS,
+  inLevelBracket,
+  levelBracketBlockedReason,
+  formatTimeoutMin,
+} from "@/lib/wager-constants";
 import { verifyServerHasCharacter } from "@/lib/character-presence-check";
 import { computeBusyState, decideMatchmakingRender } from "@/lib/busy-state";
 import type { FightType, WagerLobbyEntry } from "@/types/game";
@@ -65,10 +80,27 @@ function timeAgo(timestamp: number): string {
   return `${Math.floor(secs / 60)}m ago`;
 }
 
+/** v5.2 — viewer's relationship to a wager. Drives which buttons render. */
+type ViewerRole =
+  | "creator"           // viewer wallet === entry.creatorWallet
+  | "pendingChallenger" // viewer wallet === entry.pendingChallenger.wallet
+  | "stranger";         // anyone else
+
+function classifyViewer(entry: WagerLobbyEntry, viewerWallet: string): ViewerRole {
+  if (entry.creatorWallet === viewerWallet) return "creator";
+  if (entry.pendingChallenger?.wallet === viewerWallet) return "pendingChallenger";
+  return "stranger";
+}
+
 function WagerLobbyCard({
   entry,
-  isOwn,
-  onAccept,
+  viewerWallet,
+  viewerLevel,
+  onRequestAccept,
+  onApprove,
+  onDecline,
+  onWithdraw,
+  onCancelExpiredChallenge,
   onCancel,
   onInspect,
   signing,
@@ -76,26 +108,160 @@ function WagerLobbyCard({
   disableReason,
 }: {
   entry: WagerLobbyEntry;
-  isOwn: boolean;
-  onAccept: () => void;
+  viewerWallet: string;
+  /** Viewer's live character level — used for the ±1 client-side pre-check
+   *  on Accept (the chain assertion is the trustless backstop). */
+  viewerLevel: number;
+  onRequestAccept: () => void;
+  onApprove: () => void;
+  onDecline: () => void;
+  onWithdraw: () => void;
+  onCancelExpiredChallenge: () => void;
   onCancel: () => void;
-  /** When set, clicking anywhere on the card (other than the Accept /
-   *  Cancel buttons) opens the Tavern player-profile modal for the wager
-   *  creator. Lets a player scout an opponent's gear/build before
-   *  signing accept_wager. */
   onInspect?: () => void;
   signing: boolean;
-  /** When true, the Accept button is hard-disabled regardless of `signing`.
-   *  Set by the parent when the caller has their own open wager — closes the
-   *  silent-accept bug (2026-05-04, see lib/wager-accept-gate.ts header). */
+  /** Cross-mode busy gate (Fix A silent-accept + Fix 1 cross-mode). */
   disableAccept?: boolean;
-  /** Tooltip shown on hover of the disabled Accept button. */
   disableReason?: string;
 }) {
+  const role = classifyViewer(entry, viewerWallet);
+  const isOwn = role === "creator";
+  const status = entry.status ?? WAGER_STATUS.WAITING;
+  const pending = entry.pendingChallenger;
+  const isPending = status === WAGER_STATUS.PENDING_APPROVAL && !!pending;
+
+  // v5.2 — level-bracket pre-check against the snapshot. If v5.1-shape
+  // wire is in flight (no snapshot field), use the live creator level.
+  const snapshot = entry.playerALevelSnapshot ?? entry.creatorLevel;
+  const inBracket = inLevelBracket(viewerLevel, snapshot);
+  const bracketBlockedReason = inBracket
+    ? undefined
+    : levelBracketBlockedReason(viewerLevel, snapshot);
+
+  // v5.2 — challenge expiry: anyone can clear after CHALLENGE_TIMEOUT_MS.
+  // Render-time check using server-clock pendingAt; we re-render on lobby
+  // updates so the button surfaces close to the actual expiry.
+  const elapsedSincePending = isPending && pending
+    ? Date.now() - pending.pendingAt
+    : 0;
+  const challengeExpired = isPending && elapsedSincePending >= CHALLENGE_TIMEOUT_MS;
+
   const archetype = getArchetypeLabel(entry.creatorStats);
   const color = getArchetypeColor(archetype);
-  const acceptBlocked = disableAccept || signing;
   const inspectable = !!onInspect;
+
+  // Border/background tint per state:
+  //   - own + WAITING: bronze frame
+  //   - PENDING_APPROVAL: amber accent (signals attention required)
+  //   - default: rim
+  const isOwnPending = isOwn && isPending;
+  const borderColor = isOwnPending
+    ? "var(--sc-bronze)"
+    : isOwn
+      ? "var(--sc-bronze)"
+      : isPending
+        ? "var(--sc-bronze-deep)"
+        : "var(--sc-rim-2)";
+
+  // Compute the action row for this viewer × status combination.
+  let actions: React.ReactNode;
+  if (isPending && role === "creator") {
+    // Creator sees their pending challenger + approve/decline.
+    actions = (
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onApprove(); }}
+          disabled={signing}
+          title="Approve this challenger and start the fight"
+        >
+          {signing ? "Signing..." : "Approve"}
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onDecline(); }}
+          disabled={signing}
+          title="Decline this challenger — they get a refund, wager returns to waiting"
+        >
+          Decline
+        </Button>
+      </div>
+    );
+  } else if (isPending && role === "pendingChallenger") {
+    // Challenger sees withdraw + waiting state.
+    actions = (
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onWithdraw(); }}
+          disabled={signing}
+          title="Withdraw your challenge and get your stake back"
+        >
+          {signing ? "Signing..." : "Withdraw"}
+        </Button>
+      </div>
+    );
+  } else if (isPending && role === "stranger" && challengeExpired) {
+    // Anyone can clear an expired pending challenge.
+    actions = (
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onCancelExpiredChallenge(); }}
+          disabled={signing}
+          title="The challenger hasn't been approved in 5+ minutes — clear the pending slot"
+        >
+          Clear expired
+        </Button>
+      </div>
+    );
+  } else if (isPending) {
+    // Stranger viewing a fresh pending — disabled placeholder.
+    actions = (
+      <div className="flex items-center gap-2 shrink-0">
+        <span style={{ fontSize: 11, color: "var(--fg-3)", fontStyle: "italic" }}>
+          Awaiting approval
+        </span>
+      </div>
+    );
+  } else if (role === "creator") {
+    // Own WAITING — Cancel.
+    actions = (
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onCancel(); }}
+          disabled={signing}
+        >
+          Cancel
+        </Button>
+      </div>
+    );
+  } else {
+    // Stranger viewing WAITING — Accept (with bracket + busy gates).
+    const blocked = disableAccept || !inBracket || signing;
+    const reason = !inBracket
+      ? bracketBlockedReason
+      : disableAccept
+        ? disableReason
+        : undefined;
+    actions = (
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onRequestAccept(); }}
+          disabled={blocked}
+          title={reason}
+        >
+          {signing ? "Signing..." : "Accept"}
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -115,11 +281,15 @@ function WagerLobbyCard({
       }
       title={inspectable ? `Inspect ${entry.creatorName}'s build` : undefined}
       style={{
-        border: isOwn
-          ? "2px solid var(--sc-bronze)"
-          : "1px solid var(--sc-rim-2)",
-        borderLeft: isOwn ? "3px solid var(--sc-bronze)" : "1px solid var(--sc-rim-2)",
-        background: isOwn ? "rgba(200,154,63,0.08)" : "var(--sc-panel-2)",
+        border: `${isOwn ? 2 : 1}px solid ${borderColor}`,
+        borderLeft: isOwn ? "3px solid var(--sc-bronze)" : `1px solid ${borderColor}`,
+        background: isOwnPending
+          ? "rgba(200,154,63,0.12)"
+          : isOwn
+            ? "rgba(200,154,63,0.08)"
+            : isPending
+              ? "rgba(200,154,63,0.05)"
+              : "var(--sc-panel-2)",
         borderRadius: "var(--r-card)",
         boxShadow: isOwn ? "var(--sh-plate-sm)" : "var(--rim-top), var(--rim-bottom)",
         fontFamily: "var(--font-ui)",
@@ -132,40 +302,47 @@ function WagerLobbyCard({
             <span className="font-semibold text-sm text-zinc-100 truncate">{entry.creatorName}</span>
             <Badge variant="info">Lv.{entry.creatorLevel}</Badge>
             <span className={`text-xs font-bold ${color}`}>{archetype}</span>
+            {isPending && (
+              <span title="Pending approval — creator must approve or decline">
+                <Badge variant="warning">Pending</Badge>
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 mt-1 text-xs text-zinc-500">
             <span>{entry.creatorRating} ELO</span>
             <span>S{entry.creatorStats.strength} D{entry.creatorStats.dexterity} I{entry.creatorStats.intuition} E{entry.creatorStats.endurance}</span>
             <span>{timeAgo(entry.createdAt)}</span>
           </div>
+          {isPending && pending && (
+            // v5.2 — challenger details + countdown for the creator's
+            // approve/decline decision.
+            <div
+              className="mt-2 pt-2 text-xs"
+              style={{
+                borderTop: "1px dashed var(--sc-rim-2)",
+                color: "var(--fg-2)",
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span style={{ color: "var(--sc-bronze)" }}>Challenger:</span>
+                <span className="font-semibold text-zinc-100">{pending.name}</span>
+                <Badge variant="info">Lv.{pending.level}</Badge>
+                <span style={{ color: "var(--fg-3)" }}>{pending.rating} ELO</span>
+              </div>
+              <div className="flex items-center gap-3 mt-1" style={{ color: "var(--fg-3)" }}>
+                <span>S{pending.stats.strength} D{pending.stats.dexterity} I{pending.stats.intuition} E{pending.stats.endurance}</span>
+                <span>
+                  {challengeExpired
+                    ? `Expired ${formatTimeoutMin(elapsedSincePending - CHALLENGE_TIMEOUT_MS)} ago`
+                    : `${formatTimeoutMin(CHALLENGE_TIMEOUT_MS - elapsedSincePending)} to decide`}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-amber-400 font-bold text-sm">{entry.wagerAmount} SUI</span>
-          {isOwn ? (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCancel();
-              }}
-              disabled={signing}
-            >
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAccept();
-              }}
-              disabled={acceptBlocked}
-              title={disableAccept ? disableReason : undefined}
-            >
-              {signing ? "Signing..." : "Accept"}
-            </Button>
-          )}
+          {actions}
         </div>
       </div>
     </div>
@@ -293,7 +470,22 @@ export function MatchmakingQueue() {
         }
 
         const stakeAmountMist = BigInt(Math.round(parsedWager.amount * 1_000_000_000));
-        const tx = buildCreateWagerTx(stakeAmountMist);
+        // v5.2 — create_wager now takes a &Character ref (snapshots level
+        // for the ±1 bracket gate). The chain object id comes from the
+        // server-hydrated `onChainCharacter` slice. A missing slice is a
+        // hard error: the chain hasn't confirmed the character yet, so
+        // signing create_wager would either abort (ENotCharacterOwner=22)
+        // or — worse — orphan SUI on chain.
+        const characterObjectId = state.onChainCharacter?.objectId;
+        if (!characterObjectId) {
+          dispatch({
+            type: "SET_ERROR",
+            message:
+              "Your character isn't fully synced with the chain yet — reload and try again in a moment.",
+          });
+          return;
+        }
+        const tx = buildCreateWagerTx(stakeAmountMist, characterObjectId);
 
         // 2026-05-18 pre-flight — catches `EInvalidStake (0)` if the
         // input rounds to zero MIST and surfaces a friendly message
@@ -450,34 +642,22 @@ export function MatchmakingQueue() {
     state.socket.send({ type: "cancel_queue" });
   }, [state.socket]);
 
-  const handleAcceptWager = useCallback(async (entry: WagerLobbyEntry) => {
-    // Defence in depth — the Accept button is already disabled in the
-    // render path when the caller has their own open wager (Fix A,
-    // 2026-05-04). This catches any keyboard / programmatic / dev-tools
-    // override BEFORE we sign and lock SUI on chain.
-    //
-    // Without this guard, the chain `accept_wager` succeeds (it has no
-    // "no own open wager" check) and the wager flips to STATUS_ACTIVE.
-    // The server's WS check then rejects the follow-up message but the
-    // chain state is already mutated — `cancel_wager` aborts with
-    // `EMatchNotWaiting (1)`. See lib/wager-accept-gate.ts header for
-    // the full chain-evidenced trace.
+  /** v5.2 — request_accept_wager replaces v5.1's accept_wager. Stake parks
+   *  in `challenger_escrow` and status moves WAITING → PENDING_APPROVAL.
+   *  The creator then approves (handleApproveChallenger) or declines
+   *  (handleDeclineChallenger). The challenger can withdraw_challenge
+   *  unilaterally at any point before approval. */
+  const handleRequestAccept = useCallback(async (entry: WagerLobbyEntry) => {
+    // v5.1 silent-accept defence is still relevant — the chain
+    // EAlreadyHasOpenWager (11) covers the silent-accept path now,
+    // but the client gate is faster + clearer than a chain abort.
     const lobbyGate = canAcceptWager({
       callerWallet: walletAddress,
       targetWagerId: entry.wagerMatchId,
       lobby: wagerLobby,
     });
 
-    // Phase A (2026-05-17) — Bug A pre-flight balance check.
-    // Refuses the click BEFORE the wallet popup when the caller can't
-    // cover stake + estimated gas. Closes the silent-fail UX bug filed
-    // 2026-05-16 (acceptor with 0.501 SUI on a 0.5 SUI wager → chain
-    // tx failed, misleading "Wager not active on-chain" toast).
     const stakeAmountMist = BigInt(Math.round(entry.wagerAmount * 1_000_000_000));
-    // Treat both "still loading" and "fetch errored" as "can't determine
-    // the balance" so the gate refuses with a try-again message rather
-    // than silently allowing a wager click during the initial render
-    // window where balance.mist defaults to 0n.
     const balanceMist =
       balance.loading || balance.error ? null : balance.mist;
     const gate = canAcceptWagerWithBalance({
@@ -488,23 +668,28 @@ export function MatchmakingQueue() {
 
     if (!gate.allow) {
       console.warn(
-        "[Wager] Accept gate refused:",
+        "[Wager] Request-accept gate refused:",
         gate.reason,
         gate.ownWagerId ? `(own=${gate.ownWagerId})` : "",
       );
       dispatch({ type: "SET_ERROR", message: gate.reason ?? "Cannot accept this wager." });
       return;
     }
+
+    // v5.2 — level-bracket pre-check. Compares the viewer's live level
+    // against the wager's snapshot (player_a_level if present, else the
+    // creator's current level as a v5.1-shape fallback). A pre-check
+    // miss skips the wallet popup entirely.
+    const creatorSnapshot = entry.playerALevelSnapshot ?? entry.creatorLevel;
+    if (!inLevelBracket(level, creatorSnapshot)) {
+      const reason = levelBracketBlockedReason(level, creatorSnapshot);
+      console.warn("[Wager] Level-bracket pre-check refused:", reason);
+      dispatch({ type: "SET_ERROR", message: reason });
+      return;
+    }
+
     setSigning(true);
     try {
-      // Bug 6 defence-in-depth (2026-05-19). Even with the auth_ok
-      // self-heal in place, the server could lose our character record
-      // *while* the wager UI is open (a restart between the form
-      // mounting and the user clicking Accept). Verify the server
-      // still knows us BEFORE the SDK opens the wallet popup. On
-      // failure, dispatch BEGIN_SERVER_REHYDRATE so the user lands in
-      // the loader while the chain-check re-restores; their pending
-      // click is cancelled rather than orphaned-on-chain.
       const presence = await verifyServerHasCharacter({ socket: state.socket });
       if (!presence.ok) {
         console.warn("[Wager] Server-character presence check failed:", presence.reason);
@@ -516,28 +701,30 @@ export function MatchmakingQueue() {
         return;
       }
 
-      // 2026-05-18 pre-flight (Bug — EMatchNotWaiting). Run an unsigned
-      // simulation FIRST so a "wager already accepted by someone else"
-      // (status flipped WAITING→ACTIVE between lobby render and click)
-      // surfaces as a friendly toast instead of dragging the user
-      // through the wallet popup just to see the cryptic
-      // `MoveAbort in 2nd command, abort code: 1` from dapp-kit's
-      // post-sign resolve step. We also drop the lobby entry locally
-      // on a positive simulation so a double-click can't race a
-      // second sign attempt against the now-ACTIVE wager.
-      const tx = buildAcceptWagerTx(entry.wagerMatchId, stakeAmountMist);
+      // v5.2 — characterObjectId required by request_accept_wager.
+      const characterObjectId = state.onChainCharacter?.objectId;
+      if (!characterObjectId) {
+        dispatch({
+          type: "SET_ERROR",
+          message:
+            "Your character isn't fully synced with the chain yet — reload and try again in a moment.",
+        });
+        return;
+      }
+
+      const tx = buildRequestAcceptWagerTx(
+        entry.wagerMatchId,
+        characterObjectId,
+        stakeAmountMist,
+      );
       const preflight = await simulateWagerTx(
         client,
         tx,
         walletAddress,
-        "accept_wager",
+        "request_accept_wager",
       );
       if (!preflight.ok) {
-        // Friendly message already pulled from ARENA_ABORT_CODES by
-        // simulateWagerTx's assertTxSucceeded wrapper. Drop the stale
-        // entry from the local lobby — the server will broadcast its
-        // own `wager_lobby_removed` shortly but the user gets an
-        // instant accurate view either way.
+        // Optimistic removal closes the double-click race (2026-05-18).
         dispatch({
           type: "REMOVE_WAGER_LOBBY_ENTRY",
           wagerMatchId: entry.wagerMatchId,
@@ -548,36 +735,19 @@ export function MatchmakingQueue() {
 
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-
-      // Phase A (2026-05-17) — Bug B branching via the shared
-      // `assertTxSucceeded` helper. Pre-fix, this site grabbed a digest
-      // from either the Transaction or FailedTransaction wrapper and
-      // proceeded to send `wager_accepted` over the WS, so the server's
-      // chain probe was the first place the failure surfaced. The
-      // helper now throws with a contextual `accept_wager failed:
-      // <reason>` (now carrying the arena-abort-codes humanizer too)
-      // that the catch block below surfaces verbatim.
-      assertTxSucceeded(result, "accept_wager", ARENA_ABORT_CODES);
+      assertTxSucceeded(result, "request_accept_wager", ARENA_ABORT_CODES);
       const digest = extractTxDigest(result);
 
-      // Optimistic local removal — the server will broadcast
-      // `wager_lobby_removed` soon but in the meantime the lobby UI
-      // would still show this entry, and signing has just released
-      // `signing=false` in the finally block. A double-click during
-      // that window is the exact race that produced the 2026-05-18
-      // incident; locking the entry locally on success closes it.
-      dispatch({
-        type: "REMOVE_WAGER_LOBBY_ENTRY",
-        wagerMatchId: entry.wagerMatchId,
-      });
-
+      // v5.2 — wager stays in lobby but transitions to PENDING_APPROVAL.
+      // The server will broadcast `wager_lobby_updated` with the new
+      // status + pendingChallenger payload after observing the chain.
       state.socket.send({
-        type: "wager_accepted",
+        type: "wager_request_accepted",
         wagerMatchId: entry.wagerMatchId,
         ...(digest ? { txDigest: digest } : {}),
       });
     } catch (err: any) {
-      console.error("[Wager] accept_wager failed:", err);
+      console.error("[Wager] request_accept_wager failed:", err);
       const raw = String(err?.message || "");
       const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
       dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet transaction rejected" });
@@ -588,13 +758,164 @@ export function MatchmakingQueue() {
     dAppKit,
     client,
     state.socket,
+    state.onChainCharacter,
     dispatch,
     walletAddress,
     wagerLobby,
+    level,
     balance.error,
     balance.mist,
     balance.loading,
   ]);
+
+  /** v5.2 — Creator approves a pending challenger. Merges challenger
+   *  escrow into the main escrow; status PENDING_APPROVAL → ACTIVE.
+   *  Server picks up the chain transition and starts the fight. */
+  const handleApproveChallenger = useCallback(async (entry: WagerLobbyEntry) => {
+    setSigning(true);
+    try {
+      const tx = buildApproveChallengerTx(entry.wagerMatchId);
+      const preflight = await simulateWagerTx(
+        client,
+        tx,
+        walletAddress,
+        "approve_challenger",
+      );
+      if (!preflight.ok) {
+        dispatch({ type: "SET_ERROR", message: preflight.message });
+        return;
+      }
+      const signer = new CurrentAccountSigner(dAppKit as any);
+      const result = await signer.signAndExecuteTransaction({ transaction: tx });
+      assertTxSucceeded(result, "approve_challenger", ARENA_ABORT_CODES);
+      const digest = extractTxDigest(result);
+
+      // The fight starts on the server's chain-observed ACTIVE transition.
+      // Reuse the v5.1 `wager_accepted` WS message — the server's existing
+      // `handleWagerAccepted` handler runs the gate + starts the fight.
+      state.socket.send({
+        type: "wager_accepted",
+        wagerMatchId: entry.wagerMatchId,
+        ...(digest ? { txDigest: digest } : {}),
+      });
+    } catch (err: any) {
+      console.error("[Wager] approve_challenger failed:", err);
+      const raw = String(err?.message || "");
+      const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
+      dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet transaction rejected" });
+    } finally {
+      setSigning(false);
+    }
+  }, [dAppKit, client, state.socket, dispatch, walletAddress]);
+
+  /** v5.2 — Creator declines a pending challenger. Refunds challenger;
+   *  wager returns to WAITING (another challenger can request next). */
+  const handleDeclineChallenger = useCallback(async (entry: WagerLobbyEntry) => {
+    setSigning(true);
+    try {
+      const tx = buildDeclineChallengerTx(entry.wagerMatchId);
+      const preflight = await simulateWagerTx(
+        client,
+        tx,
+        walletAddress,
+        "decline_challenger",
+      );
+      if (!preflight.ok) {
+        dispatch({ type: "SET_ERROR", message: preflight.message });
+        return;
+      }
+      const signer = new CurrentAccountSigner(dAppKit as any);
+      const result = await signer.signAndExecuteTransaction({ transaction: tx });
+      assertTxSucceeded(result, "decline_challenger", ARENA_ABORT_CODES);
+      const digest = extractTxDigest(result);
+
+      state.socket.send({
+        type: "wager_declined",
+        wagerMatchId: entry.wagerMatchId,
+        ...(digest ? { txDigest: digest } : {}),
+      });
+    } catch (err: any) {
+      console.error("[Wager] decline_challenger failed:", err);
+      const raw = String(err?.message || "");
+      const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
+      dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet decline rejected" });
+    } finally {
+      setSigning(false);
+    }
+  }, [dAppKit, client, state.socket, dispatch, walletAddress]);
+
+  /** v5.2 — Challenger self-exits while pending. Refund + return to
+   *  WAITING. Doesn't require creator action. */
+  const handleWithdrawChallenge = useCallback(async (entry: WagerLobbyEntry) => {
+    setSigning(true);
+    try {
+      const tx = buildWithdrawChallengeTx(entry.wagerMatchId);
+      const preflight = await simulateWagerTx(
+        client,
+        tx,
+        walletAddress,
+        "withdraw_challenge",
+      );
+      if (!preflight.ok) {
+        dispatch({ type: "SET_ERROR", message: preflight.message });
+        return;
+      }
+      const signer = new CurrentAccountSigner(dAppKit as any);
+      const result = await signer.signAndExecuteTransaction({ transaction: tx });
+      assertTxSucceeded(result, "withdraw_challenge", ARENA_ABORT_CODES);
+      const digest = extractTxDigest(result);
+
+      state.socket.send({
+        type: "wager_withdrawn",
+        wagerMatchId: entry.wagerMatchId,
+        ...(digest ? { txDigest: digest } : {}),
+      });
+    } catch (err: any) {
+      console.error("[Wager] withdraw_challenge failed:", err);
+      const raw = String(err?.message || "");
+      const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
+      dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet withdraw rejected" });
+    } finally {
+      setSigning(false);
+    }
+  }, [dAppKit, client, state.socket, dispatch, walletAddress]);
+
+  /** v5.2 — Anyone (typically the challenger) can clear a stale pending
+   *  challenge after the 5-min CHALLENGE_TIMEOUT_MS. Refunds challenger;
+   *  status returns to WAITING. */
+  const handleCancelExpiredChallenge = useCallback(async (entry: WagerLobbyEntry) => {
+    setSigning(true);
+    try {
+      const tx = buildCancelExpiredChallengeTx(entry.wagerMatchId);
+      const preflight = await simulateWagerTx(
+        client,
+        tx,
+        walletAddress,
+        "cancel_expired_challenge",
+      );
+      if (!preflight.ok) {
+        dispatch({ type: "SET_ERROR", message: preflight.message });
+        return;
+      }
+      const signer = new CurrentAccountSigner(dAppKit as any);
+      const result = await signer.signAndExecuteTransaction({ transaction: tx });
+      assertTxSucceeded(result, "cancel_expired_challenge", ARENA_ABORT_CODES);
+      const digest = extractTxDigest(result);
+
+      state.socket.send({
+        type: "wager_challenge_expired",
+        wagerMatchId: entry.wagerMatchId,
+        ...(digest ? { txDigest: digest } : {}),
+      });
+    } catch (err: any) {
+      console.error("[Wager] cancel_expired_challenge failed:", err);
+      const raw = String(err?.message || "");
+      const humanized = humanizeChainError(raw, ARENA_ABORT_CODES);
+      dispatch({ type: "SET_ERROR", message: humanized || raw || "Wallet clear-challenge rejected" });
+    } finally {
+      setSigning(false);
+    }
+  }, [dAppKit, client, state.socket, dispatch, walletAddress]);
 
   const handleCancelWager = useCallback(async (entry: WagerLobbyEntry) => {
     setSigning(true);
@@ -1120,8 +1441,6 @@ export function MatchmakingQueue() {
                       // Accept gate (Fix A silent-accept + Fix 1 cross-mode):
                       //   - own wager → Cancel only, no Accept
                       //   - busy in any mode → Accept disabled
-                      // ownWager keeps its specific reason; other busy
-                      // kinds get the generic busy reason.
                       const disableAccept = !isOwn && busy.busy;
                       const disableReason =
                         disableAccept
@@ -1133,8 +1452,13 @@ export function MatchmakingQueue() {
                         <WagerLobbyCard
                           key={entry.wagerMatchId}
                           entry={entry}
-                          isOwn={isOwn}
-                          onAccept={() => handleAcceptWager(entry)}
+                          viewerWallet={walletAddress}
+                          viewerLevel={level}
+                          onRequestAccept={() => handleRequestAccept(entry)}
+                          onApprove={() => handleApproveChallenger(entry)}
+                          onDecline={() => handleDeclineChallenger(entry)}
+                          onWithdraw={() => handleWithdrawChallenge(entry)}
+                          onCancelExpiredChallenge={() => handleCancelExpiredChallenge(entry)}
                           onCancel={() => handleCancelWager(entry)}
                           onInspect={
                             isOwn

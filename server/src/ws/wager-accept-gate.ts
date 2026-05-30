@@ -29,6 +29,12 @@
 export const STATUS_WAITING = 0 as const;
 export const STATUS_ACTIVE = 1 as const;
 export const STATUS_SETTLED = 2 as const;
+/** v5.2 — challenger has staked via `request_accept_wager`; creator
+ *  must approve_challenger (→ ACTIVE) or decline_challenger (→ WAITING).
+ *  Surfaces on the lobby as a "pending approval" card; the fight does
+ *  NOT start until the creator approves and a follow-up wager_accepted
+ *  WS message arrives. */
+export const STATUS_PENDING_APPROVAL = 3 as const;
 
 /** Minimal lobby-entry shape — narrows the dependency on `WagerLobbyEntry`. */
 export interface LobbyWagerLike {
@@ -97,9 +103,17 @@ export function decideAcceptOutcome(args: DecideAcceptOutcomeArgs): DecideAccept
     };
   }
 
-  // 2. Self-target. Chain `accept_wager` would also abort
-  //    (ECannotJoinOwnMatch=7), but the WS rejection is faster and clearer.
-  if (args.targetInLobby.creatorWallet.toLowerCase() === args.callerWallet.toLowerCase()) {
+  // 2. Self-target — only an abuse case when status is still WAITING
+  //    (pre-accept). v5.2 (2026-05-30): the creator IS the legitimate
+  //    caller of `wager_accepted` after they sign `approve_challenger`
+  //    — at that point status is already ACTIVE, so we must NOT reject.
+  //    The chain itself blocks v5.2 self-accept via ECannotJoinOwnMatch
+  //    (7) on `request_accept_wager`, so this gate only needs to catch
+  //    the v5.1-shape self-accept (caller=creator while status=WAITING).
+  if (
+    args.targetChainStatus !== STATUS_ACTIVE &&
+    args.targetInLobby.creatorWallet.toLowerCase() === args.callerWallet.toLowerCase()
+  ) {
     return { kind: 'reject', reason: 'You cannot accept your own wager' };
   }
 

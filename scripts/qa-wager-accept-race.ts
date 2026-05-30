@@ -86,12 +86,13 @@ const preflightSrc = readFileSync(
 function testPreflightWiredEverywhere(): void {
   section("Pre-flight simulateWagerTx wired into all signing paths");
 
-  // Locate each handler by its `const ... = useCallback(` declaration so we
-  // skip any earlier references inside comments / dependency arrays.
-  const acceptIdx = matchmakingSrc.indexOf('const handleAcceptWager = useCallback');
+  // v5.2 (2026-05-30) — handleAcceptWager → handleRequestAccept rename
+  // as part of the wager-fairness cut-over. The pre-flight pattern is
+  // identical; the simulation label is now "request_accept_wager".
+  const acceptIdx = matchmakingSrc.indexOf('const handleRequestAccept = useCallback');
   const acceptBlock = matchmakingSrc.slice(acceptIdx, acceptIdx + 7000);
-  contains(acceptBlock, 'simulateWagerTx(', 'handleAcceptWager calls simulateWagerTx');
-  contains(acceptBlock, '"accept_wager"', 'handleAcceptWager labels the simulation "accept_wager"');
+  contains(acceptBlock, 'simulateWagerTx(', 'handleRequestAccept calls simulateWagerTx');
+  contains(acceptBlock, '"request_accept_wager"', 'handleRequestAccept labels the simulation "request_accept_wager"');
 
   // cancel_wager pre-flight (same race shape — was equally vulnerable)
   const cancelIdx = matchmakingSrc.indexOf('const handleCancelWager = useCallback');
@@ -107,22 +108,23 @@ function testPreflightWiredEverywhere(): void {
 }
 
 // ============================================================================
-// (B) Pre-flight failure removes the stale lobby entry locally
+// (B) Pre-flight failure surfaces the error
 // ============================================================================
 
 function testPreflightFailureRemovesEntry(): void {
-  section("Pre-flight failure path drops the stale entry from local lobby");
-  const acceptIdx = matchmakingSrc.indexOf('const handleAcceptWager = useCallback');
+  section("Pre-flight failure path surfaces preflight.message");
+  const acceptIdx = matchmakingSrc.indexOf('const handleRequestAccept = useCallback');
   const acceptBlock = matchmakingSrc.slice(acceptIdx, acceptIdx + 7000);
-  // We look for the pattern: when preflight.ok === false, dispatch
-  // REMOVE_WAGER_LOBBY_ENTRY AND surface preflight.message.
   contains(
     acceptBlock,
     'if (!preflight.ok)',
-    'handleAcceptWager branches on preflight.ok',
+    'handleRequestAccept branches on preflight.ok',
   );
-  // The dispatch + SET_ERROR pair lives in the same `if` block.
   const failBranch = acceptBlock.slice(acceptBlock.indexOf('if (!preflight.ok)'));
+  // v5.2 — request_accept_wager STILL removes the stale entry locally on
+  // pre-flight failure (e.g. someone else already requested → status
+  // PENDING_APPROVAL) to keep the lobby view honest while the server
+  // broadcast lands.
   contains(
     failBranch.slice(0, 600),
     'REMOVE_WAGER_LOBBY_ENTRY',
@@ -136,42 +138,32 @@ function testPreflightFailureRemovesEntry(): void {
 }
 
 // ============================================================================
-// (C) Optimistic local removal on successful accept (closes the double-click race)
+// (C) v5.2 — wager STAYS in lobby after request_accept (transitions to
+// PENDING_APPROVAL via server broadcast); no optimistic REMOVE on success.
+// Instead we verify the WS notify shape is `wager_request_accepted`.
 // ============================================================================
 
 function testOptimisticRemovalOnSuccess(): void {
-  section("Successful accept dispatches REMOVE_WAGER_LOBBY_ENTRY before the WS send");
-  const acceptIdx = matchmakingSrc.indexOf('const handleAcceptWager = useCallback');
+  section("Post-sign WS notify is wager_request_accepted (v5.2 wire)");
+  const acceptIdx = matchmakingSrc.indexOf('const handleRequestAccept = useCallback');
   const acceptBlock = matchmakingSrc.slice(acceptIdx, acceptIdx + 7000);
 
-  // Find the post-sign success region: starts after assertTxSucceeded,
-  // ends at the catch block. The dispatch MUST fire before the
-  // socket.send so the lobby UI reflects truth synchronously.
-  const successIdx = acceptBlock.indexOf('assertTxSucceeded(result, "accept_wager"');
+  const successIdx = acceptBlock.indexOf('assertTxSucceeded(result, "request_accept_wager"');
   const catchIdx = acceptBlock.indexOf('} catch (err:');
   if (successIdx < 0 || catchIdx < 0 || catchIdx < successIdx) {
-    fail('locate post-sign success region', 'could not bracket the success branch in handleAcceptWager');
+    fail('locate post-sign success region', 'could not bracket the success branch in handleRequestAccept');
     return;
   }
   const successBlock = acceptBlock.slice(successIdx, catchIdx);
-  const removeIdx = successBlock.indexOf('REMOVE_WAGER_LOBBY_ENTRY');
-  const sendIdx = successBlock.indexOf('"wager_accepted"');
-  if (removeIdx < 0) {
-    fail('optimistic REMOVE_WAGER_LOBBY_ENTRY present', 'no dispatch in success branch');
-    return;
-  }
+  const sendIdx = successBlock.indexOf('"wager_request_accepted"');
   if (sendIdx < 0) {
-    fail('socket.send("wager_accepted") present', 'unable to verify ordering');
+    fail(
+      'socket.send("wager_request_accepted") present',
+      'v5.2 frontend must notify server via wager_request_accepted after request_accept_wager lands',
+    );
     return;
   }
-  if (removeIdx < sendIdx) {
-    ok('REMOVE_WAGER_LOBBY_ENTRY fires BEFORE the wager_accepted WS send');
-  } else {
-    fail(
-      'REMOVE_WAGER_LOBBY_ENTRY fires BEFORE the wager_accepted WS send',
-      'ordering wrong — race window between local clear and server broadcast reopens',
-    );
-  }
+  ok('wager_request_accepted WS notification fires after successful request_accept_wager');
 }
 
 // ============================================================================

@@ -297,6 +297,16 @@ export interface FightState {
   status: "waiting" | "active" | "finished";
   winner?: string;
   wagerAmount?: number;
+  /** v5.2 — the on-chain WagerMatch id this fight settles. Set only
+   *  for wager fights (undefined for friendly/ranked). Used by the
+   *  Reclaim Stalled Wager banner. */
+  wagerMatchId?: string;
+  /** v5.2 — server-clock timestamp of the on-chain `accept_wager` /
+   *  `approve_challenger` confirmation (the chain `accepted_at` field
+   *  mirrored into FightState). Used by the Reclaim banner to compare
+   *  against WAGER_RESOLUTION_TIMEOUT_MS = 30 min. If absent (server
+   *  on older wire), the banner stays hidden — graceful degrade. */
+  wagerAcceptedAtMs?: number;
   turnDeadline?: number;
   /** True while the server has paused the turn timer (one or more
    *  players in the reconnect-grace window). The client mirrors this
@@ -375,15 +385,43 @@ export interface MarketplaceListing {
 }
 
 // ===== WAGER LOBBY =====
+/** Optional pending-challenger payload — set only when the server has
+ *  observed a `request_accept_wager` and the wager is in
+ *  STATUS_PENDING_APPROVAL on chain. The creator approves/declines; the
+ *  challenger can withdraw; anyone can fire cancel_expired_challenge
+ *  after CHALLENGE_TIMEOUT_MS. */
+export interface PendingChallenger {
+  wallet: string;
+  name: string;
+  level: number;
+  rating: number;
+  stats: CharacterStats;
+  /** Server-clock timestamp the request landed. Used by the UI to
+   *  show "Awaiting approval — X min remaining" and to gate the
+   *  cancel_expired_challenge action. */
+  pendingAt: number;
+}
+
 export interface WagerLobbyEntry {
   wagerMatchId: string;
   creatorWallet: string;
+  creatorCharacterId?: string;
   creatorName: string;
   creatorLevel: number;
   creatorRating: number;
   creatorStats: CharacterStats;
   wagerAmount: number;
   createdAt: number;
+  /** v5.2 — chain status. 0=WAITING, 1=ACTIVE, 2=SETTLED, 3=PENDING_APPROVAL.
+   *  Optional for backwards-compat: a missing field means the server is
+   *  still on v5.1-shape wire and the entry is implicitly WAITING. */
+  status?: number;
+  /** v5.2 — creator's level snapshot at create_wager time (chain-stored
+   *  in `WagerMatch.player_a_level`). The challenger's ±1 bracket check
+   *  compares against THIS, not the live creatorLevel. */
+  playerALevelSnapshot?: number;
+  /** v5.2 — present only in STATUS_PENDING_APPROVAL. */
+  pendingChallenger?: PendingChallenger;
 }
 
 // ===== LOOT =====

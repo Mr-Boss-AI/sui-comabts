@@ -78,6 +78,22 @@ function testEveryAbortCodeHasCopy(): void {
     8: "EUnauthorized",
     9: "ENotExpired",
     10: "ENoOpponent",
+    // v5.1
+    11: "EAlreadyHasOpenWager",
+    // v5.2 — wager fairness
+    12: "ELevelOutOfBracket",
+    13: "ENotPendingApproval",
+    14: "EChallengerSlotTaken",
+    15: "ENotCreatorForApproval",
+    16: "ENotPendingChallenger",
+    17: "EChallengeNotExpired",
+    18: "ENotActiveForReclaim",
+    19: "EWagerNotStalled",
+    20: "ENotWagerParticipant",
+    // v5.2 — judgment-call codes (spec §14.1)
+    21: "ECreatorFightLocked",
+    22: "ENotCharacterOwner",
+    23: "EWrongExpiryEntrypoint",
   };
   for (const [code, name] of Object.entries(expected)) {
     const msg = ARENA_ABORT_CODES[Number(code)];
@@ -89,7 +105,14 @@ function testEveryAbortCodeHasCopy(): void {
 function testNoStrayCodes(): void {
   section("ARENA_ABORT_CODES — no stray entries");
   const keys = Object.keys(ARENA_ABORT_CODES).map(Number);
-  const allowed = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  // v5.1 baseline (0–11) + v5.2 wager-fairness range (12–20) + v5.2
+  // judgment-call codes 21/22/23 (see docs/V5.2_WAGER_FAIRNESS_SPEC.md
+  // §14.1). If the Move source adds another const, append here.
+  const allowed = new Set([
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23,
+  ]);
   for (const k of keys) {
     if (allowed.has(k)) ok(`code ${k} is a known arena constant`);
     else

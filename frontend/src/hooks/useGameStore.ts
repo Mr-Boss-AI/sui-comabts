@@ -305,6 +305,11 @@ export type GameAction =
   | { type: "SET_PENDING_WAGER_ACCEPT"; payload: GameState["pendingWagerAccept"] }
   | { type: "SET_WAGER_LOBBY"; entries: WagerLobbyEntry[] }
   | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
+  /** v5.2 — server fires `wager_lobby_updated` for in-place transitions
+   *  (WAITING → PENDING_APPROVAL → WAITING). Swaps the existing entry
+   *  rather than add/remove pair, preserving render position + avoiding
+   *  a row flicker. Matched by `wagerMatchId`; appends if not present. */
+  | { type: "UPDATE_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
   | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
   | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
   | { type: "SHOW_TWO_HANDED_CONFLICT_MODAL" }
@@ -553,6 +558,18 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, wagerLobby: action.entries };
     case "ADD_WAGER_LOBBY_ENTRY":
       return { ...state, wagerLobby: [...state.wagerLobby, action.entry] };
+    case "UPDATE_WAGER_LOBBY_ENTRY": {
+      // v5.2 — in-place swap for PENDING_APPROVAL transitions. If the
+      // entry isn't in the lobby yet (rare: late ADD), append it so the
+      // user sees the latest state regardless of ordering.
+      const idx = state.wagerLobby.findIndex(e => e.wagerMatchId === action.entry.wagerMatchId);
+      if (idx === -1) {
+        return { ...state, wagerLobby: [...state.wagerLobby, action.entry] };
+      }
+      const next = state.wagerLobby.slice();
+      next[idx] = action.entry;
+      return { ...state, wagerLobby: next };
+    }
     case "REMOVE_WAGER_LOBBY_ENTRY":
       return { ...state, wagerLobby: state.wagerLobby.filter(e => e.wagerMatchId !== action.wagerMatchId) };
     case "UPDATE_TURN":

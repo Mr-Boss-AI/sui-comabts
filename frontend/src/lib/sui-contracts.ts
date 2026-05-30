@@ -467,35 +467,170 @@ export async function fetchKioskItems(
 //  Wager
 // =============================================================================
 
-/** v5.1 — create_wager threads OpenWagerRegistry (shared). Aborts with
- * EAlreadyHasOpenWager (code 11) if the caller already has an open wager. */
-export function buildCreateWagerTx(stakeAmountMist: bigint): Transaction {
+/** v5.2 — create_wager threads OpenWagerRegistry (shared) AND now takes a
+ * &Character reference. The contract snapshots `character::level` onto
+ * `WagerMatch.player_a_level` at create time so subsequent ±1 bracket
+ * checks compare against the snapshot, not the live level (creator
+ * levelling up while WAITING doesn't lock out their original bracket).
+ *
+ * Aborts:
+ *   - EInvalidStake (0)         if stake == 0
+ *   - ENotCharacterOwner (22)   if the Character's owner != sender
+ *   - ECreatorFightLocked (21)  if the Character has an active fight-lock
+ *   - EAlreadyHasOpenWager (11) if sender already has an open wager
+ */
+export function buildCreateWagerTx(
+  stakeAmountMist: bigint,
+  characterObjectId: string,
+): Transaction {
   const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
     target: `${PACKAGE_ID}::arena::create_wager`,
-    arguments: [stakeCoin, tx.object(registry), tx.object(SUI_CLOCK)],
+    arguments: [
+      stakeCoin,
+      tx.object(characterObjectId),
+      tx.object(registry),
+      tx.object(SUI_CLOCK),
+    ],
   });
   return tx;
 }
 
-/** v5.1 — accept_wager threads OpenWagerRegistry (shared, read-only).
- * Aborts with EAlreadyHasOpenWager (code 11) if the acceptor is themselves
- * a creator — closes the silent-accept path at the chain layer. */
-export function buildAcceptWagerTx(wagerMatchId: string, stakeAmountMist: bigint): Transaction {
+/** v5.2 — request_accept_wager REPLACES v5.1's accept_wager. Challenger's
+ * stake parks in `challenger_escrow`; wager status moves WAITING →
+ * PENDING_APPROVAL. The creator must then call approve_challenger (or
+ * decline_challenger); the challenger can withdraw_challenge unilaterally;
+ * anyone can cancel_expired_challenge after CHALLENGE_TIMEOUT_MS (5 min).
+ *
+ * Takes a &Character so the contract can (a) verify ownership against
+ * sender and (b) enforce the ±LEVEL_BRACKET = 1 fairness gate against
+ * `wager.player_a_level`.
+ *
+ * Aborts:
+ *   - EMatchNotWaiting (1)      target isn't WAITING
+ *   - EChallengerSlotTaken (14) defensive — pending_challenger already set
+ *   - EAlreadyHasOpenWager (11) sender is themselves a creator
+ *   - ECannotJoinOwnMatch (7)   defensive — sender == target's player_a
+ *   - ENotCharacterOwner (22)   Character.owner != sender
+ *   - ELevelOutOfBracket (12)   |challenger level - snapshot| > 1
+ *   - EStakeMismatch (3)        stake != wager.stake_amount
+ */
+export function buildRequestAcceptWagerTx(
+  wagerMatchId: string,
+  characterObjectId: string,
+  stakeAmountMist: bigint,
+): Transaction {
   const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();
   const [stakeCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(stakeAmountMist)]);
   tx.moveCall({
-    target: `${PACKAGE_ID}::arena::accept_wager`,
-    arguments: [tx.object(wagerMatchId), stakeCoin, tx.object(registry), tx.object(SUI_CLOCK)],
+    target: `${PACKAGE_ID}::arena::request_accept_wager`,
+    arguments: [
+      tx.object(wagerMatchId),
+      stakeCoin,
+      tx.object(characterObjectId),
+      tx.object(registry),
+      tx.object(SUI_CLOCK),
+    ],
+  });
+  return tx;
+}
+
+/** v5.2 — approve_challenger. Creator-only. Merges challenger_escrow into
+ * the main escrow, transitions PENDING_APPROVAL → ACTIVE. Reuses the v5.1
+ * `WagerAccepted` event shape so existing indexers keep working.
+ *
+ * Aborts:
+ *   - ENotPendingApproval (13)    wager isn't PENDING_APPROVAL
+ *   - ENotCreatorForApproval (15) sender != player_a
+ *   - ENoOpponent (10)            defensive — no pending challenger
+ */
+export function buildApproveChallengerTx(wagerMatchId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::approve_challenger`,
+    arguments: [tx.object(wagerMatchId), tx.object(SUI_CLOCK)],
+  });
+  return tx;
+}
+
+/** v5.2 — decline_challenger. Creator-only. Refunds the challenger's stake
+ * from challenger_escrow, transitions PENDING_APPROVAL → WAITING (so a
+ * different challenger can request).
+ *
+ * Aborts: ENotPendingApproval (13), ENotCreatorForApproval (15),
+ * ENoOpponent (10).
+ */
+export function buildDeclineChallengerTx(wagerMatchId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::decline_challenger`,
+    arguments: [tx.object(wagerMatchId)],
+  });
+  return tx;
+}
+
+/** v5.2 — withdraw_challenge. Challenger-only self-exit. Strictly
+ * stronger than lock-on-approval: the challenger never has to wait for
+ * the creator. Refunds the challenger; status PENDING_APPROVAL → WAITING.
+ *
+ * Aborts: ENotPendingApproval (13), ENoOpponent (10),
+ * ENotPendingChallenger (16).
+ */
+export function buildWithdrawChallengeTx(wagerMatchId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::withdraw_challenge`,
+    arguments: [tx.object(wagerMatchId)],
+  });
+  return tx;
+}
+
+/** v5.2 — cancel_expired_challenge. Permissionless after CHALLENGE_TIMEOUT_MS
+ * (5 min). Refunds the challenger's stake; status PENDING_APPROVAL → WAITING.
+ *
+ * Aborts: ENotPendingApproval (13), EChallengeNotExpired (17),
+ * ENoOpponent (10).
+ */
+export function buildCancelExpiredChallengeTx(wagerMatchId: string): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::cancel_expired_challenge`,
+    arguments: [tx.object(wagerMatchId), tx.object(SUI_CLOCK)],
+  });
+  return tx;
+}
+
+/** v5.2 — reclaim_stalled_wager. The referee-liveness escape hatch. Either
+ * participant in an ACTIVE wager can call this after
+ * WAGER_RESOLUTION_TIMEOUT_MS (30 min) to refund both stakes — no winner
+ * declared. Closes the centralized-referee single-point-of-failure: even
+ * if TREASURY is down/compromised/stalled, players keep an on-chain right
+ * to recover their escrow. Same shape as settle_tie, but invoked by a
+ * participant rather than treasury.
+ *
+ * Aborts:
+ *   - ENotActiveForReclaim (18)  status != ACTIVE
+ *   - ENoOpponent (10)           defensive — player_b unset
+ *   - EWagerNotStalled (19)      elapsed < 30 min (the mid-fight abuse gate)
+ *   - ENotWagerParticipant (20)  sender isn't player_a or player_b
+ */
+export function buildReclaimStalledWagerTx(wagerMatchId: string): Transaction {
+  const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${PACKAGE_ID}::arena::reclaim_stalled_wager`,
+    arguments: [tx.object(wagerMatchId), tx.object(registry), tx.object(SUI_CLOCK)],
   });
   return tx;
 }
 
 /** v5.1 — cancel_wager threads OpenWagerRegistry (shared). Removes the
- * registry entry on success so the creator can post a fresh wager. */
+ * registry entry on success so the creator can post a fresh wager.
+ * NOTE (v5.2): PENDING_APPROVAL is NOT cancellable here — the creator
+ * must decline_challenger first to return to WAITING. */
 export function buildCancelWagerTx(wagerMatchId: string): Transaction {
   const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();
@@ -506,7 +641,10 @@ export function buildCancelWagerTx(wagerMatchId: string): Transaction {
   return tx;
 }
 
-/** v5.1 — cancel_expired_wager threads OpenWagerRegistry (shared). Anyone-callable. */
+/** v5.1 — cancel_expired_wager threads OpenWagerRegistry (shared).
+ * Permissionless WAITING/ACTIVE arms unchanged in v5.2. PENDING_APPROVAL
+ * is NOT in scope — that state aborts with EWrongExpiryEntrypoint (23)
+ * directing the caller to cancel_expired_challenge instead. */
 export function buildCancelExpiredWagerTx(wagerMatchId: string): Transaction {
   const registry = requireV51Registry("NEXT_PUBLIC_OPEN_WAGER_REGISTRY_ID", OPEN_WAGER_REGISTRY_ID);
   const tx = new Transaction();

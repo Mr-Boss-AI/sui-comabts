@@ -185,6 +185,10 @@ export default function GameProvider({
         case "wager_lobby_added":
           dispatch({ type: "ADD_WAGER_LOBBY_ENTRY", entry: msg.entry });
           break;
+        case "wager_lobby_updated":
+          // v5.2 — in-place transition (WAITING ↔ PENDING_APPROVAL).
+          dispatch({ type: "UPDATE_WAGER_LOBBY_ENTRY", entry: msg.entry });
+          break;
         case "wager_lobby_removed":
           dispatch({ type: "REMOVE_WAGER_LOBBY_ENTRY", wagerMatchId: msg.wagerMatchId });
           break;

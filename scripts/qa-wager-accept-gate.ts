@@ -554,9 +554,26 @@ function testFailedTransactionBranchingShape(): void {
     src.includes('assertTxSucceeded(result, "create_wager", ARENA_ABORT_CODES)'),
     'create_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
+  // v5.2 (2026-05-30) — accept_wager is REMOVED; the v5.2 handshake
+  // replaces it with request_accept_wager + approve_challenger +
+  // decline_challenger + withdraw_challenge + cancel_expired_challenge.
+  // Each new entrypoint passes ARENA_ABORT_CODES at its own assertTxSucceeded
+  // site for the post-sign humanizer.
   truthy(
-    src.includes('assertTxSucceeded(result, "accept_wager", ARENA_ABORT_CODES)'),
-    'accept_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
+    src.includes('assertTxSucceeded(result, "request_accept_wager", ARENA_ABORT_CODES)'),
+    'request_accept_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
+  );
+  truthy(
+    src.includes('assertTxSucceeded(result, "approve_challenger", ARENA_ABORT_CODES)'),
+    'approve_challenger path passes ARENA_ABORT_CODES to assertTxSucceeded',
+  );
+  truthy(
+    src.includes('assertTxSucceeded(result, "decline_challenger", ARENA_ABORT_CODES)'),
+    'decline_challenger path passes ARENA_ABORT_CODES to assertTxSucceeded',
+  );
+  truthy(
+    src.includes('assertTxSucceeded(result, "withdraw_challenge", ARENA_ABORT_CODES)'),
+    'withdraw_challenge path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   truthy(
     src.includes('simulateWagerTx('),

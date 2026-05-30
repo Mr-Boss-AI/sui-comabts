@@ -100,10 +100,11 @@ function testHelperStructure(): void {
 // ============================================================================
 
 function testWiringInAcceptWager(): void {
-  section("handleAcceptWager — pre-sign presence check wired");
-  const idx = matchmaking.indexOf("const handleAcceptWager = useCallback");
+  // v5.2 (2026-05-30) — handleAcceptWager → handleRequestAccept rename.
+  section("handleRequestAccept — pre-sign presence check wired");
+  const idx = matchmaking.indexOf("const handleRequestAccept = useCallback");
   const block = matchmaking.slice(idx, idx + 7500);
-  contains(block, "verifyServerHasCharacter", "handleAcceptWager calls verifyServerHasCharacter");
+  contains(block, "verifyServerHasCharacter", "handleRequestAccept calls verifyServerHasCharacter");
   // Ordering: presence check must run BEFORE simulateWagerTx (pre-flight
   // dry-run) — if the server lost the character there's no point dry-
   // running, and the popup must not open.
@@ -160,17 +161,28 @@ function testWiringInCreateWager(): void {
 
 function testAuditCompleteness(): void {
   section("Audit pin — every signAndExecuteTransaction call site routes through the guard");
-  // Count distinct signAndExecuteTransaction calls. We expect at most
-  // 3 (create_wager, accept_wager, cancel_wager). The cancel path
-  // doesn't need the orphan-guard (cancel can't orphan anything — it
-  // releases an escrow back to the creator) but we still pin the
-  // count so a future site doesn't sneak in without a presence check.
+  // v5.2 (2026-05-30) — expanded to 7 sites for the wager-fairness
+  // handshake:
+  //   1. create_wager        (handleQueue)              — guarded
+  //   2. request_accept_wager (handleRequestAccept)     — guarded
+  //   3. approve_challenger  (handleApproveChallenger)  — read-only state mutation (no escrow open)
+  //   4. decline_challenger  (handleDeclineChallenger)  — refunds challenger (can't orphan)
+  //   5. withdraw_challenge  (handleWithdrawChallenge)  — refunds challenger (can't orphan)
+  //   6. cancel_expired_challenge (handleCancelExpiredChallenge) — refunds challenger
+  //   7. cancel_wager        (handleCancelWager)        — refunds creator (can't orphan)
+  //
+  // Only paths 1 + 2 LOCK new SUI on chain — those are the orphan-vulnerable
+  // sites and are presence-check guarded (tested in testWiringInAcceptWager +
+  // testWiringInCreateWager above). Paths 3-7 only release escrow, never lock
+  // it, so a missing-character race can't orphan funds. The audit pin keeps
+  // the count honest so a future "lock new SUI" entrypoint forces the test
+  // to fail until its guard is wired.
   const matches = matchmaking.match(/signAndExecuteTransaction\(/g) ?? [];
-  if (matches.length === 3) {
-    ok("exactly 3 signAndExecuteTransaction sites (create / accept / cancel)");
+  if (matches.length === 7) {
+    ok("exactly 7 signAndExecuteTransaction sites (v5.2 wager-fairness handshake)");
   } else {
     fail(
-      "exactly 3 signAndExecuteTransaction sites",
+      "exactly 7 signAndExecuteTransaction sites",
       `found ${matches.length} — a new site needs the presence-check guard too`,
     );
   }
