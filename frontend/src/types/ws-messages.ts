@@ -61,7 +61,31 @@ export type ClientMessage =
   // wallets swallow it) doesn't force a `'' as string` cast at the call
   // site (pre-fix that was a `digest ?? undefined` against a required
   // field, flagged as a TS regression at e91c8e7).
+  //
+  // v5.2 retains this name as the FINAL "fight starts" signal — the server
+  // probes chain after approve_challenger lands and sees STATUS_ACTIVE.
+  // Sent by the CREATOR after `approve_challenger` succeeds. The
+  // intermediate request_accept handshake uses the new shapes below.
   | { type: "wager_accepted"; wagerMatchId: string; txDigest?: string }
+  // v5.2 — challenger ran `request_accept_wager`; chain moved
+  // WAITING → PENDING_APPROVAL. Server pins the pending challenger
+  // server-side + broadcasts the updated lobby entry.
+  | { type: "wager_request_accepted"; wagerMatchId: string; txDigest?: string }
+  // v5.2 — creator ran `decline_challenger`; chain moved
+  // PENDING_APPROVAL → WAITING. Server clears the pending slot +
+  // broadcasts.
+  | { type: "wager_declined"; wagerMatchId: string; txDigest?: string }
+  // v5.2 — challenger self-exited via `withdraw_challenge`; chain
+  // moved PENDING_APPROVAL → WAITING. Server clears the pending slot.
+  | { type: "wager_withdrawn"; wagerMatchId: string; txDigest?: string }
+  // v5.2 — anyone ran `cancel_expired_challenge` after the 5-min
+  // CHALLENGE_TIMEOUT_MS; chain moved PENDING_APPROVAL → WAITING.
+  | { type: "wager_challenge_expired"; wagerMatchId: string; txDigest?: string }
+  // v5.2 — referee-liveness escape hatch fired. Either participant ran
+  // `reclaim_stalled_wager` after the 30-min WAGER_RESOLUTION_TIMEOUT_MS;
+  // chain moved ACTIVE → SETTLED with both stakes refunded (no winner).
+  // Server drops the wager_in_flight row + ends any orphan fight state.
+  | { type: "wager_reclaimed"; wagerMatchId: string; txDigest?: string }
   | { type: "fight_action"; attackZones: Zone[]; blockZones: Zone[] }
   | { type: "chat_message"; content: string; target?: string }
   | { type: "get_online_players" }
@@ -230,7 +254,30 @@ export type ServerMessage =
   | { type: "wager_settled"; txDigest: string; wagerMatchId: string }
   | { type: "wager_lobby_list"; entries: WagerLobbyEntry[] }
   | { type: "wager_lobby_added"; entry: WagerLobbyEntry }
+  // v5.2 — server fires this whenever a wager's lobby-visible state
+  // changes WITHOUT the entry being removed. Fired on PENDING_APPROVAL
+  // transitions: request_accept arriving, decline/withdraw/expire
+  // returning the entry to WAITING. The frontend swaps the existing
+  // entry in-place — same `wagerMatchId`, new `status` /
+  // `pendingChallenger` payload.
+  | { type: "wager_lobby_updated"; entry: WagerLobbyEntry }
   | { type: "wager_lobby_removed"; wagerMatchId: string }
+  /** v5.2 (2026-05-31) — targeted notification to the party affected
+   *  by a wager-state transition they DIDN'T sign:
+   *    declined         → sent to the pending challenger when creator declines
+   *    withdrawn        → sent to the creator when challenger withdraws
+   *    challengeExpired → sent to the pending challenger when anyone fires
+   *                       cancel_expired_challenge (5-min timeout)
+   *  Server-side toast surface — the lobby-card already updates via
+   *  wager_lobby_updated; this is the explicit "your stake was just
+   *  refunded" / "your challenger walked away" UX. Frontend routes
+   *  these to the existing toast via SET_ERROR (non-sticky). */
+  | {
+      type: "wager_notification";
+      kind: "declined" | "withdrawn" | "challengeExpired";
+      wagerMatchId: string;
+      message: string;
+    }
   | { type: "character_updated_onchain" }
   | { type: "character_deleted" }
   /** Level-up celebration trigger (Fix 3, 2026-05-04). Server emits

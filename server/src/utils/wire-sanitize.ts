@@ -91,3 +91,44 @@ export function sanitizeEquipment(
   }
   return out;
 }
+
+/**
+ * v5.2 (2026-05-30) — sanitizer for the full `character_data` /
+ * `points_allocated` wire payloads. Moved out of `ws/handler.ts` so
+ * fight-room.ts can also push a fresh `character_data` after the
+ * post-fight chain `update_after_fight` lands without creating a
+ * `handler.ts → fight-room.ts → handler.ts` import cycle.
+ *
+ * Behaviour mirrors the prior `sanitizeCharacter` in handler.ts
+ * 1-for-1 — including the unallocatedPoints diagnostic log when
+ * non-zero, the BUG E `onChainObjectId` carry-through, and the
+ * 13-slot equipment guarantee via sanitizeEquipment.
+ */
+export function sanitizeCharacter(character: any): Record<string, any> {
+  const unallocatedPoints = character.unallocatedPoints || 0;
+  if (unallocatedPoints > 0) {
+    console.log(
+      `[Character] Sending ${character.name} with ${unallocatedPoints} unallocated points`,
+    );
+  }
+  return {
+    id: character.id,
+    name: character.name,
+    level: character.level,
+    xp: character.xp,
+    walletAddress: character.walletAddress,
+    onChainObjectId: character.onChainObjectId ?? null,
+    stats: {
+      strength: character.stats.strength,
+      dexterity: character.stats.dexterity,
+      intuition: character.stats.intuition,
+      endurance: character.stats.endurance,
+    },
+    unallocatedPoints,
+    equipment: sanitizeEquipment(character.equipment),
+    wins: character.wins,
+    losses: character.losses,
+    draws: character.draws,
+    rating: character.rating,
+  };
+}

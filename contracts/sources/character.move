@@ -166,6 +166,16 @@ module sui_combats::character {
         xp_for_level(level)
     }
 
+    /// v5.2 — Test helper. Forces the character's level field for level-
+    /// bracket tests in arena_tests without grinding XP through
+    /// update_after_fight (which would also bump wins/losses). Not exposed
+    /// outside of test builds — production-side levels only move via
+    /// update_after_fight / update_after_fight_draw.
+    #[test_only]
+    public fun set_level_for_testing(character: &mut Character, level: u8) {
+        character.level = level;
+    }
+
     // ===== XP curve (production values per GDD §9.1) =====
     // Anchors: L2=100, L5=1500, L10=50k, L15=350k, L20=1M.
     // Intermediate levels interpolated geometrically.

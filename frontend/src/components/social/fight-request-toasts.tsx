@@ -187,7 +187,8 @@ function FightRequestToastCard({ request }: { request: FightRequestWire }) {
           }}
         >
           Click Accept again to confirm. Once both sides commit you'll need to
-          sign accept_wager to match the {stake} stake.
+          sign request_accept_wager to match the {stake} stake; the creator
+          then approves to start the fight (v5.2 handshake).
         </p>
       )}
       <div style={{ display: "flex", gap: 6, marginTop: 12 }}>

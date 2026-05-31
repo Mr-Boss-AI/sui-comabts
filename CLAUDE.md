@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **sui-comabts** (6739 symbols, 11635 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **sui-comabts** (6737 symbols, 11652 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -44,68 +44,73 @@ This project is indexed by GitNexus as **sui-comabts** (6739 symbols, 11635 rela
 
 ---
 
-# v5.1 testnet — current runtime (2026-05-28, post-session)
+# v5.2 testnet — current runtime (2026-05-30, post-cut-over)
 
-> Hand-maintained reference for the live testnet runtime. Updated end of
-> session 2026-05-28. The GitNexus block above this line is auto-rewritten
-> by the post-commit hook; everything below this header is preserved.
+> Hand-maintained reference for the live testnet runtime. Updated 2026-05-30
+> after the v5.2 wager-fairness app-code cut-over completed and is ready
+> for live QA. The GitNexus block above this line is auto-rewritten by
+> the post-commit hook; everything below this header is preserved.
 
 ## Branch + commit
 
-- Working branch: `feature/v5.1-contracts` (NOT yet merged to `main`)
-- HEAD on origin: `0ab7677` (pushed 2026-05-28)
-- `main` mainline stays at `08ff991` (v4-era) per standing rule — no
-  merge until v5.2 + external audit
+- Working branch: `feature/v5.2-wager-fairness` (local only — NOT pushed, NOT merged to `main`)
+- `main` at `6fdb18d` (v5.1 baseline, annotated tag `v5.1`) — untouched
+- v5.1 package + v5.1 shared objects still live on chain; v5.2 is the
+  parallel runtime the frontend + server are now pointed at
 
-## v5.1 final deployment (testnet)
+## v5.2 deployment (testnet, live)
 
 | Artefact | ID |
 |---|---|
-| Package | `0x308645f3d85ba6d7647f660610faba5dbdae2822819939bc917302a20cf33717` |
-| AdminCap (→ TREASURY) | `0x2cbeef93fb0d167ccd87fd67f99542b7e2387601a0a3644bb19a600db3461c50` |
-| UpgradeCap (→ TREASURY) | `0x7434a214aa346c5af0199bee519cc8203ce4d8633bcc8397fba08e281dbbb07a` |
-| Publisher (→ TREASURY) | `0x2cb1d94c837bae772ce1122f8c17314bc2fdb0bbec4991540e1a38c4c28495b1` |
-| TransferPolicy\<Item\> (shared) | `0x0483cd855318921a330ff2d8967fb925382d76c7360a29a5d2bbf676bd13f69f` |
-| TransferPolicyCap (→ TREASURY) | `0xee5a808c9aa22daf8c57420fa06e9ae0073b0d6a22e55a8be7c84da3f6ed31c8` |
-| CharacterRegistry (shared) | `0xad05d60e00149ab105ee60f8eaaec1542ec08d8c8795da53305f01bde4c9105f` |
-| OpenWagerRegistry (shared) | `0xa3be188a6b636bdf12d1d7b79f866fc6d22f287c60daf7157f95b3c246908e20` |
-| KioskRegistry (shared) | `0x05d355fdf844bc615d66bd621f1a8aa7f673784f70d1d991681e4c6a012d4860` |
-| Display\<Character\> | `0x94a855326a01a91e247a8062d9c475eddf5770829f52d7dbfceef535a5fc0885` |
-| Display\<Item\> | `0x32bdda84dd589ed21e804171b924cc5b3676f97b35b55dff2d064d035a5aa658` |
+| Package | `0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f` |
+| AdminCap (→ TREASURY) | `0x41475565a81cf769948ea1268d850fc144c7e995d91017d4115730dc5d617c44` |
+| UpgradeCap (→ TREASURY) | `0xdb6d2be80538cc43a2b9aed8299a3e97f4804bba07f656c42baf604ca4a36212` |
+| Publisher (→ TREASURY) | `0x4010478364ea545645200d43c6080c5f48218b45bbbc9b82d9a4748aece2bd9e` |
+| TransferPolicy\<Item\> (shared) | `0x7d2aa5d31544d16b28998a7bfdce112c2bd02be79da7f9fbbd34e63d41de568d` |
+| TransferPolicyCap (→ TREASURY) | `0x93efafa2f2038476b209af420efb00f1fd7c12054290249c2707c67639359f1d` |
+| CharacterRegistry (shared) | `0x84c78a861f3ee2d2299fec507640605c71e313bfbea340bd490a19a04d8492ff` |
+| OpenWagerRegistry (shared) | `0xabf10378c0b8a65f883098440cfcb68809f14f66fcdb1278106dbd88bf086e16` |
+| KioskRegistry (shared) | `0xbc5f55674711b69ea830603d715853f50e40028702be9e837aaf8afd50bc3efe` |
+| Display\<Character\> | `0x9c8fc218e52a7bab1a95aa2bbbfbf9199243523cc8cd94d7e5cecb1db2b07b8b` |
+| Display\<Item\> | `0x8b75f8f6d90be38f41ddd4105b73e8f3857ad53d510e140b18bd46c1580fa88e` |
 | TREASURY wallet | `0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d` |
-| TREASURY kiosk | `0x9a492e52f998a76c355d65b0aad2db3c35812837da36aed9666c7b2661dfdb36` |
-| KioskOwnerCap | `0x668805a60262971d6044c1ad8c861dd6e0ce0d69bb93eda46690214d1820fed2` |
+| TREASURY kiosk (v5.1 — unchanged) | `0x9a492e52f998a76c355d65b0aad2db3c35812837da36aed9666c7b2661dfdb36` |
+| KioskOwnerCap (v5.1) | `0x668805a60262971d6044c1ad8c861dd6e0ce0d69bb93eda46690214d1820fed2` |
 
-Two earlier v5.1 publishes (`0x78534...` 10-slot original; `0x95c23...`
-13-slot with pauldrons) are SUPERSEDED — their bytecode lives on chain
-per Sui semantics, but the running servers point at the final package.
-The full chain is in `deployment.testnet-v5.1.json::supersedes`.
+Royalty rule on v5.2 TransferPolicy: `amount_bp = 250` (2.5%), `min_amount = 1000` MIST. Matches v5.1 parity exactly.
+
+v5.2 is a fresh publish — NOT an upgrade. The struct shape changed (WagerMatch added 4 fields). v5.1 package is superseded for new wagers but its bytecode + shared objects remain live for any v5.1-era settlement straggler. Supersede chain: `deployment.testnet-v5.2.json::supersedes`.
+
+## v5.2 wager-fairness — what changed semantically
+
+- `accept_wager` REMOVED. Replaced with the request → approve / decline / withdraw / cancel-expired-challenge handshake.
+- New status `STATUS_PENDING_APPROVAL = 3` between WAITING and ACTIVE.
+- ±1 level bracket enforced on `request_accept_wager` against the creator's snapshot at create time.
+- `reclaim_stalled_wager` participant escape hatch (30-min `WAGER_RESOLUTION_TIMEOUT_MS`).
+- Abort codes 12–23 added.
 
 ## Test wallets
 
-- Mr_Boss `0xf669789c0e6d30627e8480b5886721d608d796277aab0664cfa84b2c04590f33` — v5.1 character minted, Tank build equipped
-- Sx `0x03c33df0c97d4dfb3792d340bbf83891e2a20d653155874fd37a350ad443985f` — not yet on v5.1
+- Mr_Boss `0xf669789c…0590f33` — v5.1 character minted (still usable; Character module unchanged in v5.2)
+- Sx `0x03c33df0…443985f` — v5.1 character minted
 
-## Pinata CIDs (operational catalog)
+## Pinata CIDs (catalog)
 
 - Lv1 Common (Ponke set, 26 items): `bafybeib36hi7qupllhjymo2qnte2nghbiowkwxj2hb2fgbs5jly2ln3ida`
 - Lv2 Uncommon (Scavenger set, 26 items): `bafybeidsjl6kihow5vzgssvoyjo2nvworbwhmk53f5vfe3wp56tqzzv4oq`
 
-Both sets are minted into TREASURY and listed in the TREASURY kiosk —
-52 active listings total as of session end.
+Both sets are minted under the v5.1 package's Item type. Player wallets can still HOLD them but they CANNOT be listed under the v5.2 TransferPolicy. A v5.2 catalog mint is a separate follow-up step.
 
-## 13-slot loadout (live)
+## 13-slot loadout (unchanged from v5.1)
 
-`weapon, offhand, helmet, chest, gloves, boots, belt, ring_1, ring_2,
-ring_3, necklace, pants, bracelets`. **`ring_3`, NOT `pauldrons`** —
-the slot decision changed mid-session; pauldrons were removed entirely
-from contracts, server, and frontend before the final publish.
+`weapon, offhand, helmet, chest, gloves, boots, belt, ring_1, ring_2, ring_3, necklace, pants, bracelets`. Same slots, same `slot_type` rules — v5.2 only touched arena.move.
 
 ## Where the canonical session state lives
 
-- `STATE_OF_PROJECT_2026-05-28.md` — repo-root canonical snapshot
-- `SESSION_HANDOFF_2026-05-28.md` — single-page session handoff
-- `docs/V5.1_RELEASE_NOTES_2026-05-28.md` — release notes (cut-over protocol)
-- `docs/V5.1_OVERNIGHT_LOG_2026-05-28.md` — per-phase journal
-- `docs/V5_QA_AUDIT_AND_V5.1_SCOPE_2026-05-28.md` — primary spec source
+- `STATE_OF_PROJECT_2026-05-30.md` — repo-root canonical snapshot (current)
+- `STATE_OF_PROJECT_2026-05-29.md` — yesterday's snapshot (v5.1 QA complete; v5.2 spec drafted)
+- `docs/V5.2_QA_GAUNTLET.md` — **live-testnet QA script for v5.2 — top-to-bottom run-list**
+- `docs/V5.2_WAGER_FAIRNESS_SPEC.md` — v5.2 spec (with §14 implementation deviations)
+- `deployment.testnet-v5.2.json` — v5.2 deploy record
+- `deployment.testnet-v5.1.json` — v5.1 deploy record (kept for parity reference)
 - `MAINNET_PREP.md` — deploy protocol + threat model + change log

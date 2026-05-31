@@ -31,7 +31,7 @@ import {
   canAcceptWagerWithBalance,
   DEFAULT_GAS_RESERVE_MIST,
 } from '../frontend/src/lib/wager-accept-gate';
-import { decideAcceptOutcome } from '../server/src/ws/wager-accept-gate';
+import { decideAcceptOutcome, resolveChallengerWallet } from '../server/src/ws/wager-accept-gate';
 
 // ===== Pass / fail helpers (mirrors qa-wager-register.ts style) =====
 let passes = 0;
@@ -214,6 +214,143 @@ function testDecideAcceptOutcomeAutoRollback(): void {
     eq(r.removeFromMatchmakingQueue, false, 'no queue drop needed (own wager case)');
     truthy(r.userMessage.includes('rolled back') || r.userMessage.toLowerCase().includes('refund'),
       `user message explains the rollback: ${r.userMessage}`);
+  }
+}
+
+// ===========================================================================
+// v5.2 — 2026-05-30 live-QA regression suite.
+//
+// The 2026-05-04 silent-accept autoRollback misfired in the v5.2
+// creator-approve flow because the caller's "own wager" IS the target.
+// The fix is the `ownWagerIsTarget` discriminator (wager-accept-gate.ts).
+// These tests pin both halves:
+//   - creator approving their own target → PROCEED (no rollback)
+//   - caller with a DIFFERENT open wager → autoRollback (preserved)
+// Plus they pin the player_b resolution helper for the post-gate
+// fight-start.
+// ===========================================================================
+
+function testV52CreatorApprovesOwnTarget(): void {
+  section('v5.2 — caller is the creator approving their own target wager');
+
+  // Sx created S_W. Mr_Boss requested it (status → PENDING_APPROVAL).
+  // Sx then signed approve_challenger and the chain flipped to ACTIVE.
+  // The frontend now sends wager_accepted with Sx as caller.
+  // Pre-fix this misfired the silent-accept autoRollback. Post-fix:
+  // ownWagerIsTarget recognises the v5.2 flow and falls through to PROCEED.
+  const r = decideAcceptOutcome({
+    callerWallet: SX,
+    targetWagerId: S_W, // caller IS creator of this wager
+    targetChainStatus: 1, // ACTIVE — approve_challenger landed
+    callerOwnWagerInLobby: { creatorWallet: SX, wagerMatchId: S_W }, // own = target
+    targetInLobby: { creatorWallet: SX, wagerMatchId: S_W },
+  });
+  eq(r.kind, 'proceed', 'creator approving own target → PROCEED (no autoRollback)');
+}
+
+function testV52CallerHasDifferentOwnWagerStillRollsBack(): void {
+  section('v5.2 — caller has a DIFFERENT open wager + chain ACTIVE (silent-accept guard preserved)');
+
+  // The original 2026-05-04 Fix B bug case: Sx has their own open wager
+  // S_W AND somehow accepted Mr_Boss's wager M_W. Chain is ACTIVE on M_W
+  // (the silent-accept landed). The autoRollback MUST still fire — this
+  // is the case the fix is preserving.
+  const r = decideAcceptOutcome({
+    callerWallet: SX,
+    targetWagerId: M_W,
+    targetChainStatus: 1, // ACTIVE — silent-accept landed
+    callerOwnWagerInLobby: { creatorWallet: SX, wagerMatchId: S_W }, // own != target
+    targetInLobby: { creatorWallet: MR_BOSS, wagerMatchId: M_W },
+  });
+  eq(r.kind, 'autoRollback', 'different own wager + chain ACTIVE → autoRollback (preserved)');
+  if (r.kind === 'autoRollback') {
+    eq(r.targetWagerId, M_W, 'target wager id surfaced for admin_cancel');
+    eq(r.callerOwnWagerId, S_W, 'caller own wager id surfaced for admin_cancel');
+  }
+}
+
+function testV52CreatorApprovesOwnTargetPendingApprovalStaysClean(): void {
+  section('v5.2 — own == target but chain still PENDING_APPROVAL (probe lag) → no rollback');
+
+  // Edge case: the wager_accepted message arrived but the status probe
+  // raced ahead and read PENDING_APPROVAL (3, not yet ACTIVE). The
+  // ownWagerIsTarget guard still applies — never rollback the creator's
+  // own wager. The chain-status check downstream rejects gracefully.
+  const r = decideAcceptOutcome({
+    callerWallet: SX,
+    targetWagerId: S_W,
+    targetChainStatus: 3, // PENDING_APPROVAL — probe lag
+    callerOwnWagerInLobby: { creatorWallet: SX, wagerMatchId: S_W },
+    targetInLobby: { creatorWallet: SX, wagerMatchId: S_W },
+  });
+  // With ownWagerIsTarget guard, we skip the busy branch entirely.
+  // Falls through to step 4 (chain not ACTIVE → reject) — NOT autoRollback.
+  truthy(r.kind === 'reject',
+    `own=target + non-ACTIVE → reject (NOT autoRollback): got ${r.kind}`);
+  if (r.kind === 'reject') {
+    truthy(!r.reason.toLowerCase().includes('rolled back'),
+      'reject reason must not mention rollback');
+  }
+}
+
+function testV52ResolveChallengerV52ApproveFlow(): void {
+  section('resolveChallengerWallet — v5.2 approve flow (caller IS creator)');
+  const r = resolveChallengerWallet({
+    callerWallet: SX, // creator + caller
+    creatorWallet: SX,
+    pendingChallengerWallet: MR_BOSS, // populated by earlier wager_request_accepted
+  });
+  if (r.ok) {
+    eq(r.wallet, MR_BOSS, 'challenger resolved from pendingChallenger.wallet');
+    eq(r.flow, 'v5.2-approve', 'flow label = v5.2-approve');
+  } else {
+    fail('resolveChallengerWallet must succeed in v5.2 approve flow', r.reason);
+  }
+}
+
+function testV52ResolveChallengerV51LegacyFlow(): void {
+  section('resolveChallengerWallet — v5.1 legacy flow (caller IS challenger)');
+  const r = resolveChallengerWallet({
+    callerWallet: MR_BOSS, // challenger + caller (v5.1)
+    creatorWallet: SX,
+    // pendingChallengerWallet may or may not be present; not consulted in v5.1 path
+  });
+  if (r.ok) {
+    eq(r.wallet, MR_BOSS, 'challenger resolved from callerWallet (v5.1 legacy)');
+    eq(r.flow, 'v5.1-legacy', 'flow label = v5.1-legacy');
+  } else {
+    fail('resolveChallengerWallet must succeed in v5.1 legacy flow', r.reason);
+  }
+}
+
+function testV52ResolveChallengerMissingPending(): void {
+  section('resolveChallengerWallet — v5.2 caller=creator but lobby pending missing (defensive)');
+  const r = resolveChallengerWallet({
+    callerWallet: SX,
+    creatorWallet: SX,
+    // pendingChallengerWallet absent — server restart between request_accept and approve
+  });
+  if (!r.ok) {
+    truthy(r.reason.toLowerCase().includes('pendingchallenger'),
+      `reason mentions pendingChallenger: ${r.reason}`);
+    ok('missing pending challenger reported with clear error');
+  } else {
+    fail('resolveChallengerWallet must fail when caller=creator and no pending', `got: ${r.wallet}`);
+  }
+}
+
+function testV52ResolveChallengerCaseInsensitive(): void {
+  section('resolveChallengerWallet — wallet comparison is case-insensitive');
+  const r = resolveChallengerWallet({
+    callerWallet: SX.toUpperCase(),
+    creatorWallet: SX.toLowerCase(),
+    pendingChallengerWallet: MR_BOSS,
+  });
+  if (r.ok) {
+    eq(r.flow, 'v5.2-approve', 'case-mismatched wallets still classified as v5.2 approve');
+    eq(r.wallet, MR_BOSS, 'challenger correctly resolved');
+  } else {
+    fail('case-insensitive comparison must succeed', r.reason);
   }
 }
 
@@ -547,16 +684,45 @@ function testFailedTransactionBranchingShape(): void {
     src.includes('from "@/lib/tx-result"'),
     'imports the shared tx-result helper module',
   );
-  // 2026-05-18 — both sites now pass ARENA_ABORT_CODES so the post-sign
+  // 2026-05-18 — both sites pass ARENA_ABORT_CODES so the post-sign
   // failure path emits the same humanized copy as the pre-flight. The
   // bare label call (`assertTxSucceeded(result, "...")`) is gone.
+  //
+  // 2026-05-31 — additionally, every site now passes
+  // ARENA_EXPECTED_ABORT_CODES as the fourth arg so handled race-loss
+  // codes (13, 11, …) log at warn instead of error. The assertion
+  // accepts either form so the test pins the friendly-copy plumbing
+  // but doesn't break if the expected-set arg is reordered.
+  function hasArenaCall(src: string, fn: string): boolean {
+    return (
+      src.includes(`assertTxSucceeded(result, "${fn}", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES)`) ||
+      src.includes(`assertTxSucceeded(result, "${fn}", ARENA_ABORT_CODES)`)
+    );
+  }
   truthy(
-    src.includes('assertTxSucceeded(result, "create_wager", ARENA_ABORT_CODES)'),
+    hasArenaCall(src, 'create_wager'),
     'create_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
+  // v5.2 (2026-05-30) — accept_wager is REMOVED; the v5.2 handshake
+  // replaces it with request_accept_wager + approve_challenger +
+  // decline_challenger + withdraw_challenge + cancel_expired_challenge.
+  // Each new entrypoint passes ARENA_ABORT_CODES at its own assertTxSucceeded
+  // site for the post-sign humanizer.
   truthy(
-    src.includes('assertTxSucceeded(result, "accept_wager", ARENA_ABORT_CODES)'),
-    'accept_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
+    hasArenaCall(src, 'request_accept_wager'),
+    'request_accept_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
+  );
+  truthy(
+    hasArenaCall(src, 'approve_challenger'),
+    'approve_challenger path passes ARENA_ABORT_CODES to assertTxSucceeded',
+  );
+  truthy(
+    hasArenaCall(src, 'decline_challenger'),
+    'decline_challenger path passes ARENA_ABORT_CODES to assertTxSucceeded',
+  );
+  truthy(
+    hasArenaCall(src, 'withdraw_challenge'),
+    'withdraw_challenge path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   truthy(
     src.includes('simulateWagerTx('),
@@ -655,6 +821,15 @@ function run(): void {
   testBalanceGateOwnWagerShortCircuit();
   testBalanceGateDefaultReserveValue();
   testFailedTransactionBranchingShape();
+
+  // v5.2 (2026-05-30) — gate fix + player_b resolution.
+  testV52CreatorApprovesOwnTarget();
+  testV52CallerHasDifferentOwnWagerStillRollsBack();
+  testV52CreatorApprovesOwnTargetPendingApprovalStaysClean();
+  testV52ResolveChallengerV52ApproveFlow();
+  testV52ResolveChallengerV51LegacyFlow();
+  testV52ResolveChallengerMissingPending();
+  testV52ResolveChallengerCaseInsensitive();
 
   const total = passes + failures;
   console.log('\n──────────────────────────────────────────────────');

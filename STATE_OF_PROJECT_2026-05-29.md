@@ -1,14 +1,19 @@
-# SUI Combats — State of the Project, 2026-05-29 (EOD final — v5.1 testnet two-wallet QA + two-handed system complete)
+# SUI Combats — State of the Project, 2026-05-29 (EOD FINAL — v5.1 QA gauntlet COMPLETE; v5.2 wager-fairness contract BUILT, awaits deploy)
 
-> **v5.1 IS LIVE on testnet** and has now been hammered with two
-> consecutive multi-session two-wallet, dual-signing-path QA passes
-> across 2026-05-28/29. Branch `feature/v5.1-contracts` @ `57027bd` on
-> origin (pushed 2026-05-29 EOD with explicit user authorization).
-> Package `0x308645f3…3717` unchanged. **Mainline `main` stays at
-> `08ff991` (v4-era) until v5.2 + external audit clears.**
+> **v5.1 testnet QA gauntlet is COMPLETE.** Every flagship surface
+> live-verified two-wallet across 2026-05-28 / 2026-05-29 (Slush +
+> zkLogin signing paths, on-chain Suiscan-confirmed).
+> Branch `feature/v5.1-contracts` @ `534e4f4` on origin (pushed
+> 2026-05-29).  v5.1 package `0x308645f3…3717` unchanged.
+> **Mainline `main` stays at `08ff991` (v4-era) — merge timing
+> decision flagged for 2026-05-30** (see [§ Decision point](#-decision-point--v51--main-merge-timing)).
 >
-> This doc supersedes [`docs/archive/STATE_OF_PROJECT_2026-05-28.md`](docs/archive/STATE_OF_PROJECT_2026-05-28.md)
-> as canonical state. Previous days remain in `docs/archive/`.
+> **v5.2 wager-fairness contract has been BUILT by CLI** per
+> [`docs/V5.2_WAGER_FAIRNESS_SPEC.md`](docs/V5.2_WAGER_FAIRNESS_SPEC.md)
+> and is staged for tomorrow's fresh testnet publish.
+>
+> This doc supersedes
+> [`docs/archive/STATE_OF_PROJECT_2026-05-28.md`](docs/archive/STATE_OF_PROJECT_2026-05-28.md).
 
 ---
 
@@ -16,12 +21,19 @@
 
 | Commit | Scope |
 |---|---|
-| **`b606a97`** *(AM)* | The three working-tree fixes that the 2026-05-28 EOD handoff flagged as uncommitted: server scout-modal sanitizer + 13-slot fix, arena wager-card clickable scouting, mutual-KO draw modal + sound. |
+| **`b606a97`** *(AM)* | Server scout-modal sanitizer + 13-slot fix, arena wager-card clickable scouting, mutual-KO draw modal + sound. Closed the three working-tree items flagged by 2026-05-28 EOD. |
 | **`57027bd`** *(PM)* | Complete two-handed weapon system — `slot_type` plumbed chain→frontend (`TWO_HANDED_NAMES` allowlist deleted), abort humanizer at all call sites, inverse picker excludes off-hand for 2H, `buildSaveLoadoutTx` auto-clear + unequip-before-equip ordering, educational popup on wrong-order, slot lock + tooltip. 146/146 tests across 5 gauntlets. Docs: [`docs/V5.1_TWO_HANDED_FLOW.md`](docs/V5.1_TWO_HANDED_FLOW.md). |
+| **`534e4f4`** *(EOD doc reorg)* | Rolling EOD archive — 9 docs moved to `docs/archive/`; new `docs/README.md` curated index; CLAUDE.md GitNexus block refreshed from `npx gitnexus analyze`. |
 
-Server `tsc --noEmit` clean. Frontend `tsc --noEmit` clean. Working
-tree carries only pre-existing untracked files (`.obsidian/`, NFT
-asset dirs, mint scripts, `.env` backup) — none session-relevant.
+## 📝 POST-PUSH UNCOMMITTED (working tree at EOD, ready for next commit)
+
+| Item | Files | Status |
+|---|---|---|
+| Hall of Fame W/L/D counter (`draws: u32` end-to-end) | 8 server + 8 frontend + `scripts/qa-hall-of-fame.ts` | ✅ live-verified, tsc clean, gauntlets green (198 hall-of-fame + 247 regression-passes across other gauntlets) |
+| v5.2 wager-fairness spec | `docs/V5.2_WAGER_FAIRNESS_SPEC.md` + 4 one-line pointers (`MAINNET_PREP.md`, this doc, `docs/README.md`) | 📄 design doc; the Move contract has also been built by CLI but is not yet deployed |
+| Automated chore changes | `AGENTS.md`, `CLAUDE.md` (GitNexus auto-rewrite), `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` | bundle into next commit |
+
+Server `tsc --noEmit` clean. Frontend `tsc --noEmit` clean.
 
 ---
 
@@ -204,7 +216,7 @@ navbar/profile/history is still a separate backlog item.
 | More weapon variety in combat math | Two-handed equip path is now closed end-to-end; broader weapon-class damage / offhand-bonus rolls in combat resolution still need a multi-class sweep |
 | Lv2 Scavenger Uncommon combat math | Equip walk verified; combat math with budget≤40 stat-budget items still pending |
 | Full 13-slot single-PTB `save_loadout` (all 13 dirty) | Tested with 2-PTB walks and a few slot edits; full-13-dirty single PTB still pending |
-| W/L/D counter render in navbar / profile / history (`draws` value) | Modal-layer closed; counter UI surfaces still v5.2 backlog |
+| W/L/D counter render across surfaces | ✅ closed 2026-05-29 PM — Hall of Fame ladder + character profile + scout modal all render W/L/D from the chain `draws: u32` field via the existing wire path |
 
 ---
 
@@ -327,7 +339,8 @@ docs/V5.1_TWO_HANDED_FLOW.md               — NEW: end-to-end flow doc
 ## Commit ladder on `feature/v5.1-contracts`
 
 ```
-57027bd  feat(v5.1): complete two-handed weapon system (frontend) ← HEAD on origin (pushed 2026-05-29 EOD)
+534e4f4  docs(v5.1): EOD 2026-05-29 — refresh handoffs, archive prior sessions, add docs index ← HEAD on origin (pushed 2026-05-29 EOD)
+57027bd  feat(v5.1): complete two-handed weapon system (frontend) (2026-05-29 PM)
 b606a97  fix(v5.1): draw modal, scout sanitizer, wager-card scouting (2026-05-29 AM)
 536bb1f  docs(v5.1): patch SESSION_HANDOFF — add opponent inspector, prescriptive opener
 a35a9ae  docs(v5.1): end-of-session handoff — STATE_OF_PROJECT, SESSION_HANDOFF, archive
@@ -350,9 +363,10 @@ fe8bfe9  chore(v5.0): wager-accept finality fix + diagnostic logging + v5.1 back
 
 | Item | Status change today |
 |---|---|
-| Frontend Draw modal | ✅ **modal-layer closed today** (counter render across surfaces still backlog) |
+| Frontend Draw modal + W/L/D counter | ✅ **COMPLETE 2026-05-29** — modal closed AM; counter render landed PM (`draws` plumbed chain → server → wire → frontend; Hall of Fame ladder shows W/L/D; character profile + scout modal updated; win% draws-excluded convention pinned by 8 new test assertions in `qa-hall-of-fame.ts`) |
 | Opponent inspector / scout system | ✅ **partial-shipped today** (Tavern modal + Arena wager-card entry point; pre-accept *preview* before signing still backlog) |
 | StatBonuses shape unification | ✅ **closed at wire boundary** for the scout-modal path; full server-internal unification still backlog |
+| **Wager fairness — level bracket + creator approval** | 🛠️ **spec drafted + Move contract BUILT by CLI** — [`docs/V5.2_WAGER_FAIRNESS_SPEC.md`](docs/V5.2_WAGER_FAIRNESS_SPEC.md). Contract redesign: ±1 level bracket on `request_accept_wager`, new `STATUS_PENDING_APPROVAL` with creator approve/decline + challenger self-withdraw + permissionless 5-min expiry, abort codes 12-17. **Not yet deployed — fresh `sui client publish` is tomorrow's STEP 2** (cannot patch v5.1 in place, struct shape changed) |
 | Settlement retry / journal | ❌ unchanged — still #1 mainnet blocker |
 | Confirm-modal gate | ❌ unchanged — still #2 mainnet blocker |
 | `settle_wager_attested` | ❌ unchanged — still #3 mainnet blocker |
@@ -366,11 +380,56 @@ fe8bfe9  chore(v5.0): wager-accept finality fix + diagnostic logging + v5.1 back
 
 ---
 
+## 🚦 Decision point — v5.1 → main merge timing
+
+The v5.1 QA gauntlet is complete. Merge timing for `feature/v5.1-contracts`
+→ `main` is the open question before tomorrow's v5.2 publish. Two
+paths, both legitimate; pick one before STEP 2 of tomorrow:
+
+| Path | Outline | Audit + cleanliness | Speed |
+|---|---|---|---|
+| **A (recommended)** — Merge v5.1 → main first | Tomorrow STEP 0: merge `feature/v5.1-contracts` into `main`. Cut a fresh `feature/v5.2-contracts` branch off `main`. Deploy v5.2 from there. | Auditor sees `main` (v5.1) vs v5.2 branch — unambiguous. Matches the [V5.2 spec dependency note](docs/V5.2_WAGER_FAIRNESS_SPEC.md#11-dependencies). | +1 step before deploy. |
+| **B** — Deploy v5.2 from `feature/v5.1-contracts`, then merge v5.1+v5.2 together | Tomorrow STEP 2: deploy v5.2 from this branch. After re-test, merge both to `main` as one polished step. | Auditor sees "diff vs `feature/v5.1-contracts`" which isn't the canonical comparison; risks dragging v5.1 testnet artifacts into v5.2 audit scope. | No extra step. |
+
+**Recommendation: A.** One extra PR is a small price for unambiguous
+audit framing. Confirm tomorrow.
+
+---
+
+## 🐛 Known minor cosmetic issues (carry-forward, NOT v5.2-blocking)
+
+Bundle into the polish pass before/during the public-testnet launch.
+
+| Item | Severity | Notes |
+|---|---|---|
+| Stale opponent-gear display during fight | cosmetic | Fight arena shows opponent's gear from fight start; UI race can show stale icons. **Combat resolution is unaffected** — server resolves against locked stats. |
+| Marketplace race-loss generic toast | cosmetic | Two buyers race for last copy → loser gets a generic abort instead of a friendly "snapped up just before you" toast. Buyer SUI safe — atomic chain refusal. Add a marketplace-specific abort-code → friendly string map (mirror `lib/equipment-aborts.ts` pattern). |
+
+---
+
+## 🌐 Public-testnet launch — open scope items (to decide during 2026-05-30 STEP 7)
+
+Goal of the launch round: put it in front of real players to surface
+bugs solo testing can't. Items to scope tomorrow:
+
+| Item | Default position | Notes |
+|---|---|---|
+| Frontend hosting (Vercel) | should ship | `NEXT_PUBLIC_*` shape already correct. Verify clean-clone build hits testnet RPC + new v5.2 package id. |
+| Backend hosting (Fly.io / Render / small VM) | should ship | Persistent process, restart-on-crash. Single instance is fine for the launch round. |
+| Supabase DB provisioning | gated launch-blocker decision | Currently in-memory only. Mainnet needs it; testnet launch could ship without (state resets on restart). Probably ship WITH for realism. |
+| Public-facing known-issues page | should ship | Lists current limitations (server-signed settlement until `settle_wager_attested`, etc.). |
+| Feedback channel | should ship | GitHub Issues template + a Discord or X thread. |
+| Structured logging sink | should ship | Currently console. A flat-file on disk is enough for the launch round (WS errors, abort codes, gRPC latency). |
+| WS Zod validation + rate limiter | accept gap | Still v5.2 backlog. Testnet SUI is free; abuse impact bounded. |
+| Telemetry dashboard | accept gap | Post-launch hardening. |
+
+---
+
 ## Standing rules (do not need re-confirming)
 
 1. **No commit, no push** without explicit user signal.
 2. **No merge to `main`** until v5.1 QA fully done AND external audit clears v5.2.
-3. **Fix-as-we-go, no deferrals.** Today's session shipped three fixes inside the QA pass that surfaced them — that's the working pattern.
+3. **Fix-as-we-go, no deferrals.** This session's pattern.
 
 ---
 

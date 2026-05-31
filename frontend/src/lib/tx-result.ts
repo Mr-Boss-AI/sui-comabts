@@ -37,6 +37,90 @@
 export type AbortCodeMap = Record<number, string>;
 
 /**
+ * Structured Move-abort information lifted from the SDK 2.16
+ * `ExecutionError` envelope. Same fields humanizeChainError would have
+ * regex-extracted from a string, but available here directly when the
+ * SDK gives us the typed shape.
+ */
+export interface StructuredAbort {
+  abortCode: number;
+  module?: string;
+  functionName?: string;
+  instruction?: number;
+}
+
+/**
+ * SDK 2.16 ExecutionError shape (subset). When `simulateTransaction` or
+ * `signAndExecuteTransaction` aborts, the inner Transaction's
+ * `status.error` is an object of this shape — NOT a string. The 2026-05-31
+ * incident traced to this: the `create_wager` simulate aborted with
+ * EAlreadyHasOpenWager but `assertTxSucceeded` only read `error` as a
+ * string, so the empty fallback fired and the user saw the generic
+ * "aborted on-chain (see console for raw result)" toast instead of
+ * "You already have an open wager…".
+ */
+export interface ExecutionErrorLike {
+  message?: string;
+  command?: number;
+  $kind?: string;
+  MoveAbort?: {
+    abortCode?: string | number;
+    location?: {
+      package?: string;
+      module?: string;
+      function?: number;
+      functionName?: string;
+      instruction?: number;
+    };
+  };
+}
+
+/**
+ * Read a structured Move abort from an SDK ExecutionError-shaped value.
+ * Returns null if the shape isn't recognized (e.g. SizeError, RPC
+ * failure, or just a string error from a legacy wallet path).
+ */
+export function readStructuredAbort(err: unknown): StructuredAbort | null {
+  if (!err || typeof err !== 'object') return null;
+  const e = err as ExecutionErrorLike;
+  // The $kind discriminator is the canonical signal. We also accept a
+  // bare `MoveAbort` field for defence-in-depth (some intermediate
+  // wrappers strip the discriminator).
+  if (e.$kind !== 'MoveAbort' && !e.MoveAbort) return null;
+  const ma = e.MoveAbort;
+  if (!ma) return null;
+  const codeRaw = ma.abortCode;
+  const code = typeof codeRaw === 'number' ? codeRaw : codeRaw != null ? Number(codeRaw) : NaN;
+  if (!Number.isFinite(code)) return null;
+  return {
+    abortCode: code,
+    module: ma.location?.module,
+    functionName: ma.location?.functionName,
+    instruction: ma.location?.instruction,
+  };
+}
+
+/**
+ * Format a structured abort into the same wire-shape string the regex
+ * branch in `humanizeChainError` produces. Keeps the call-site format
+ * identical regardless of which envelope path produced the abort, so
+ * downstream log readers / tests don't need to fork.
+ */
+export function formatStructuredAbort(
+  abort: StructuredAbort,
+  abortCodes?: AbortCodeMap,
+): string {
+  const humanMsg = abortCodes?.[abort.abortCode] ?? `Abort code ${abort.abortCode}`;
+  if (abort.module && abort.functionName) {
+    const loc = abort.instruction != null
+      ? `${abort.module}::${abort.functionName}:${abort.instruction}`
+      : `${abort.module}::${abort.functionName}`;
+    return `${humanMsg} (at ${loc})`;
+  }
+  return humanMsg;
+}
+
+/**
  * Parse a raw error string (from `result.effects.status.error`,
  * `FailedTransaction.error`, or a thrown `Error.message`) and produce a
  * human-readable message. Returns `null` when the string doesn't match
@@ -84,6 +168,87 @@ export function humanizeChainError(
 }
 
 /**
+ * Lift the numeric abort code from a stringly-typed error message.
+ * Returns `null` if no `abort code: N` pattern is present. Used by the
+ * expected-abort classifier so even the string-path can demote benign
+ * race-loss outcomes from `console.error` to `console.warn`.
+ */
+function extractAbortCodeFromString(errStr: string): number | null {
+  if (!errStr) return null;
+  const m = errStr.match(/abort code[:\s]+(\d+)/i);
+  if (!m) return null;
+  const code = Number(m[1]);
+  return Number.isFinite(code) ? code : null;
+}
+
+/**
+ * Classify an abort as either a benign handled outcome (race / state-
+ * moved-on) or a real failure, and log at the appropriate console level.
+ *
+ * 2026-05-31 (bug-ledger): pre-fix this module always called
+ * `console.error` on any FailedTransaction shape, even when the abort
+ * code was a well-known benign race (e.g. ENotPendingApproval (13) when
+ * the challenger withdrew between approve-click and tx-land). That
+ * filled the console with red errors during adversarial QA for
+ * outcomes the contract was correctly rejecting. Real bugs were drowned
+ * out by handled race-losses. Now:
+ *
+ *   - structured abort + code is in expectedCodes set
+ *       → console.warn ONE concise line, no raw dump
+ *   - structured abort + code NOT in expectedCodes
+ *       → console.error ONE concise line with formatted abort, no raw dump
+ *         (structured already carries module/function/instruction info)
+ *   - no structured abort but string-path code matches expectedCodes
+ *       → console.warn ONE concise line, no raw dump
+ *   - genuine unknown (no structured, no parseable code)
+ *       → console.error WITH the raw envelope dump (the pre-fix
+ *         behaviour, kept for actual mystery failures)
+ *
+ * The user-visible throw is unchanged in every branch — they still get
+ * the same humanized Error message. Only console output level differs.
+ */
+function logAbortAtAppropriateLevel(
+  pathLabel: string,
+  ctxLabel: string,
+  structured: StructuredAbort | null,
+  errStr: string,
+  rawResult: unknown,
+  expectedCodes?: ReadonlySet<number>,
+  abortCodes?: AbortCodeMap,
+): void {
+  const code = structured?.abortCode ?? extractAbortCodeFromString(errStr);
+  const isExpected = code != null && (expectedCodes?.has(code) ?? false);
+
+  if (isExpected && code != null) {
+    const humanCopy = abortCodes?.[code] ?? `Abort code ${code}`;
+    console.warn(
+      `[Tx:${ctxLabel}] expected abort (handled): ${humanCopy} ` +
+        `[code=${code}, path=${pathLabel}]`,
+    );
+    return;
+  }
+
+  if (structured) {
+    // Real failure with structured info — log the formatted abort, NOT
+    // the raw envelope. The structured shape already carries everything
+    // an engineer needs (code, module, function, instruction).
+    console.error(
+      `[Tx:${ctxLabel}] Aborted: ${formatStructuredAbort(structured, abortCodes)} ` +
+        `[path=${pathLabel}]`,
+    );
+    return;
+  }
+
+  // No structured abort AND no expected-code match in the string —
+  // genuine unknown failure. Keep the raw dump so a future SDK shape
+  // drift is one log line away from a diagnosis.
+  console.error(
+    `[Tx:${ctxLabel}] Aborted (${pathLabel}, no structured error). Raw:`,
+    rawResult,
+  );
+}
+
+/**
  * Throws a human-readable `Error` if the tx result indicates failure.
  * Silent on success. The `ctxLabel` (e.g. `"accept_wager"`) is included
  * in the thrown message so the call-site is obvious in the catch block.
@@ -120,6 +285,7 @@ export function assertTxSucceeded(
   result: unknown,
   ctxLabel: string,
   abortCodes?: AbortCodeMap,
+  expectedCodes?: ReadonlySet<number>,
 ): void {
   const r = result as Record<string, any> | null | undefined;
   if (!r) {
@@ -130,13 +296,44 @@ export function assertTxSucceeded(
   if (r.$kind === "FailedTransaction") {
     const failed = r.FailedTransaction;
     const innerStatus = failed?.status;
+    // SDK 2.16 ExecutionError is an OBJECT, not a string. Try the
+    // structured path first so a Move abort always reaches the human
+    // copy even when `error.message` is empty (the 2026-05-31 incident:
+    // simulate failed with EAlreadyHasOpenWager but `typeof error ===
+    // 'string'` returned false, so the empty fallback fired). The
+    // string-only paths below are kept as defence for legacy / wallet-
+    // specific shapes.
+    const structured =
+      readStructuredAbort(innerStatus?.error) ??
+      readStructuredAbort((failed as Record<string, unknown> | undefined)?.error);
     const errStr: string =
       (innerStatus && typeof innerStatus.error === "string" && innerStatus.error) ||
+      // The SDK ExecutionError carries a `.message` field even when the
+      // top-level shape is structured. Pull it for the legacy regex.
+      (innerStatus?.error && typeof innerStatus.error === "object"
+        && typeof (innerStatus.error as { message?: unknown }).message === "string"
+        ? (innerStatus.error as { message: string }).message
+        : "") ||
       (typeof failed?.error === "string" && failed.error) ||
       (typeof failed?.errorMessage === "string" && failed.errorMessage) ||
       (typeof failed?.cause === "string" && failed.cause) ||
       "";
-    console.error(`[Tx:${ctxLabel}] Aborted (\\$kind=FailedTransaction). Raw:`, r);
+    logAbortAtAppropriateLevel(
+      "$kind=FailedTransaction",
+      ctxLabel,
+      structured,
+      errStr,
+      r,
+      expectedCodes,
+      abortCodes,
+    );
+    if (structured) {
+      // The structured branch is authoritative when present — we have
+      // the abort code directly from the SDK, no regex needed.
+      throw new Error(
+        `${ctxLabel} failed: ${formatStructuredAbort(structured, abortCodes)}`,
+      );
+    }
     const humanized = humanizeChainError(errStr, abortCodes);
     throw new Error(
       humanized
@@ -152,10 +349,32 @@ export function assertTxSucceeded(
     // "failure", treat it as abort. Per the SDK type, this branch shouldn't
     // be reachable, but we guard against future shape drift.
     const innerStatus = r.Transaction?.status;
-    if (innerStatus && innerStatus.status === "failure") {
+    // Defence-in-depth (per the SDK type union this branch shouldn't
+    // be reachable — it's "success-flavoured" by construction). If a
+    // future SDK drift puts a failure here, handle the same way:
+    // structured first, then string.
+    if (innerStatus && (innerStatus.status === "failure" || innerStatus.success === false)) {
+      const structured = readStructuredAbort(innerStatus.error);
       const errStr: string =
-        (typeof innerStatus.error === "string" && innerStatus.error) || "";
-      console.error(`[Tx:${ctxLabel}] Aborted (Transaction.status=failure). Raw:`, r);
+        (typeof innerStatus.error === "string" && innerStatus.error) ||
+        (innerStatus.error && typeof innerStatus.error === "object"
+          && typeof (innerStatus.error as { message?: unknown }).message === "string"
+          ? (innerStatus.error as { message: string }).message
+          : "");
+      logAbortAtAppropriateLevel(
+        "Transaction.status=failure",
+        ctxLabel,
+        structured,
+        errStr,
+        r,
+        expectedCodes,
+        abortCodes,
+      );
+      if (structured) {
+        throw new Error(
+          `${ctxLabel} failed: ${formatStructuredAbort(structured, abortCodes)}`,
+        );
+      }
       const humanized = humanizeChainError(errStr, abortCodes);
       throw new Error(
         humanized
@@ -178,6 +397,28 @@ export function assertTxSucceeded(
 
   if (status && (status.status === "success" || status === "success")) return;
 
+  // Try the structured-abort path before falling through to string
+  // patterns — covers the case where a wallet returns the legacy shape
+  // BUT puts a 2.16-style ExecutionError object in `.error`.
+  const legacyStructured =
+    readStructuredAbort(status?.error) ??
+    readStructuredAbort(r.FailedTransaction?.error) ??
+    readStructuredAbort(r.error);
+  if (legacyStructured) {
+    logAbortAtAppropriateLevel(
+      "legacy-shape, structured error",
+      ctxLabel,
+      legacyStructured,
+      "",
+      r,
+      expectedCodes,
+      abortCodes,
+    );
+    throw new Error(
+      `${ctxLabel} failed: ${formatStructuredAbort(legacyStructured, abortCodes)}`,
+    );
+  }
+
   const errStr: string =
     (status && typeof status.error === "string" && status.error) ||
     (typeof r.FailedTransaction?.error === "string" && r.FailedTransaction.error) ||
@@ -187,7 +428,15 @@ export function assertTxSucceeded(
     (typeof r.message === "string" && r.message) ||
     "";
 
-  console.error(`[Tx:${ctxLabel}] Aborted (legacy-shape path). Raw:`, r);
+  logAbortAtAppropriateLevel(
+    "legacy-shape path",
+    ctxLabel,
+    null,
+    errStr,
+    r,
+    expectedCodes,
+    abortCodes,
+  );
   const humanized = humanizeChainError(errStr, abortCodes);
   throw new Error(
     humanized

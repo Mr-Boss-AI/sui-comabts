@@ -147,6 +147,24 @@ export async function sweepOne(
     return;
   }
 
+  if (status === 3 /* STATUS_PENDING_APPROVAL (v5.2) */) {
+    // Server crashed mid-PENDING_APPROVAL. Both stakes are locked
+    // (creator's in `escrow`, challenger's in `challenger_escrow`).
+    // The v5.2 contract extended admin_cancel_wager to handle this
+    // state (spec §7.7): refunds each side their own stake from their
+    // own escrow, emits WagerRefunded with refund_each=stake_amount.
+    // Calling the same adminCancelWagerOnChain helper is enough —
+    // the contract's if/else if/else dispatches on status.
+    const { digest } = await deps.adminCancelWager(row.wager_match_id);
+    await deps.deleteRow(row.wager_match_id);
+    result.cancelled++;
+    console.log(
+      `[OrphanWager] ${row.wager_match_id.slice(0, 10)}… PENDING_APPROVAL → ` +
+      `refund-each-own-stake tx=${digest}`,
+    );
+    return;
+  }
+
   if (status === 0 /* STATUS_WAITING */) {
     // Strange state — row was inserted only after accept, so this
     // shouldn't happen. Log + drop the row to keep the table clean.

@@ -32,8 +32,16 @@
  *
  * Exits 0 on full pass, 1 on any failure.
  */
-import { ARENA_ABORT_CODES } from "../frontend/src/lib/arena-aborts";
-import { humanizeChainError } from "../frontend/src/lib/tx-result";
+import {
+  ARENA_ABORT_CODES,
+  ARENA_EXPECTED_ABORT_CODES,
+} from "../frontend/src/lib/arena-aborts";
+import {
+  humanizeChainError,
+  readStructuredAbort,
+  formatStructuredAbort,
+  assertTxSucceeded,
+} from "../frontend/src/lib/tx-result";
 
 let passes = 0;
 let failures = 0;
@@ -78,6 +86,22 @@ function testEveryAbortCodeHasCopy(): void {
     8: "EUnauthorized",
     9: "ENotExpired",
     10: "ENoOpponent",
+    // v5.1
+    11: "EAlreadyHasOpenWager",
+    // v5.2 — wager fairness
+    12: "ELevelOutOfBracket",
+    13: "ENotPendingApproval",
+    14: "EChallengerSlotTaken",
+    15: "ENotCreatorForApproval",
+    16: "ENotPendingChallenger",
+    17: "EChallengeNotExpired",
+    18: "ENotActiveForReclaim",
+    19: "EWagerNotStalled",
+    20: "ENotWagerParticipant",
+    // v5.2 — judgment-call codes (spec §14.1)
+    21: "ECreatorFightLocked",
+    22: "ENotCharacterOwner",
+    23: "EWrongExpiryEntrypoint",
   };
   for (const [code, name] of Object.entries(expected)) {
     const msg = ARENA_ABORT_CODES[Number(code)];
@@ -89,7 +113,14 @@ function testEveryAbortCodeHasCopy(): void {
 function testNoStrayCodes(): void {
   section("ARENA_ABORT_CODES — no stray entries");
   const keys = Object.keys(ARENA_ABORT_CODES).map(Number);
-  const allowed = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  // v5.1 baseline (0–11) + v5.2 wager-fairness range (12–20) + v5.2
+  // judgment-call codes 21/22/23 (see docs/V5.2_WAGER_FAIRNESS_SPEC.md
+  // §14.1). If the Move source adds another const, append here.
+  const allowed = new Set([
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23,
+  ]);
   for (const k of keys) {
     if (allowed.has(k)) ok(`code ${k} is a known arena constant`);
     else
@@ -158,6 +189,388 @@ function testNoMatchReturnsNull(): void {
 }
 
 // ============================================================================
+// Structured ExecutionError path — 2026-05-31 create_wager incident.
+// SDK 2.16 puts an OBJECT in `status.error` (not a string). The pre-fix
+// `assertTxSucceeded` only knew about strings, fell through to the
+// empty fallback, and the user saw the generic "aborted on-chain (see
+// console for raw result)" toast instead of the friendly EAlready copy.
+// ============================================================================
+
+function structured16Envelope(code: number, opts: { fnName?: string; instruction?: number } = {}) {
+  // Mirrors the @mysten/sui types.ts:350-362 SimulateTransactionResult
+  // FailedTransaction shape with the ExecutionStatus.error object that
+  // carries the structured MoveAbort. The real envelope has gas /
+  // changedObjects / etc — only the abort-relevant subset matters here.
+  return {
+    $kind: "FailedTransaction",
+    FailedTransaction: {
+      status: {
+        success: false,
+        status: "failure",
+        error: {
+          message: "", // INTENTIONALLY EMPTY — the bug's defining feature
+          command: 0,
+          $kind: "MoveAbort",
+          MoveAbort: {
+            abortCode: String(code),
+            location: {
+              package: "0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f",
+              module: "arena",
+              function: 12,
+              functionName: opts.fnName ?? "create_wager",
+              instruction: opts.instruction ?? 14,
+            },
+          },
+        },
+      },
+    },
+    commandResults: undefined,
+  };
+}
+
+function testReadStructuredAbortMoveAbort(): void {
+  section("readStructuredAbort — extracts code + module + functionName from MoveAbort");
+  const err = structured16Envelope(11).FailedTransaction.status.error;
+  const sa = readStructuredAbort(err);
+  if (!sa) {
+    fail("returns a StructuredAbort", "got null");
+    return;
+  }
+  eq(sa.abortCode, 11, "abortCode is the numeric Move code");
+  eq(sa.module, "arena", "module preserved");
+  eq(sa.functionName, "create_wager", "functionName preserved");
+  eq(sa.instruction, 14, "instruction preserved");
+}
+
+function testReadStructuredAbortNonMoveAbort(): void {
+  section("readStructuredAbort — non-MoveAbort kinds → null");
+  const err = { $kind: "SizeError", message: "too big" };
+  eq(readStructuredAbort(err), null, "SizeError → null");
+  eq(readStructuredAbort(null), null, "null → null");
+  eq(readStructuredAbort("plain string"), null, "string → null");
+  eq(readStructuredAbort(undefined), null, "undefined → null");
+}
+
+function testFormatStructuredAbort(): void {
+  section("formatStructuredAbort — produces the same shape humanizeChainError does");
+  const sa = { abortCode: 11, module: "arena", functionName: "create_wager", instruction: 14 };
+  const out = formatStructuredAbort(sa, ARENA_ABORT_CODES);
+  includes(out, "You already have an open wager", "uses friendly copy for code 11");
+  includes(out, "arena::create_wager", "preserves module::function location");
+  includes(out, ":14", "preserves bytecode instruction offset");
+}
+
+function testAssertTxSucceededStructuredAbort(): void {
+  section("assertTxSucceeded — structured FailedTransaction with empty .message reaches code 11");
+  // This is the 2026-05-31 incident exactly. Pre-fix this case threw
+  // "create_wager aborted on-chain (see console for raw result)";
+  // post-fix it throws "You already have an open wager…".
+  const envelope = structured16Envelope(11);
+  let caught: Error | null = null;
+  try {
+    assertTxSucceeded(envelope, "create_wager", ARENA_ABORT_CODES);
+  } catch (e) {
+    caught = e as Error;
+  }
+  if (!caught) {
+    fail("assertTxSucceeded throws", "did not throw on FailedTransaction envelope");
+    return;
+  }
+  includes(
+    caught.message,
+    "You already have an open wager",
+    "thrown message contains friendly EAlreadyHasOpenWager copy",
+  );
+  includes(caught.message, "create_wager", "thrown message names the ctxLabel");
+  // Regression guard — the generic fallback substring must NOT appear.
+  if (caught.message.includes("aborted on-chain (see console for raw result)")) {
+    fail(
+      "no generic fallback substring",
+      "structured-abort branch fell through to the generic toast copy — humanizer regression",
+    );
+  } else {
+    ok("no generic fallback substring (modal-friendly copy reaches user)");
+  }
+}
+
+function testAssertTxSucceededStructuredCoversEveryCode(): void {
+  section("assertTxSucceeded — every arena abort code routes through the structured path");
+  for (const codeStr of Object.keys(ARENA_ABORT_CODES)) {
+    const code = Number(codeStr);
+    const envelope = structured16Envelope(code, { fnName: "create_wager" });
+    try {
+      assertTxSucceeded(envelope, "create_wager", ARENA_ABORT_CODES);
+      fail(`code ${code} throws`, "did not throw");
+    } catch (e) {
+      const msg = (e as Error).message;
+      const expectedCopy = ARENA_ABORT_CODES[code];
+      if (msg.includes(expectedCopy)) ok(`code ${code} → "${expectedCopy.slice(0, 40)}…"`);
+      else fail(`code ${code} surfaces friendly copy`, `got=${JSON.stringify(msg)}`);
+    }
+  }
+}
+
+// ============================================================================
+// Expected-vs-real abort classification — 2026-05-31 console-noise fix.
+// Adversarial QA surfaced that a benign race-loss (challenger withdrew
+// at the same moment creator approved → chain rejects with code 13
+// ENotPendingApproval, both players in clean state, no stranded escrow)
+// was logging TWO red console.error lines as if it were a crash. The
+// fix classifies expected race-loss codes and demotes them to a single
+// console.warn line.
+// ============================================================================
+
+/**
+ * Monkey-patch console.warn + console.error for the duration of `fn`,
+ * capture every call, then restore. Used by the classification tests
+ * below — we want to assert which level a given abort path logs at,
+ * not the message contents (those are covered by the
+ * humanize/format/assertTxSucceeded suites above).
+ */
+function captureConsole<T>(fn: () => T): {
+  result: T | null;
+  thrown: Error | null;
+  warnCount: number;
+  errorCount: number;
+  warnLines: string[];
+  errorLines: string[];
+} {
+  const origWarn = console.warn;
+  const origError = console.error;
+  const warnLines: string[] = [];
+  const errorLines: string[] = [];
+  console.warn = (...args: unknown[]) => {
+    warnLines.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+  };
+  console.error = (...args: unknown[]) => {
+    errorLines.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+  };
+  let result: T | null = null;
+  let thrown: Error | null = null;
+  try {
+    result = fn();
+  } catch (e) {
+    thrown = e as Error;
+  } finally {
+    console.warn = origWarn;
+    console.error = origError;
+  }
+  return {
+    result,
+    thrown,
+    warnCount: warnLines.length,
+    errorCount: errorLines.length,
+    warnLines,
+    errorLines,
+  };
+}
+
+function testExpectedSetCoversTheKnownRaceCodes(): void {
+  section("ARENA_EXPECTED_ABORT_CODES — covers all known race / state-moved-on codes");
+  // The list is curated. Renumbering or expansion should force the
+  // test to be updated explicitly so we don't silently classify a NEW
+  // failure mode as benign.
+  const expected = new Set([1, 3, 6, 11, 13, 14, 17, 19, 21]);
+  const actual = new Set(ARENA_EXPECTED_ABORT_CODES);
+  eq(actual.size, expected.size, `expected set has ${expected.size} entries`);
+  for (const code of expected) {
+    if (actual.has(code)) ok(`code ${code} classified as expected race / state-moved-on`);
+    else fail(`code ${code} classified as expected`, "missing from ARENA_EXPECTED_ABORT_CODES");
+  }
+  for (const code of actual) {
+    if (!expected.has(code)) {
+      fail(
+        `code ${code} unexpectedly in ARENA_EXPECTED_ABORT_CODES`,
+        "the classification list grew without a test update — either add it to `expected` here with a justification or remove it from the production set",
+      );
+    }
+  }
+}
+
+function testExpectedCodesAreAllInAbortCodeMap(): void {
+  section("ARENA_EXPECTED_ABORT_CODES — every entry has a humanized copy");
+  for (const code of ARENA_EXPECTED_ABORT_CODES) {
+    if (ARENA_ABORT_CODES[code]) ok(`code ${code} has humanized copy`);
+    else fail(
+      `code ${code} has humanized copy`,
+      "classified as expected but no entry in ARENA_ABORT_CODES — the warn line would say 'Abort code N'",
+    );
+  }
+}
+
+function testExpectedAbortLogsAsWarnNotError(): void {
+  section("assertTxSucceeded — expected race-code logs at WARN, not ERROR (the bug)");
+  // The 2026-05-31 scenario verbatim: challenger withdrew between
+  // approve-click and tx-land → chain rejects with code 13.
+  const envelope = structured16Envelope(13, { fnName: "approve_challenger", instruction: 14 });
+  const cap = captureConsole(() => {
+    assertTxSucceeded(envelope, "approve_challenger", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
+  });
+  if (!cap.thrown) {
+    fail("assertTxSucceeded still throws on expected abort", "no throw");
+    return;
+  }
+  ok("assertTxSucceeded still throws on expected abort (user gets toast)");
+  includes(
+    cap.thrown.message,
+    "This wager isn't waiting for approval anymore",
+    "thrown message uses the humanized copy for code 13",
+  );
+  eq(cap.errorCount, 0, "expected race-code → ZERO console.error calls");
+  eq(cap.warnCount, 1, "expected race-code → exactly ONE console.warn line");
+  includes(
+    cap.warnLines[0] ?? null,
+    "expected abort (handled)",
+    "warn line is prefixed with the 'expected abort (handled)' label",
+  );
+  includes(cap.warnLines[0] ?? null, "code=13", "warn line includes the numeric abort code");
+  // Regression guard — the warn line must NOT include the raw envelope
+  // dump (that was the "two red errors" complaint from QA). The
+  // detector looks for structural markers of the raw dump (a JSON-y
+  // `MoveAbort` blob, or the `status` field of the envelope rendered
+  // as JSON), NOT the bare word "FailedTransaction" — the path label
+  // itself is `$kind=FailedTransaction` and is a legitimate one-token
+  // diagnostic tag, not a leaked envelope.
+  for (const line of cap.warnLines) {
+    if (line.includes("MoveAbort") || line.includes('"status"') || line.includes('abortCode')) {
+      fail(
+        "expected abort does not include raw envelope dump",
+        `warn line contains envelope blob: ${line.slice(0, 200)}…`,
+      );
+      return;
+    }
+  }
+  ok("expected abort does not include raw envelope dump in the warn line");
+}
+
+function testEveryExpectedCodeLogsAsWarn(): void {
+  section("assertTxSucceeded — every expected code routes through WARN");
+  for (const code of ARENA_EXPECTED_ABORT_CODES) {
+    const envelope = structured16Envelope(code);
+    const cap = captureConsole(() => {
+      assertTxSucceeded(envelope, "create_wager", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
+    });
+    if (cap.errorCount === 0 && cap.warnCount === 1) {
+      ok(`code ${code} → 0 errors, 1 warn`);
+    } else {
+      fail(
+        `code ${code} → 0 errors, 1 warn`,
+        `got errors=${cap.errorCount} warns=${cap.warnCount}`,
+      );
+    }
+  }
+}
+
+function testUnexpectedAbortStillLogsAsError(): void {
+  section("assertTxSucceeded — unexpected code still logs at ERROR (real bug stays loud)");
+  // Code 4 = ENotPlayerA — a real bug indicator (wrong wallet called
+  // cancel). Must NOT be demoted to warn.
+  const envelope = structured16Envelope(4, { fnName: "cancel_wager" });
+  const cap = captureConsole(() => {
+    assertTxSucceeded(envelope, "cancel_wager", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
+  });
+  eq(cap.warnCount, 0, "unexpected code → ZERO console.warn calls");
+  eq(cap.errorCount, 1, "unexpected code → exactly ONE console.error line (no raw dump duplicate)");
+  includes(
+    cap.errorLines[0] ?? null,
+    "Aborted:",
+    "error line uses the 'Aborted:' prefix (structured shape known)",
+  );
+}
+
+function testEveryUnexpectedCodeLogsAsError(): void {
+  section("assertTxSucceeded — every NON-expected code logs at ERROR");
+  for (const codeStr of Object.keys(ARENA_ABORT_CODES)) {
+    const code = Number(codeStr);
+    if (ARENA_EXPECTED_ABORT_CODES.has(code)) continue;
+    const envelope = structured16Envelope(code);
+    const cap = captureConsole(() => {
+      assertTxSucceeded(envelope, "any_fn", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
+    });
+    if (cap.errorCount === 1 && cap.warnCount === 0) {
+      ok(`code ${code} → 1 error, 0 warns (loud, as a real bug indicator)`);
+    } else {
+      fail(
+        `code ${code} → 1 error, 0 warns`,
+        `got errors=${cap.errorCount} warns=${cap.warnCount}`,
+      );
+    }
+  }
+}
+
+function testNoExpectedSetMeansLoudByDefault(): void {
+  section("assertTxSucceeded — omitting expectedCodes keeps everything loud (back-compat)");
+  // Equipment-aborts call site never sets expectedCodes. A wager-flow
+  // race code (13) MUST log at error from that path because the
+  // classifier has no whitelist to consult — back-compat with the
+  // pre-fix loudness.
+  const envelope = structured16Envelope(13);
+  const cap = captureConsole(() => {
+    assertTxSucceeded(envelope, "approve_challenger", ARENA_ABORT_CODES); // no expected set
+  });
+  eq(cap.warnCount, 0, "no expectedCodes → 0 warns even for what would be a 'benign' code");
+  eq(cap.errorCount, 1, "no expectedCodes → 1 error (back-compat with pre-fix behaviour)");
+}
+
+function testUnknownCodeStillDumpsRaw(): void {
+  section("assertTxSucceeded — genuine unknown failure still dumps raw envelope");
+  // Pre-fix the raw-envelope dump was the only signal an engineer had
+  // for a mystery SDK-shape failure. Must survive the refactor so a
+  // future shape drift still leaves an investigable trail.
+  const noStructuredEnvelope = {
+    $kind: "FailedTransaction",
+    FailedTransaction: {
+      status: {
+        success: false,
+        error: "completely-unrecognised-error-shape",
+      },
+    },
+  };
+  const cap = captureConsole(() => {
+    assertTxSucceeded(
+      noStructuredEnvelope,
+      "approve_challenger",
+      ARENA_ABORT_CODES,
+      ARENA_EXPECTED_ABORT_CODES,
+    );
+  });
+  eq(cap.errorCount, 1, "unknown failure → 1 console.error");
+  const line = cap.errorLines[0] ?? "";
+  // Must reference the raw envelope (the no-structured branch is the
+  // diagnostic last-resort).
+  if (line.includes("Raw:") || line.includes("no structured error")) {
+    ok("unknown failure includes 'Raw:' marker for engineer investigation");
+  } else {
+    fail(
+      "unknown failure includes 'Raw:' marker",
+      `error line: ${line.slice(0, 200)}…`,
+    );
+  }
+}
+
+function testAssertTxSucceededStructuredFallbackPreservesString(): void {
+  section("assertTxSucceeded — string-error legacy envelope still works (no regression)");
+  // Pre-2.16 envelope: status.error is a string, not an object.
+  const legacy = {
+    $kind: "FailedTransaction",
+    FailedTransaction: {
+      status: {
+        success: false,
+        error:
+          "MoveAbort in 1st command, abort code: 11, in '0xabc::arena::create_wager' (instruction 14)",
+      },
+    },
+  };
+  let caught: Error | null = null;
+  try {
+    assertTxSucceeded(legacy, "create_wager", ARENA_ABORT_CODES);
+  } catch (e) {
+    caught = e as Error;
+  }
+  includes(caught?.message ?? null, "You already have an open wager", "legacy string path still humanizes code 11");
+}
+
+// ============================================================================
 // Runner
 // ============================================================================
 
@@ -169,6 +582,22 @@ function runAll(): void {
   testEachCodeRoundTrips();
   testUnknownCodeStillReadable();
   testNoMatchReturnsNull();
+  // Structured-envelope path (2026-05-31 regression guard).
+  testReadStructuredAbortMoveAbort();
+  testReadStructuredAbortNonMoveAbort();
+  testFormatStructuredAbort();
+  testAssertTxSucceededStructuredAbort();
+  testAssertTxSucceededStructuredCoversEveryCode();
+  // Expected-vs-real classification (2026-05-31 console-noise fix).
+  testExpectedSetCoversTheKnownRaceCodes();
+  testExpectedCodesAreAllInAbortCodeMap();
+  testExpectedAbortLogsAsWarnNotError();
+  testEveryExpectedCodeLogsAsWarn();
+  testUnexpectedAbortStillLogsAsError();
+  testEveryUnexpectedCodeLogsAsError();
+  testNoExpectedSetMeansLoudByDefault();
+  testUnknownCodeStillDumpsRaw();
+  testAssertTxSucceededStructuredFallbackPreservesString();
 
   console.log(
     `\n\x1b[1m▸ arena-aborts gauntlet: ${passes} pass, ${failures} fail\x1b[0m`,

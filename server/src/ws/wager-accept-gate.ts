@@ -29,6 +29,12 @@
 export const STATUS_WAITING = 0 as const;
 export const STATUS_ACTIVE = 1 as const;
 export const STATUS_SETTLED = 2 as const;
+/** v5.2 — challenger has staked via `request_accept_wager`; creator
+ *  must approve_challenger (→ ACTIVE) or decline_challenger (→ WAITING).
+ *  Surfaces on the lobby as a "pending approval" card; the fight does
+ *  NOT start until the creator approves and a follow-up wager_accepted
+ *  WS message arrives. */
+export const STATUS_PENDING_APPROVAL = 3 as const;
 
 /** Minimal lobby-entry shape — narrows the dependency on `WagerLobbyEntry`. */
 export interface LobbyWagerLike {
@@ -97,31 +103,55 @@ export function decideAcceptOutcome(args: DecideAcceptOutcomeArgs): DecideAccept
     };
   }
 
-  // 2. Self-target. Chain `accept_wager` would also abort
-  //    (ECannotJoinOwnMatch=7), but the WS rejection is faster and clearer.
-  if (args.targetInLobby.creatorWallet.toLowerCase() === args.callerWallet.toLowerCase()) {
+  // 2. Self-target — only an abuse case when status is still WAITING
+  //    (pre-accept). v5.2 (2026-05-30): the creator IS the legitimate
+  //    caller of `wager_accepted` after they sign `approve_challenger`
+  //    — at that point status is already ACTIVE, so we must NOT reject.
+  //    The chain itself blocks v5.2 self-accept via ECannotJoinOwnMatch
+  //    (7) on `request_accept_wager`, so this gate only needs to catch
+  //    the v5.1-shape self-accept (caller=creator while status=WAITING).
+  if (
+    args.targetChainStatus !== STATUS_ACTIVE &&
+    args.targetInLobby.creatorWallet.toLowerCase() === args.callerWallet.toLowerCase()
+  ) {
     return { kind: 'reject', reason: 'You cannot accept your own wager' };
   }
 
   // 3. Caller is busy in another mode — the BUG path branches here.
   //    Two flavours: (a) own open wager (Fix B silent-accept), (b) in
   //    matchmaking queue (Fix 1 cross-mode isolation, 2026-05-04).
+  //
+  //    v5.2 — Bug 2026-05-30 LIVE QA: in the v5.2 creator-approve flow
+  //    the caller IS the creator of the target, and the target IS their
+  //    "own open wager" in the lobby. The original Fix B autoRollback
+  //    would misfire here, admin-cancelling the freshly-ACTIVE wager
+  //    that should have started a fight. The `ownWagerIsTarget`
+  //    discriminator restores the v5.1 silent-accept guard for the
+  //    case it was actually meant for — a caller with a DIFFERENT open
+  //    wager — while letting the legitimate v5.2 approve flow fall
+  //    through to step 5 (proceed).
   const callerInQueue = args.callerInMatchmakingQueue === true;
   const hasOwnWager = !!args.callerOwnWagerInLobby;
+  const ownWagerIsTarget =
+    !!args.callerOwnWagerInLobby &&
+    args.callerOwnWagerInLobby.wagerMatchId === args.targetWagerId;
+  const hasDifferentOwnWager = hasOwnWager && !ownWagerIsTarget;
 
-  if (hasOwnWager || callerInQueue) {
+  if (hasDifferentOwnWager || callerInQueue) {
     if (args.targetChainStatus === STATUS_ACTIVE) {
       // Chain accept already landed despite the busy state. Auto-rollback:
       //   - target wager (ACTIVE, escrow=2× stake) → 50/50 admin_cancel
       //   - caller's own wager (if any, WAITING) → admin_cancel refund
       //   - caller's matchmaking queue entry (if any) → drop
-      const ownTag = hasOwnWager
+      const ownTag = hasDifferentOwnWager
         ? 'You had your own open wager'
         : 'You were already in the matchmaking queue';
       return {
         kind: 'autoRollback',
         targetWagerId: args.targetWagerId,
-        callerOwnWagerId: args.callerOwnWagerInLobby?.wagerMatchId ?? null,
+        callerOwnWagerId: hasDifferentOwnWager
+          ? args.callerOwnWagerInLobby!.wagerMatchId
+          : null,
         removeFromMatchmakingQueue: callerInQueue,
         userMessage:
           'Auto-rolled back — stakes refunded. ' +
@@ -130,7 +160,7 @@ export function decideAcceptOutcome(args: DecideAcceptOutcomeArgs): DecideAccept
       };
     }
     // Chain didn't flip → Fix A / Fix 1 client gate held. Plain reject.
-    if (hasOwnWager) {
+    if (hasDifferentOwnWager) {
       return {
         kind: 'reject',
         reason: 'You have an open wager. Cancel it first before accepting another.',
@@ -154,4 +184,57 @@ export function decideAcceptOutcome(args: DecideAcceptOutcomeArgs): DecideAccept
 
   // 5. All checks passed.
   return { kind: 'proceed' };
+}
+
+// ===========================================================================
+// v5.2 — challenger-wallet resolution for the post-gate fight-start.
+//
+// Pre-v5.2 the caller of `wager_accepted` was always the challenger
+// (the wallet that signed accept_wager), so `player_b = client.walletAddress`
+// worked. In v5.2 the caller after `approve_challenger` is the CREATOR
+// (player_a), and player_b is the challenger from the lobby's
+// pending_challenger / chain wager.player_b.
+//
+// resolveChallengerWallet centralises that decision as a pure function
+// so the gauntlet can drive every flow without needing a WS client mock.
+// ===========================================================================
+
+export type ResolveChallengerOutcome =
+  | { ok: true; wallet: string; flow: 'v5.1-legacy' | 'v5.2-approve' }
+  | { ok: false; reason: string };
+
+export function resolveChallengerWallet(args: {
+  /** Wallet that sent `wager_accepted` (signed either the v5.1 accept_wager
+   *  or the v5.2 approve_challenger). */
+  callerWallet: string;
+  /** Lobby entry's creator wallet (= chain wager.player_a). */
+  creatorWallet: string;
+  /** Lobby entry's pendingChallenger.wallet, if populated by an earlier
+   *  `wager_request_accepted` handshake. v5.2 needs this when caller ==
+   *  creator. */
+  pendingChallengerWallet?: string;
+}): ResolveChallengerOutcome {
+  const callerIsCreator =
+    args.callerWallet.toLowerCase() === args.creatorWallet.toLowerCase();
+
+  if (!callerIsCreator) {
+    // v5.1 legacy flow: caller signed accept_wager and IS the challenger.
+    // (Backward compat — once the frontend cut-over is fully live this
+    // branch only fires for in-flight v5.1 wagers settling under their
+    // own package id.)
+    return { ok: true, wallet: args.callerWallet, flow: 'v5.1-legacy' };
+  }
+
+  // v5.2 creator-approve flow.
+  if (!args.pendingChallengerWallet) {
+    return {
+      ok: false,
+      reason:
+        'Cannot resolve player_b: caller is the wager creator but no ' +
+        'pendingChallenger is on the lobby entry. The v5.2 request handshake ' +
+        'may have been lost (server restart between request_accept_wager and ' +
+        'approve_challenger). Investigate via getWagerStatus + chain object read.',
+    };
+  }
+  return { ok: true, wallet: args.pendingChallengerWallet, flow: 'v5.2-approve' };
 }

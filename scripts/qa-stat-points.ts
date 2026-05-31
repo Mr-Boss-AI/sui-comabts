@@ -1,24 +1,36 @@
 /**
- * Stat-points drift gauntlet (BUG 1, live test 2026-05-02).
+ * Stat-points drift gauntlet.
  *
  *   $ cd server && npx tsx ../scripts/qa-stat-points.ts
  *
- * Sx_v5.1 hit `MoveAbort code 2 (ENotEnoughPoints)` trying to spend 3
- * unallocated stat points. The server's `applyXp` had already
- * incremented her server-side `unallocatedPoints` to 3 the instant the
- * fight ended, but the on-chain `update_after_fight` (which actually
- * grants the points to the Character NFT) was still queued behind
- * `settle_wager` + the opponent's `update_after_fight` in the treasury
- * queue. Modal showed "+3 to allocate" → user clicked → Slush dry-ran
- * against the still-old chain object (0 unallocated) → abort.
+ * History:
  *
- * Fix: the modal clamps to `min(server, chain)` via
- * `effectiveUnallocatedPoints`. Chain is the contract's source of
- * truth for `allocate_points`; offering more than chain has lets the
- * UI stage a doomed transaction.
+ *  Race A (BUG 1, live test 2026-05-02): server's `applyXp`
+ *  optimistically incremented `unallocatedPoints` to 3 the instant a
+ *  fight ended, but the on-chain `update_after_fight` lagged ~5-25s
+ *  behind. Modal pre-helper showed "+3 to allocate" → user clicked →
+ *  Slush dry-ran against the still-old chain object (0 unallocated) →
+ *  abort code 2 (`ENotEnoughPoints`).
  *
- * This gauntlet pins the predicate's contract — every drift case the
- * UI relies on. Pure function, no chain or DB calls.
+ *  Race B (BUG, live test 2026-05-30 v5.2 QA): the SYMMETRIC race —
+ *  chain `update_after_fight` lands and the server's in-memory record
+ *  syncs (fight-room.ts:688), but no fresh `character_data` is pushed.
+ *  Frontend's `state.character.unallocatedPoints` stays at 0; the
+ *  chain-refetched `state.onChainCharacter.unallocatedPoints` is 3.
+ *  Under the OLD `min(server, chain)` clamp, the modal showed
+ *  "Remaining: 0" and refused to allocate even though the chain would
+ *  have accepted 3.
+ *
+ * Fix: `effectiveUnallocatedPoints` trusts chain when present (it's
+ * the binding gate for `allocate_points` — `assert!(total <=
+ * unallocated_points, ENotEnoughPoints)`). Race A: chain=0 → return 0,
+ * still safe. Race B: chain=3 → return 3, correct. Server-side
+ * `character_data` push after fight-end (fight-room.ts) makes the
+ * server-side mirror catch up — but the helper remains the canonical
+ * defence (the WS push could still race the modal open).
+ *
+ * Pure-function tests + source-grep tests (REST + WS serializer +
+ * fight-room push) pin every drop point the live-QA bug uncovered.
  *
  * Exits 0 on full pass, 1 on any failure.
  */
@@ -27,6 +39,10 @@ import {
   isAwaitingChainCatchup,
   applyLocalAllocate,
 } from '../frontend/src/lib/stat-points';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+const ROOT = join(__dirname, '..');
 
 let passes = 0;
 let failures = 0;
@@ -78,16 +94,27 @@ function main(): void {
   eq(isAwaitingChainCatchup(6, 3), true, '6/3 → awaiting');
 
   // ===========================================================================
-  // 3 — chain ahead of server (rare — admin grant on chain that hasn't
-  //   propagated back to server yet) → return server (the smaller)
+  // 3 — ⚡ THE v5.2 BUG: chain ahead of server (Race B) → return CHAIN
+  //   This is the inverted Race A from 2026-05-30 live QA. Pre-fix
+  //   `min(0, 3) = 0` would hide points the chain already has.
   // ===========================================================================
-  console.log('\n[3] Chain ahead of server — return server (still safe)');
+  console.log('\n[3] ⚡ Race B (v5.2 2026-05-30) — chain ahead of server → return CHAIN');
   eq(
     effectiveUnallocatedPoints(0, 3),
-    0,
-    'server=0, chain=3 → 0 (avoid promising points server doesn\'t track)',
+    3,
+    'server=0, chain=3 → 3 (post-level-up, server-mirror behind, chain already has points)',
   );
-  eq(isAwaitingChainCatchup(0, 3), false, '0/3 → NOT awaiting (different drift direction)');
+  eq(
+    effectiveUnallocatedPoints(2, 3),
+    3,
+    'server=2, chain=3 → 3 (partial server sync, chain authoritative)',
+  );
+  // isAwaitingChainCatchup is asymmetric — it only flags Race A (server
+  // ahead), not Race B. That's intentional UX: the only case the
+  // "catching up" banner needs to warn about is the doomed-tx case, and
+  // chain-ahead-of-server never produces a doomed tx now that we trust
+  // chain directly.
+  eq(isAwaitingChainCatchup(0, 3), false, '0/3 → NOT awaiting (Race B is non-blocking)');
 
   // ===========================================================================
   // 4 — chain unavailable (RPC down at boot) → fall back to server
@@ -102,22 +129,25 @@ function main(): void {
   eq(isAwaitingChainCatchup(3, undefined), false, 'undefined chain → NOT awaiting');
 
   // ===========================================================================
-  // 5 — Defensive: server unavailable → 0
+  // 5 — Defensive: server unavailable but chain present → return chain
+  //   (chain is authoritative; if server-side mirror is missing entirely,
+  //   chain is still the safe-to-spend value.)
   // ===========================================================================
-  console.log('\n[5] Defensive: server unavailable');
-  eq(effectiveUnallocatedPoints(null, 3), 0, 'server=null, chain=3 → 0');
-  eq(effectiveUnallocatedPoints(undefined, 3), 0, 'server=undefined, chain=3 → 0');
-  eq(effectiveUnallocatedPoints(null, null), 0, 'both null → 0');
+  console.log('\n[5] Defensive: server unavailable but chain present');
+  eq(effectiveUnallocatedPoints(null, 3), 3, 'server=null, chain=3 → 3 (trust chain)');
+  eq(effectiveUnallocatedPoints(undefined, 3), 3, 'server=undefined, chain=3 → 3');
+  eq(effectiveUnallocatedPoints(null, null), 0, 'both null → 0 (no data anywhere)');
 
   // ===========================================================================
   // 6 — Defensive: NaN / negative / non-integer noise
   // ===========================================================================
   console.log('\n[6] Sanitization — NaN, negative, fractional');
-  eq(effectiveUnallocatedPoints(Number.NaN, 3), 0, 'NaN server → 0 (clamped)');
-  eq(effectiveUnallocatedPoints(3, Number.NaN), 0, 'NaN chain → 0 (clamped)');
-  eq(effectiveUnallocatedPoints(-1, 3), 0, 'negative server → 0 (clamped)');
-  eq(effectiveUnallocatedPoints(3, -1), 0, 'negative chain → 0 (clamped)');
-  eq(effectiveUnallocatedPoints(3.7, 3), 3, 'fractional server floored to 3');
+  // With chain present, server-side NaN doesn't matter — chain wins.
+  eq(effectiveUnallocatedPoints(Number.NaN, 3), 3, 'NaN server, chain=3 → 3 (chain wins)');
+  eq(effectiveUnallocatedPoints(3, Number.NaN), 0, 'NaN chain → 0 (chain sanitized to 0)');
+  eq(effectiveUnallocatedPoints(-1, 3), 3, 'negative server, chain=3 → 3 (chain wins)');
+  eq(effectiveUnallocatedPoints(3, -1), 0, 'negative chain → 0 (chain sanitized to 0)');
+  eq(effectiveUnallocatedPoints(3.7, null), 3, 'fractional server (no chain) floored to 3');
   eq(effectiveUnallocatedPoints(3, 3.9), 3, 'fractional chain floored to 3');
 
   // ===========================================================================
@@ -230,6 +260,75 @@ function main(): void {
     eq(after?.stats.dexterity, 5, 'negative sanitized to 0 (no change)');
     eq(after?.stats.intuition, 7, 'valid input applied');
     eq(after?.unallocatedPoints, 3, '5 - 2 = 3');
+  }
+
+  // ===========================================================================
+  // 12 — Source-grep — every server-side serializer carries unallocatedPoints
+  //   (REST /api/character was the v5.2 live-QA drop point; pin all three.)
+  // ===========================================================================
+  console.log('\n[12] Source-grep — server serializers include unallocatedPoints');
+
+  const restSrc = readFileSync(join(ROOT, 'server/src/index.ts'), 'utf8');
+  const wireSrc = readFileSync(join(ROOT, 'server/src/utils/wire-sanitize.ts'), 'utf8');
+  const fightSrc = readFileSync(join(ROOT, 'server/src/ws/fight-room.ts'), 'utf8');
+
+  // /api/character REST serializer.
+  const restBlockIdx = restSrc.indexOf("app.get('/api/character/:walletAddress'");
+  const restBlock = restBlockIdx >= 0 ? restSrc.slice(restBlockIdx, restBlockIdx + 2000) : '';
+  if (restBlock.includes('unallocatedPoints: character.unallocatedPoints')) {
+    ok('REST /api/character serializer includes unallocatedPoints (v5.2 drop fix)');
+  } else {
+    fail(
+      'REST /api/character serializer includes unallocatedPoints',
+      'the v5.2 2026-05-30 live-QA bug was this field missing from the REST response',
+    );
+  }
+
+  // wire-sanitize.ts (canonical WS sanitizer).
+  if (wireSrc.includes('export function sanitizeCharacter') && wireSrc.includes('unallocatedPoints')) {
+    ok('utils/wire-sanitize.ts exports sanitizeCharacter with unallocatedPoints');
+  } else {
+    fail(
+      'utils/wire-sanitize.ts exports sanitizeCharacter with unallocatedPoints',
+      "moved out of ws/handler.ts in v5.2 to break the handler→fight-room→handler cycle",
+    );
+  }
+
+  // fight-room.ts pushes fresh character_data after post-fight chain sync.
+  // Two sites — winner branch + loser branch.
+  const winnerIdx = fightSrc.indexOf('updateCharacter(winnerCharRef)');
+  const loserIdx = fightSrc.indexOf('updateCharacter(loserCharRef)');
+  if (winnerIdx >= 0) {
+    const winnerBlock = fightSrc.slice(winnerIdx, winnerIdx + 800);
+    if (
+      winnerBlock.includes("type: 'character_data'") &&
+      winnerBlock.includes('sanitizeCharacter(winnerCharRef)')
+    ) {
+      ok('fight-room.ts winner branch pushes fresh character_data after chain sync');
+    } else {
+      fail(
+        'fight-room.ts winner branch pushes fresh character_data',
+        'without this push, frontend state.character.unallocatedPoints stays at 0 post-level-up',
+      );
+    }
+  } else {
+    fail('locate winner branch in fight-room.ts', 'updateCharacter(winnerCharRef) not found');
+  }
+  if (loserIdx >= 0) {
+    const loserBlock = fightSrc.slice(loserIdx, loserIdx + 800);
+    if (
+      loserBlock.includes("type: 'character_data'") &&
+      loserBlock.includes('sanitizeCharacter(loserCharRef)')
+    ) {
+      ok('fight-room.ts loser branch pushes fresh character_data after chain sync');
+    } else {
+      fail(
+        'fight-room.ts loser branch pushes fresh character_data',
+        'loser can also level up on a wager loss — same staleness applies',
+      );
+    }
+  } else {
+    fail('locate loser branch in fight-room.ts', 'updateCharacter(loserCharRef) not found');
   }
 
   console.log(`\n${failures === 0 ? '\x1b[32m✔' : '\x1b[31m✘'} ${passes} pass / ${failures} fail\x1b[0m\n`);

@@ -24,7 +24,7 @@
 
 import type { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
-import { ARENA_ABORT_CODES } from "./arena-aborts";
+import { ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES } from "./arena-aborts";
 import { assertTxSucceeded } from "./tx-result";
 
 export type PreflightResult =
@@ -81,13 +81,24 @@ export async function simulateWagerTx(
     );
     return { ok: true };
   }
-  // Diagnostic (2026-05-27). The 2026-05-27 accept_wager incident logged
-  // `Raw result: {}` from assertTxSucceeded — but the underlying accept
-  // tx (81M27eNDr…) had in fact landed on chain. The empty-object dump
-  // may be a serialization artifact of the gRPC response wrapper rather
-  // than an actual empty wire payload. Capture the keys + the expected
-  // envelope fields so the next repro tells us exactly which.
+  // Diagnostic (2026-05-27, deepened 2026-05-31). The 2026-05-27
+  // accept_wager incident logged `Raw result: {}` from
+  // assertTxSucceeded — but the underlying accept tx (81M27eNDr…) had in
+  // fact landed on chain. The empty-object dump turned out to be a
+  // surface artifact: console.log unwrapping a class instance that has
+  // no own-enumerable properties beyond the SDK's $kind discriminator
+  // hidden behind getters. The 2026-05-31 create_wager incident hit the
+  // SAME log line because the SDK 2.16 `ExecutionError` is an OBJECT
+  // (with `.MoveAbort.abortCode`) — the old string-only path in
+  // assertTxSucceeded couldn't reach it, fell through to the empty
+  // fallback, and the user saw the unhelpful generic toast. Now the
+  // structured-abort reader in tx-result.ts handles both shapes; the
+  // diagnostic here also logs the FailedTransaction inner error shape
+  // (typeof + $kind + whether MoveAbort is present) so the NEXT
+  // SDK-shape drift is one log line away from a diagnosis.
   const rTyped = result as Record<string, unknown> | null;
+  const failed = (rTyped as any)?.FailedTransaction;
+  const failedErr = failed?.status?.error ?? failed?.error;
   console.log(
     `[Preflight:${ctxLabel}] simulateTransaction returned. ` +
       `type=${typeof result} ` +
@@ -95,11 +106,15 @@ export async function simulateWagerTx(
       `hasEffects=${!!(rTyped as any)?.effects} ` +
       `hasTransaction=${!!(rTyped as any)?.Transaction} ` +
       `$kind=${(rTyped as any)?.$kind ?? "(undef)"} ` +
+      `failedErrType=${typeof failedErr} ` +
+      `failedErr$kind=${(failedErr as any)?.$kind ?? "(undef)"} ` +
+      `hasMoveAbort=${!!(failedErr as any)?.MoveAbort} ` +
+      `abortCode=${(failedErr as any)?.MoveAbort?.abortCode ?? "(undef)"} ` +
       `raw=`,
     result,
   );
   try {
-    assertTxSucceeded(result, ctxLabel, ARENA_ABORT_CODES);
+    assertTxSucceeded(result, ctxLabel, ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
     return { ok: true };
   } catch (err: any) {
     return {

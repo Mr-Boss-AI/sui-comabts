@@ -28,7 +28,7 @@ import {
 } from '../data/characters';
 import { getLeaderboard } from '../data/leaderboard';
 import { getMatchmaking } from '../game/matchmaking';
-import { dbInsertWagerInFlight } from '../data/db';
+import { dbInsertWagerInFlight, dbDeleteWagerInFlight } from '../data/db';
 import {
   submitTurnAction,
   addSpectator,
@@ -49,11 +49,11 @@ import {
   getChatClients,
 } from './chat';
 import { CONFIG, GAME_CONSTANTS } from '../config';
-import { getWagerStatus, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint, waitForWagerTxFinality } from '../utils/sui-settle';
-import { decideAcceptOutcome } from './wager-accept-gate';
+import { getWagerStatus, getWagerAcceptedAt, adminCancelWagerOnChain, findCharacterObjectId, findAllCharacterIdsForWallet, shouldRejectDuplicateMint, waitForWagerTxFinality } from '../utils/sui-settle';
+import { decideAcceptOutcome, resolveChallengerWallet } from './wager-accept-gate';
 import { evaluateServerBusy } from './busy-state';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
-import { sanitizeEquipment } from '../utils/wire-sanitize';
+import { sanitizeEquipment, sanitizeCharacter } from '../utils/wire-sanitize';
 import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
   createFight,
@@ -241,17 +241,38 @@ function handleDisconnect(client: ConnectedClient): void {
       getMatchmaking().removeFromQueue(client.walletAddress);
     } catch { /* matchmaking may not be initialized */ }
 
-    // Cancel any open wager lobby entry
-    for (const [id, entry] of wagerLobby) {
-      if (entry.creatorWallet === client.walletAddress) {
-        wagerLobby.delete(id);
-        broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
-        adminCancelWagerOnChain(id).catch((err) => {
-          console.error('[Wager Lobby] On-chain cancel after disconnect failed:', err.message);
-        });
-        break;
-      }
-    }
+    // === No disconnect-cancel for open wagers ===
+    //
+    // 2026-05-31 (bug-ledger): we used to sweep wagerLobby here for any
+    // entry created by the disconnecting wallet, broadcast
+    // `wager_lobby_removed`, and admin_cancel_wager on chain. That
+    // behaviour was harmful in three ways:
+    //
+    //   1. Any 5-second WiFi blip / page reload refunded the user's
+    //      stake. There is no UX rationale for "close tab = abandon
+    //      your wager" — modern PvP games keep the stake live and let
+    //      you reconnect into it.
+    //   2. It was racy: with rehydration (added the same day) the
+    //      disconnect-cancel could fire on the old socket's teardown
+    //      AFTER the new socket connected, leaving the new tab seeing
+    //      an empty lobby it had no way to repopulate.
+    //   3. The matching broadcast also wiped the wager from OTHER
+    //      players' UIs — collateral damage from one player's reload.
+    //
+    // A WAITING / PENDING_APPROVAL wager now stays alive across any
+    // disconnect, reload, or reconnect. The only paths that end a
+    // wager are:
+    //   • Explicit Cancel by the creator (handleCancelWagerLobby).
+    //   • The 10-min lobby-expiry timer (line ~1386).
+    //   • Explicit handshake transitions (handleWagerHandshake).
+    //   • Silent-accept autoRollback (decideAcceptOutcome).
+    //   • Fight-start cleanup of OTHER stragglers (post-accept).
+    //   • Treasury admin_cancel / chain-side cancel_expired_wager.
+    //
+    // In-fight forfeit is handled below by handlePlayerDisconnect
+    // (fight-room.ts:1037) which has its own reconnect-grace window
+    // and is independent of this branch — covers the case where the
+    // disconnecting player is in an ACTIVE wager fight.
 
     // Handle active fight disconnect (forfeit — settles wager on-chain via fight-room)
     handlePlayerDisconnect(client.walletAddress);
@@ -454,9 +475,32 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
       // .catch() at the call site so the breadcrumb lands in the
       // server log even when the inner try/catch is bypassed by
       // an unexpected code path.
+      //
+      // v5.2 — this still terminates the wager-accept flow (wager is
+      // now ACTIVE; the server starts the fight). The CALLER is now
+      // the creator (after they signed approve_challenger), not the
+      // challenger as in v5.1; the gate's self-check was relaxed to
+      // accommodate (see wager-accept-gate.ts STATUS_ACTIVE branch).
       handleWagerAccepted(client, msg).catch((err: any) => {
         console.error(
           '[router:wager_accepted] unhandled async rejection:',
+          err?.stack || err?.message || err,
+        );
+      });
+      break;
+    case 'wager_request_accepted':
+    case 'wager_declined':
+    case 'wager_withdrawn':
+    case 'wager_challenge_expired':
+    case 'wager_reclaimed':
+      // v5.2 — handshake transitions for the new approval state
+      // machine. All share the same shape (digest + chain re-probe +
+      // lobby broadcast); the dispatcher routes through a single
+      // generic handler with the message type as a hint for the chain
+      // status it should expect to read.
+      handleWagerHandshake(client, msg).catch((err: any) => {
+        console.error(
+          `[router:${msg.type}] unhandled async rejection:`,
           err?.stack || err?.message || err,
         );
       });
@@ -1422,6 +1466,253 @@ function handleCancelWagerLobby(client: ConnectedClient, msg: ClientMessage): vo
 }
 
 /**
+ * v5.2 — Generic handshake handler for the wager-fairness flow.
+ *
+ * Five message types share this entrypoint:
+ *
+ *   wager_request_accepted      → chain expected to be PENDING_APPROVAL (3)
+ *   wager_declined              → chain expected to be WAITING        (0)
+ *   wager_withdrawn             → chain expected to be WAITING        (0)
+ *   wager_challenge_expired     → chain expected to be WAITING        (0)
+ *   wager_reclaimed             → chain expected to be SETTLED        (2)
+ *
+ * Common machinery:
+ *   1. Validate wagerMatchId + that the lobby has this entry
+ *   2. waitForWagerTxFinality on the supplied digest (same as v5.1's
+ *      handleWagerAccepted — closes the chain-finality race)
+ *   3. getWagerStatus probe + verify it matches the expected status
+ *      for the message type (defence against stale / replayed messages)
+ *   4. Update the in-memory lobby entry + broadcast wager_lobby_updated
+ *      (or wager_lobby_removed for the reclaim path)
+ *
+ * NOT handled here:
+ *   - Fight-start for approve_challenger: the creator's frontend sends a
+ *     separate `wager_accepted` after approve_challenger lands, which
+ *     goes through the existing handleWagerAccepted flow (gate updated
+ *     to allow caller=creator when status=ACTIVE; v5.1 v5.2 paths share
+ *     the same fight-start machinery).
+ *   - Profile lookup for pendingChallenger: the simplest path uses the
+ *     calling client's wallet (they signed request_accept_wager, so
+ *     they ARE the pending_challenger). We pull their character snapshot
+ *     from in-memory state — same source the lobby entry was created
+ *     from at create_wager time.
+ */
+async function handleWagerHandshake(
+  client: ConnectedClient,
+  msg: ClientMessage,
+): Promise<void> {
+  const wagerMatchId = msg.wagerMatchId as string | undefined;
+  const txDigest = (msg as { txDigest?: string }).txDigest;
+  const messageType = msg.type as
+    | 'wager_request_accepted'
+    | 'wager_declined'
+    | 'wager_withdrawn'
+    | 'wager_challenge_expired'
+    | 'wager_reclaimed';
+
+  if (!wagerMatchId) {
+    console.warn(`[${messageType}] reject(missing-wagerMatchId)`);
+    sendError(client, 'Missing wagerMatchId');
+    return;
+  }
+
+  if (!client.authenticated) {
+    console.warn(`[${messageType}] reject(unauthenticated) wallet=${client.walletAddress}`);
+    sendError(client, 'Not authenticated');
+    return;
+  }
+
+  const entry = wagerLobby.get(wagerMatchId);
+  if (!entry && messageType !== 'wager_reclaimed') {
+    // Lobby entry might be missing if the server restarted between the
+    // client's tx and this message. Reclaim is the exception — that
+    // path drops state, so a missing entry is acceptable.
+    console.warn(
+      `[${messageType}] no lobby entry for wager=${wagerMatchId.slice(0, 14)} ` +
+      `— broadcasting removal as best-effort cleanup`,
+    );
+    broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
+    return;
+  }
+
+  // v5.2 — chain-finality wait. Same shape as handleWagerAccepted
+  // (closes the 2026-05-27/28 fullnode-lag race). On timeout we still
+  // proceed to the status probe; on failure we abort.
+  if (txDigest) {
+    const txOutcome = await waitForWagerTxFinality(txDigest, 3000);
+    if (txOutcome.kind === 'failure') {
+      console.warn(
+        `[${messageType}] tx-failed-onchain digest=${txDigest.slice(0, 14)} err=${txOutcome.error}`,
+      );
+      sendError(client, `Your ${messageType.replace('wager_', '')} transaction failed on chain: ${txOutcome.error}`);
+      return;
+    }
+    if (txOutcome.kind === 'timeout') {
+      console.warn(
+        `[${messageType}] tx-finality timeout digest=${txDigest.slice(0, 14)} ` +
+        `wager=${wagerMatchId.slice(0, 14)} — falling through to status probe`,
+      );
+    }
+  }
+
+  // Probe chain status — same RPC the v5.1 handleWagerAccepted uses.
+  const chainStatus = await getWagerStatus(wagerMatchId);
+  if (chainStatus === null) {
+    console.warn(
+      `[${messageType}] chain-probe-null wager=${wagerMatchId.slice(0, 14)} ` +
+      `— skipping lobby mutation (next sweep tick will resolve)`,
+    );
+    return;
+  }
+
+  // Expected status per message type. A mismatch means the client + chain
+  // are out of sync (e.g. another participant raced) — log + ignore so
+  // we don't broadcast a misleading state.
+  const STATUS_WAITING = 0;
+  const STATUS_SETTLED = 2;
+  const STATUS_PENDING_APPROVAL = 3;
+  const expectedByType: Record<typeof messageType, number> = {
+    wager_request_accepted: STATUS_PENDING_APPROVAL,
+    wager_declined: STATUS_WAITING,
+    wager_withdrawn: STATUS_WAITING,
+    wager_challenge_expired: STATUS_WAITING,
+    wager_reclaimed: STATUS_SETTLED,
+  };
+  const expected = expectedByType[messageType];
+  if (chainStatus !== expected) {
+    console.warn(
+      `[${messageType}] status mismatch wager=${wagerMatchId.slice(0, 14)} ` +
+      `expected=${expected} chain=${chainStatus} — ignoring (out-of-sync)`,
+    );
+    return;
+  }
+
+  console.log(
+    `[${messageType}] chain-confirmed wager=${wagerMatchId.slice(0, 14)} ` +
+    `status=${chainStatus} caller=${(client.walletAddress ?? '(unknown)').slice(0, 14)}`,
+  );
+
+  // ─── Lobby mutation dispatch ─────────────────────────────────────
+
+  if (messageType === 'wager_reclaimed') {
+    // Drop the lobby entry (if any) + any wager_in_flight row + broadcast
+    // removal. Same shape as a settle_wager/settle_tie cleanup but
+    // initiated by a participant rather than treasury.
+    if (entry) wagerLobby.delete(wagerMatchId);
+    broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
+    dbDeleteWagerInFlight(wagerMatchId).catch((err) => {
+      console.error(`[${messageType}] dbDeleteWagerInFlight failed:`, err?.message || err);
+    });
+    return;
+  }
+
+  if (!entry) {
+    // Defensive — handled above for non-reclaim paths.
+    return;
+  }
+
+  if (messageType === 'wager_request_accepted') {
+    // v5.2 — populate pendingChallenger from the caller's in-memory
+    // character state. The caller signed request_accept_wager so by
+    // construction they ARE the pending challenger; we don't need an
+    // extra chain object read to identify them.
+    const challengerCharacter = client.walletAddress
+      ? getCharacterByWallet(client.walletAddress)
+      : undefined;
+    if (!challengerCharacter) {
+      console.warn(
+        `[${messageType}] caller has no in-memory character wager=${wagerMatchId.slice(0, 14)} ` +
+        `wallet=${(client.walletAddress ?? '(unknown)').slice(0, 14)} — skipping pending populate`,
+      );
+      return;
+    }
+    const updated: WagerLobbyEntry = {
+      ...entry,
+      status: STATUS_PENDING_APPROVAL,
+      pendingChallenger: {
+        wallet: client.walletAddress!,
+        name: challengerCharacter.name,
+        level: challengerCharacter.level,
+        rating: challengerCharacter.rating,
+        stats: { ...challengerCharacter.stats },
+        pendingAt: Date.now(),
+      },
+    };
+    wagerLobby.set(wagerMatchId, updated);
+    broadcastAll({ type: 'wager_lobby_updated', entry: updated });
+    console.log(
+      `[${messageType}] pending populated: ` +
+      `creator=${entry.creatorName} challenger=${challengerCharacter.name} ` +
+      `(Lv.${challengerCharacter.level})`,
+    );
+    return;
+  }
+
+  // wager_declined / wager_withdrawn / wager_challenge_expired:
+  // wager returned to WAITING; clear pending fields. Capture the
+  // pre-clear pending wallet BEFORE we drop it from the entry — we
+  // still need it for the targeted "you were declined" / "your
+  // challenger walked away" toast below.
+  const previousPendingWallet = entry.pendingChallenger?.wallet;
+  const previousChallengerName = entry.pendingChallenger?.name;
+  const cleared: WagerLobbyEntry = {
+    ...entry,
+    status: STATUS_WAITING,
+    pendingChallenger: undefined,
+  };
+  wagerLobby.set(wagerMatchId, cleared);
+  broadcastAll({ type: 'wager_lobby_updated', entry: cleared });
+  console.log(
+    `[${messageType}] pending cleared: wager=${wagerMatchId.slice(0, 14)} returned to WAITING`,
+  );
+
+  // v5.2 (2026-05-31) — targeted toast to the party that DIDN'T sign
+  // the transition. The lobby-card already updated via the broadcast
+  // above; this is the explicit "your stake was refunded" / "your
+  // challenger walked away" UX cue. The signer doesn't need a toast
+  // (they just clicked the button and saw the modal close).
+  if (messageType === 'wager_declined' && previousPendingWallet) {
+    // Creator declined → challenger gets the toast.
+    const target = getClientByWalletAddress(previousPendingWallet);
+    if (target?.authenticated) {
+      send(target, {
+        type: 'wager_notification',
+        kind: 'declined',
+        wagerMatchId,
+        message: `Your challenge to ${entry.creatorName} was declined — your stake has been refunded.`,
+      });
+    }
+  } else if (messageType === 'wager_withdrawn' && previousPendingWallet) {
+    // Challenger withdrew → creator gets the toast (the candidate they
+    // were considering walked away — the slot reopened).
+    const target = getClientByWalletAddress(entry.creatorWallet);
+    if (target?.authenticated) {
+      send(target, {
+        type: 'wager_notification',
+        kind: 'withdrawn',
+        wagerMatchId,
+        message: `${previousChallengerName ?? 'Your challenger'} withdrew their challenge — the wager is open again.`,
+      });
+    }
+  } else if (messageType === 'wager_challenge_expired' && previousPendingWallet) {
+    // 5-min CHALLENGE_TIMEOUT_MS elapsed → challenger gets the toast
+    // (their stake was just refunded). Creator already sees the slot
+    // reopen via the lobby_updated broadcast; the challenger needs the
+    // explicit "refund landed" cue because they may not be looking at
+    // the lobby tab.
+    const target = getClientByWalletAddress(previousPendingWallet);
+    if (target?.authenticated) {
+      send(target, {
+        type: 'wager_notification',
+        kind: 'challengeExpired',
+        wagerMatchId,
+        message: `Your challenge to ${entry.creatorName} timed out (5 min) — your stake has been refunded.`,
+      });
+    }
+  }
+}
+
+/**
  * Wagers currently mid-acceptance. The handler awaits a chain RPC
  * (`getWagerStatus`) between checking the lobby and deleting from it, so
  * two concurrent `wager_accepted` messages for the SAME wagerMatchId can
@@ -1625,10 +1916,32 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     // any remaining stragglers for either player.
     const entry = targetEntry!; // proceed guarantees targetInLobby was defined
 
+    // v5.2 — challenger wallet resolution. In v5.1 the caller IS the
+    // challenger (they signed accept_wager). In v5.2 the caller is the
+    // CREATOR (they signed approve_challenger) and the challenger comes
+    // from the lobby entry's pendingChallenger (server-cached by the
+    // earlier wager_request_accepted handshake). Pure helper centralises
+    // the dispatch so the gauntlet tests both flows.
+    const challengerRes = resolveChallengerWallet({
+      callerWallet: client.walletAddress!,
+      creatorWallet: entry.creatorWallet,
+      pendingChallengerWallet: entry.pendingChallenger?.wallet,
+    });
+    if (!challengerRes.ok) {
+      gateExit(`challenger-resolve-failed:${challengerRes.reason.slice(0, 60)}`, challengerRes.reason);
+      return;
+    }
+    const challengerWallet = challengerRes.wallet;
+    console.log(
+      `[handleWagerAccepted] challenger resolved via ${challengerRes.flow}: ` +
+      `${challengerWallet.slice(0, 14)} (caller=${client.walletAddress!.slice(0, 14)}, ` +
+      `creator=${entry.creatorWallet.slice(0, 14)})`,
+    );
+
     dbInsertWagerInFlight({
       wager_match_id: wagerMatchId,
       player_a: entry.creatorWallet,
-      player_b: client.walletAddress,
+      player_b: challengerWallet,
       accepted_at_ms: Date.now(),
     }).catch((err) => {
       console.error('[Wager] dbInsertWagerInFlight failed:', err?.message || err);
@@ -1638,9 +1951,11 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
     wagerLobby.delete(wagerMatchId);
     broadcastAll({ type: 'wager_lobby_removed', wagerMatchId });
 
-    // Get characters and start the fight
+    // Get characters and start the fight. Resolve from the chain
+    // participant addresses, NOT the caller — in v5.2 the caller is the
+    // creator (=player_a), not the challenger.
     const charA = getCharacterByWallet(entry.creatorWallet);
-    const charB = getCharacterByWallet(client.walletAddress);
+    const charB = getCharacterByWallet(challengerWallet);
 
     if (!charA || !charB) {
       gateExit(
@@ -1657,12 +1972,29 @@ async function handleWagerAccepted(client: ConnectedClient, msg: ClientMessage):
 
     console.log(`[Wager Lobby] ${charB.name} accepted ${charA.name}'s wager for ${entry.wagerAmount} SUI`);
 
-    const fight = await createFight(charA, charB, 'wager', entry.wagerAmount);
-    fight.wagerMatchId = wagerMatchId;
+    // v5.2 — mirror chain `WagerMatch.accepted_at` into FightState so the
+    // ReclaimStalledWagerBanner can anchor its 30-min timer against the
+    // actual chain accept (not the server's "fight started" clock — those
+    // skew by seconds due to probe + WS routing latency). A null read just
+    // hides the banner gracefully; manual reclaim still works via chain
+    // assertion (EWagerNotStalled = 19) which uses the real chain value.
+    const acceptedAtMs = await getWagerAcceptedAt(wagerMatchId);
+    const fight = await createFight(
+      charA,
+      charB,
+      'wager',
+      entry.wagerAmount,
+      wagerMatchId,
+      acceptedAtMs,
+    );
 
-    // Auto-cancel any remaining open wagers for either player (safety net for race conditions)
+    // Auto-cancel any remaining open wagers for either player (safety net
+    // for race conditions). v5.2 — use the resolved challengerWallet rather
+    // than client.walletAddress; in the v5.2 approve flow the caller IS
+    // the creator, so the old check only swept creator stragglers and
+    // missed the challenger's.
     for (const [id, lobbyEntry] of wagerLobby) {
-      if (lobbyEntry.creatorWallet === entry.creatorWallet || lobbyEntry.creatorWallet === client.walletAddress) {
+      if (lobbyEntry.creatorWallet === entry.creatorWallet || lobbyEntry.creatorWallet === challengerWallet) {
         wagerLobby.delete(id);
         broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
         adminCancelWagerOnChain(id).catch((err) => {
@@ -1761,41 +2093,10 @@ function handleAllocatePoints(client: ConnectedClient, msg: ClientMessage): void
 // via ws/tavern-handlers.ts). The 13-slot guarantee — every wire payload
 // carries exactly the v5.1 slot keys — also lives there.
 
-function sanitizeCharacter(character: any): Record<string, any> {
-  const unallocatedPoints = character.unallocatedPoints || 0;
-  if (unallocatedPoints > 0) {
-    console.log(`[Character] Sending ${character.name} with ${unallocatedPoints} unallocated points`);
-  }
-  return {
-    id: character.id,
-    name: character.name,
-    level: character.level,
-    xp: character.xp,
-    walletAddress: character.walletAddress,
-    // BUG E fix (2026-05-02 retest #2): expose the server-pinned canonical
-    // chain Character NFT id so the frontend reads chain truth from the
-    // SAME object the server is using. Without this, wallets that have
-    // multiple CharacterCreated events on chain (mr_boss has 3:
-    // Mr_Boss_v5, Mr_Boss_v5.1, "mee") would have the frontend's
-    // `fetchCharacterNFT` descending-scan return the NEWEST event ("mee")
-    // while the server pins the canonical Mr_Boss_v5.1 — producing a
-    // permanent server/chain disagreement (clamp showed 0 unallocated
-    // because "mee" has 0, even though Mr_Boss_v5.1 had 6).
-    onChainObjectId: character.onChainObjectId ?? null,
-    stats: {
-      strength: character.stats.strength,
-      dexterity: character.stats.dexterity,
-      intuition: character.stats.intuition,
-      endurance: character.stats.endurance,
-    },
-    unallocatedPoints,
-    equipment: sanitizeEquipment(character.equipment),
-    wins: character.wins,
-    losses: character.losses,
-    draws: character.draws,
-    rating: character.rating,
-  };
-}
+// sanitizeCharacter moved to utils/wire-sanitize.ts (2026-05-30) so
+// fight-room.ts can push a fresh `character_data` after post-fight
+// chain updates without re-importing handler.ts (would close the cycle
+// handler.ts → fight-room.ts → handler.ts). Behaviour 1-for-1 the same.
 
 // === Exports ===
 

@@ -16,6 +16,7 @@ import { setOnChainObjectId, restoreCharacterFromChain, deleteCharacter } from '
 import { getConnectedClients, adoptWagerIntoLobby, broadcastToAuthenticated } from './ws/handler';
 import { startMarketplaceIndex, shutdownMarketplaceIndex, subscribeMarketplace, listingToWire } from './data/marketplace';
 import { sweepOrphanActiveWagers } from './data/orphan-wager-recovery';
+import { bootRehydrateLobby } from './data/lobby-rehydration';
 import {
   sweepStalePresence,
   sweepStalePresenceInDb,
@@ -74,6 +75,12 @@ app.get('/api/character/:walletAddress', (req, res) => {
       wins: character.wins,
       losses: character.losses,
       draws: character.draws,
+      // v5.2 (2026-05-30) — the field was missing from this serializer,
+      // surfaced in the post-level-up stat-allocate bug live-QA. Aligns
+      // this REST response with sanitizeCharacter (handler.ts:2025) so
+      // any caller of /api/character (admin tools, scripts) sees the
+      // same shape as the WS `character_data` payload.
+      unallocatedPoints: character.unallocatedPoints,
       rating: character.rating,
     },
   });
@@ -624,6 +631,21 @@ sweepOrphanActiveWagers().catch((err) => {
   console.error('[OrphanWager] sweep failed:', err?.message || err);
 });
 
+// === Boot lobby rehydration from chain OpenWagerRegistry ===
+//
+// 2026-05-31 incident: a server restart wipes the in-memory wagerLobby
+// map, but the on-chain registry survives. WAITING / PENDING_APPROVAL
+// wagers become invisible in the UI; the creator can't open a new one
+// (EAlreadyHasOpenWager) and has no card to cancel from. This boot pass
+// reads the registry, fetches each WagerMatch, and re-adopts every
+// WAITING / PENDING_APPROVAL entry into the lobby map. ACTIVE entries
+// are owned by the orphan-recovery sweeper above; SETTLED is logged but
+// not resurrected (the v5.2 contract removes registry entries on
+// settle, so a SETTLED registry row would indicate a contract bug).
+bootRehydrateLobby().catch((err) => {
+  console.error('[LobbyRehydrate] boot rehydration failed:', err?.message || err);
+});
+
 // === Initialize Marketplace event index ===
 //
 // Cold-syncs from chain, then opens a WSS subscription to the public Sui
@@ -670,20 +692,32 @@ subscribeMarketplace((event) => {
 // === Start Server ===
 
 server.listen(CONFIG.PORT, () => {
+  // On a hosting platform (Railway/Render/Fly) the public URL is the
+  // platform-assigned hostname, NOT localhost — the boot log used to say
+  // "http://localhost:${PORT}" which read as broken in cloud logs even
+  // though the bind itself was fine. The HTTP server attaches to the
+  // platform's injected $PORT via CONFIG.PORT (config.ts:19), and the
+  // WebSocketServer rides on the same http.Server via `{ server }`
+  // (index.ts:507) — one port serves both transports, which is what
+  // single-port platforms like Railway require.
   console.log(`
 ====================================
   SUI Combats Game Server
 ====================================
-  HTTP:      http://localhost:${CONFIG.PORT}
-  WebSocket: ws://localhost:${CONFIG.PORT}
-  Network:   ${CONFIG.SUI_NETWORK}
+  Bound on port: ${CONFIG.PORT}
+  Network:       ${CONFIG.SUI_NETWORK}
 ====================================
   Endpoints:
     GET /health
     GET /api/leaderboard
     GET /api/character/:walletAddress
     GET /api/fights/:fightId
-    WS  /  (WebSocket)
+    WS  /                       (WebSocket — same port)
+====================================
+  Local dev:    http://localhost:${CONFIG.PORT}
+                ws://localhost:${CONFIG.PORT}
+  On a host (Railway/Render/Fly) the public URL is the platform-
+  assigned hostname; clients connect via wss://<host>/ for the WS.
 ====================================
   `);
 });

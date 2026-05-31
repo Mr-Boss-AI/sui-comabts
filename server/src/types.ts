@@ -199,6 +199,13 @@ export interface FightState {
   winner?: string;
   wagerAmount?: number;
   wagerMatchId?: string;
+  /** v5.2 — chain `WagerMatch.accepted_at` (ms unix), captured at the
+   *  moment approve_challenger landed and the wager went STATUS_ACTIVE.
+   *  This is what the frontend ReclaimStalledWagerBanner anchors its
+   *  30-min countdown against. Read from chain via getWagerAcceptedAt
+   *  at fight-start; null if the chain read failed or this isn't a
+   *  wager fight (friendly / ranked never set it). */
+  wagerAcceptedAtMs?: number;
   stakedItemIds?: string[];
   spectators: Set<string>;
   turnActions: Map<string, TurnAction>;
@@ -235,6 +242,22 @@ export interface QueueEntry {
 
 // === Wager Lobby ===
 
+/** v5.2 — pending challenger payload set on the lobby entry while the
+ *  wager is in chain status PENDING_APPROVAL (3). Carries enough
+ *  player info that the creator UI can scout the challenger before
+ *  clicking Approve/Decline. */
+export interface PendingChallenger {
+  wallet: string;
+  name: string;
+  level: number;
+  rating: number;
+  stats: CharacterStats;
+  /** Server-clock timestamp the request landed. The frontend renders
+   *  "X min remaining" against CHALLENGE_TIMEOUT_MS (5 min) and gates
+   *  the cancel_expired_challenge action by this. */
+  pendingAt: number;
+}
+
 export interface WagerLobbyEntry {
   wagerMatchId: string;
   creatorWallet: string;
@@ -245,6 +268,16 @@ export interface WagerLobbyEntry {
   creatorStats: CharacterStats;
   wagerAmount: number;
   createdAt: number;
+  /** v5.2 — chain status. 0=WAITING, 1=ACTIVE, 2=SETTLED, 3=PENDING_APPROVAL.
+   *  Optional for backwards-compat: a missing field means the entry is
+   *  implicitly WAITING (server is on v5.1-shape wire). */
+  status?: number;
+  /** v5.2 — creator's level snapshot at create_wager time (mirrors
+   *  chain `WagerMatch.player_a_level`). The challenger's ±1 bracket
+   *  check compares against THIS, not the live creatorLevel. */
+  playerALevelSnapshot?: number;
+  /** v5.2 — present only when status === 3 (PENDING_APPROVAL). */
+  pendingChallenger?: PendingChallenger;
 }
 
 // === WebSocket Messages ===

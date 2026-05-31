@@ -615,7 +615,8 @@ export function PlayerProfileModal() {
                   >
                     Acceptance opens the wager UI on your side. You sign
                     create_wager to lock the {wagerStake || "0"} SUI escrow;
-                    they sign accept_wager to match it.
+                    they sign request_accept_wager to match it, then you
+                    approve or decline (v5.2 handshake).
                   </p>
                 </div>
               )}

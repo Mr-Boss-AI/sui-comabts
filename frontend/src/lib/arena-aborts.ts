@@ -11,8 +11,9 @@
  * raw `MoveAbort in 2nd command, abort code: 1` toast straight from
  * the SDK; no domain context, no recovery hint. Routed through
  * `humanizeChainError(err, ARENA_ABORT_CODES)` the same error now
- * reads: `accept_wager failed: The wager is no longer waiting for an
- * opponent — it was just accepted or cancelled. Refresh the lobby.`
+ * reads: `request_accept_wager failed: The wager is no longer waiting
+ * for an opponent — it was just accepted or cancelled. Refresh the
+ * lobby.`
  *
  * Mapping rules:
  *   - One sentence, plain English. No Move identifiers.
@@ -21,21 +22,31 @@
  *   - For invariants that should never reach the user (treasury-only
  *     bypass attempts, etc.) the copy is still polite — these would
  *     only show up if our admin tooling itself misbehaves.
+ *
+ * v5.2 (2026-05-30) — Codes 12–23 added for wager-fairness:
+ *   - 12–20 per spec §6 (level bracket + approval handshake +
+ *     reclaim_stalled_wager escape hatch)
+ *   - 21–23 are spec §14.1 judgment calls (fight-lock, character
+ *     ownership, expiry entrypoint routing)
  */
 
 import type { AbortCodeMap } from "./tx-result";
 
 export const ARENA_ABORT_CODES: AbortCodeMap = {
+  // ============================================================
+  // v5.1 codes 0–11 — unchanged.
+  // ============================================================
+
   // EInvalidStake = 0 — create_wager only.
   0: "Stake amount must be greater than zero.",
-  // EMatchNotWaiting = 1 — accept_wager / cancel_wager.
-  // 99% of real hits: the wager was already accepted (status → ACTIVE)
+  // EMatchNotWaiting = 1 — request_accept_wager / cancel_wager.
+  // 99% of real hits: the wager was already accepted (status → PENDING_APPROVAL)
   // or already cancelled (status → SETTLED) between the lobby render
   // and this click. The fix is a fresh lobby fetch.
   1: "The wager is no longer waiting for an opponent — it was just accepted or cancelled. Refresh the lobby.",
-  // EMatchNotActive = 2 — settle_wager only (treasury path).
+  // EMatchNotActive = 2 — settle_wager / settle_tie (treasury path).
   2: "The wager is not active — it can't be settled right now.",
-  // EStakeMismatch = 3 — accept_wager.
+  // EStakeMismatch = 3 — request_accept_wager.
   // Frontend gates against this with canAcceptWagerWithBalance, so a
   // user-visible hit means the chain stake amount drifted after the
   // lobby entry was cached. Re-fetch and retry.
@@ -46,13 +57,151 @@ export const ARENA_ABORT_CODES: AbortCodeMap = {
   5: "The settlement winner isn't a participant in this wager.",
   // EMatchAlreadySettled = 6 — admin_cancel_wager / cancel_expired_wager.
   6: "This wager has already been settled.",
-  // ECannotJoinOwnMatch = 7 — accept_wager.
-  // Defence-in-depth — the frontend gate already refuses this.
+  // ECannotJoinOwnMatch = 7 — request_accept_wager.
+  // Defence-in-depth — the frontend gate already refuses this; in
+  // practice EAlreadyHasOpenWager (11) fires first because the creator
+  // is in the registry.
   7: "You can't accept your own wager.",
   // EUnauthorized = 8 — treasury-only paths.
   8: "Only the treasury can perform this action.",
   // ENotExpired = 9 — cancel_expired_wager.
   9: "This wager hasn't expired yet — only the creator (or treasury) can cancel it before then.",
-  // ENoOpponent = 10 — settle_wager / admin_cancel_wager.
+  // ENoOpponent = 10 — settle_wager / admin_cancel_wager / reclaim_stalled_wager.
   10: "No opponent has joined this wager yet.",
+  // EAlreadyHasOpenWager = 11 — create_wager / request_accept_wager.
+  // Fires when the caller already has a wager in the OpenWagerRegistry
+  // (WAITING or ACTIVE). The frontend gate refuses the click before
+  // signing, but a programmatic / dev-tools bypass hits this here.
+  11: "You already have an open wager. Settle or cancel it before starting another.",
+
+  // ============================================================
+  // v5.2 codes 12–20 — wager-fairness, per spec §6.
+  // ============================================================
+
+  // ELevelOutOfBracket = 12 — request_accept_wager.
+  // Pre-checked client-side from the wager card's `creatorLevel` snapshot
+  // (±1 LEVEL_BRACKET), but the chain assertion is the trustless backstop.
+  12: "You're outside the ±1 level bracket for this wager — try a wager from a player closer to your level.",
+  // ENotPendingApproval = 13 — approve_challenger / decline_challenger /
+  // withdraw_challenge / cancel_expired_challenge.
+  // Fires when one of the PENDING_APPROVAL transitions is called on a
+  // wager in a different state (WAITING / ACTIVE / SETTLED). User-facing
+  // case: someone refreshes their tab right after the creator already
+  // approved — the lobby card still shows "Approve" but the wager moved
+  // on. Refresh resolves it.
+  13: "This wager isn't waiting for approval anymore — it moved on (approved, declined, or withdrew). Refresh the lobby.",
+  // EChallengerSlotTaken = 14 — request_accept_wager.
+  // Belt-and-suspenders for an unreachable-by-construction state
+  // (status=WAITING with a pending challenger). EMatchNotWaiting (1)
+  // fires first in practice — keep this copy polite for the
+  // theoretical case.
+  14: "Someone else just submitted a challenge on this wager — refresh and try again.",
+  // ENotCreatorForApproval = 15 — approve_challenger / decline_challenger.
+  // Fires when the wrong wallet tries to approve/decline. Defence-in-depth;
+  // the frontend hides those buttons unless the viewer is the creator.
+  15: "Only the wager creator can approve or decline a challenger.",
+  // ENotPendingChallenger = 16 — withdraw_challenge.
+  // Fires when the wrong wallet tries to withdraw a pending challenge.
+  // Frontend hides the Withdraw button unless viewer is the
+  // pending_challenger.
+  16: "Only the pending challenger can withdraw this challenge.",
+  // EChallengeNotExpired = 17 — cancel_expired_challenge.
+  // Frontend renders the "Clear expired challenge" action only after the
+  // 5-minute CHALLENGE_TIMEOUT_MS — this fires if a programmatic call
+  // beats the clock.
+  17: "The challenge hasn't been pending long enough to expire — wait for the 5-minute timeout.",
+  // ENotActiveForReclaim = 18 — reclaim_stalled_wager.
+  // Fires when the participant-escape-hatch path is called on a wager
+  // that isn't ACTIVE (WAITING / PENDING_APPROVAL / SETTLED). Distinct
+  // from EMatchNotActive (2) so the abort-humanizer copy can be specific
+  // to the reclaim path.
+  18: "Reclaim is only available once the fight is active — and only after the 30-minute settlement window has elapsed.",
+  // EWagerNotStalled = 19 — reclaim_stalled_wager.
+  // The critical mid-fight abuse gate. Frontend hides the Reclaim button
+  // before WAGER_RESOLUTION_TIMEOUT_MS (30 min); this fires on any
+  // early-call attempt.
+  19: "The wager isn't stalled yet — settlement window still open. Try again after 30 minutes from accept.",
+  // ENotWagerParticipant = 20 — reclaim_stalled_wager.
+  // Only the two players in the wager can call reclaim. Frontend hides
+  // the button for non-participants; this fires on programmatic bypass.
+  20: "Only the two participants in this wager can reclaim its escrow.",
+
+  // ============================================================
+  // v5.2 codes 21–23 — judgment calls (spec §14.1).
+  // Suggested copy lives in docs/V5.2_WAGER_FAIRNESS_SPEC.md §14.1.
+  // ============================================================
+
+  // ECreatorFightLocked = 21 — create_wager.
+  // Defence-in-depth — the equipment module's fight-lock already covers
+  // equip/unequip mid-fight. This is the new "no opening a wager while
+  // another fight is in flight on the same character" guard.
+  21: "Can't open a wager while a fight is in progress on this character.",
+  // ENotCharacterOwner = 22 — create_wager / request_accept_wager.
+  // Anti-spoofing — prevents a wallet from passing someone else's
+  // Character to read a different level for the bracket check. Should
+  // never reach the user unless they're crafting PTBs manually.
+  22: "That character doesn't belong to your wallet.",
+  // EWrongExpiryEntrypoint = 23 — cancel_expired_wager.
+  // Routes PENDING_APPROVAL callers to cancel_expired_challenge instead
+  // of letting them fall through to a misleading ENoOpponent (10).
+  // Frontend pre-routes; this fires on programmatic bypass.
+  23: "This wager is awaiting approval — use the challenge-expiry function instead.",
 };
+
+/**
+ * Codes that represent BENIGN race / state-moved-on outcomes — the
+ * contract is correctly rejecting an action that became invalid because
+ * the world changed between the user's click and the tx landing. These
+ * are NOT bugs; the user still gets the friendly humanized message, but
+ * the console logs them at `warn` (one concise line) instead of `error`
+ * (full red trace + raw envelope dump).
+ *
+ * 2026-05-31 (bug ledger): adversarial QA surfaced the over-logging.
+ * Challenger withdrew at the same moment creator approved. Chain
+ * correctly rejected the late approve with code 13 (ENotPendingApproval),
+ * both players ended in a clean state, no stranded escrow. But the
+ * console screamed with two red errors (the structured throw + the raw
+ * dump) for what was a perfectly handled race-loss. Real bugs got
+ * drowned out by handled outcomes.
+ *
+ * Classification rule: "did the world legitimately change between the
+ * user's intent and the tx landing?" If yes (race, drift, state moved
+ * on), it's expected. If no (frontend gate failed, programmatic
+ * bypass, wrong wallet, treasury misuse), it's a real failure.
+ *
+ * Borderline cases noted in the JSDoc per-code below — when in doubt,
+ * keep the abort LOUD (console.error) so a real bug stays visible.
+ */
+export const ARENA_EXPECTED_ABORT_CODES: ReadonlySet<number> = new Set([
+  // 1  EMatchNotWaiting — wager already accepted/cancelled between
+  //                       lobby render and click. Canonical race.
+  1,
+  // 3  EStakeMismatch — chain stake drifted after lobby cache. Race
+  //                     against a re-create / admin path.
+  3,
+  // 6  EMatchAlreadySettled — already settled. Concurrent settle, or
+  //                           the caller's view was stale.
+  6,
+  // 11 EAlreadyHasOpenWager — caller has open wager. Almost always a
+  //                            lobby-state-drift case (see the 2026-05-31
+  //                            server-restart incident).
+  11,
+  // 13 ENotPendingApproval — challenger withdrew / declined / expired
+  //                           between approve-click and tx-land. The
+  //                           exact race that motivated this set.
+  13,
+  // 14 EChallengerSlotTaken — someone else challenged first. Race.
+  14,
+  // 17 EChallengeNotExpired — clicked Clear-Expired-Challenge a tick
+  //                            before the 5-min timer crossed. Benign;
+  //                            user can retry.
+  17,
+  // 19 EWagerNotStalled — same shape as 17 but for the 30-min reclaim
+  //                       timer. Benign; user can retry.
+  19,
+  // 21 ECreatorFightLocked — multi-tab race (a fight started on another
+  //                          tab between this tab's create_wager prep and
+  //                          submit). User-recoverable.
+  21,
+]);
+

@@ -28,6 +28,8 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorToast } from "@/components/ui/error-toast";
 import { LevelUpModal } from "@/components/character/level-up-modal";
 import { TwoHandedConflictModal } from "@/components/character/two-handed-conflict-modal";
+import { WagerNotificationModal } from "@/components/fight/wager-notification-modal";
+import { ReclaimStalledWagerBanner } from "@/components/fight/reclaim-stalled-wager-banner";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 
@@ -273,6 +275,7 @@ export function GameScreen() {
       <div className="flex flex-col flex-1">
         <Navbar />
         <ErrorToast />
+        <ReclaimStalledWagerBanner />
         <FightArena />
         <ChallengePopup />
       </div>
@@ -327,6 +330,7 @@ export function GameScreen() {
       <ErrorToast />
       <LevelUpModal />
       <TwoHandedConflictModal />
+      <WagerNotificationModal />
       <div
         style={{
           width: "100%",

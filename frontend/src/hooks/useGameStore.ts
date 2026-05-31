@@ -94,6 +94,21 @@ export interface GameState {
   // wager lock that didn't register with the server.
   errorSticky: boolean;
 
+  // v5.2 (2026-05-31) — centered notification modal for the three
+  // wager-handshake transitions the OTHER party didn't sign:
+  //   declined         → creator declined the challenger's request
+  //   withdrawn        → challenger walked away from a pending request
+  //   challengeExpired → 5-min CHALLENGE_TIMEOUT_MS elapsed
+  // Routed here instead of through the SET_ERROR toast surface because
+  // these are stake-bearing financial events (a refund just landed) that
+  // deserve a deliberate dismiss, not a bottom-corner flash. Neutral
+  // tone — informational, not an error.
+  wagerNotification: {
+    kind: "declined" | "withdrawn" | "challengeExpired";
+    wagerMatchId: string;
+    message: string;
+  } | null;
+
   // v5.1 — Educational center-screen modal for the two-handed-weapon
   // conflict. Fires only when the user *attempts* an invalid action
   // (staging an off-hand while a 2H weapon is equipped); the correct
@@ -234,6 +249,7 @@ export const initialGameState: GameState = {
   errorTimestamp: null,
   errorSticky: false,
   twoHandedConflictModalOpen: false,
+  wagerNotification: null,
   onChainRefreshTrigger: 0,
   opponentDisconnect: null,
   levelUpEvent: null,
@@ -305,10 +321,17 @@ export type GameAction =
   | { type: "SET_PENDING_WAGER_ACCEPT"; payload: GameState["pendingWagerAccept"] }
   | { type: "SET_WAGER_LOBBY"; entries: WagerLobbyEntry[] }
   | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
+  /** v5.2 — server fires `wager_lobby_updated` for in-place transitions
+   *  (WAITING → PENDING_APPROVAL → WAITING). Swaps the existing entry
+   *  rather than add/remove pair, preserving render position + avoiding
+   *  a row flicker. Matched by `wagerMatchId`; appends if not present. */
+  | { type: "UPDATE_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
   | { type: "REMOVE_WAGER_LOBBY_ENTRY"; wagerMatchId: string }
   | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
   | { type: "SHOW_TWO_HANDED_CONFLICT_MODAL" }
   | { type: "HIDE_TWO_HANDED_CONFLICT_MODAL" }
+  | { type: "SET_WAGER_NOTIFICATION"; payload: GameState["wagerNotification"] }
+  | { type: "CLEAR_WAGER_NOTIFICATION" }
   | { type: "SET_AUTH_PHASE"; phase: AuthPhase }
   | { type: "SET_OPPONENT_DISCONNECT"; payload: GameState["opponentDisconnect"] }
   | { type: "SET_LEVEL_UP_EVENT"; payload: GameState["levelUpEvent"] }
@@ -553,6 +576,18 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, wagerLobby: action.entries };
     case "ADD_WAGER_LOBBY_ENTRY":
       return { ...state, wagerLobby: [...state.wagerLobby, action.entry] };
+    case "UPDATE_WAGER_LOBBY_ENTRY": {
+      // v5.2 — in-place swap for PENDING_APPROVAL transitions. If the
+      // entry isn't in the lobby yet (rare: late ADD), append it so the
+      // user sees the latest state regardless of ordering.
+      const idx = state.wagerLobby.findIndex(e => e.wagerMatchId === action.entry.wagerMatchId);
+      if (idx === -1) {
+        return { ...state, wagerLobby: [...state.wagerLobby, action.entry] };
+      }
+      const next = state.wagerLobby.slice();
+      next[idx] = action.entry;
+      return { ...state, wagerLobby: next };
+    }
     case "REMOVE_WAGER_LOBBY_ENTRY":
       return { ...state, wagerLobby: state.wagerLobby.filter(e => e.wagerMatchId !== action.wagerMatchId) };
     case "UPDATE_TURN":
@@ -574,6 +609,11 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case "HIDE_TWO_HANDED_CONFLICT_MODAL":
       if (!state.twoHandedConflictModalOpen) return state;
       return { ...state, twoHandedConflictModalOpen: false };
+    case "SET_WAGER_NOTIFICATION":
+      return { ...state, wagerNotification: action.payload };
+    case "CLEAR_WAGER_NOTIFICATION":
+      if (!state.wagerNotification) return state;
+      return { ...state, wagerNotification: null };
     case "SET_AUTH_PHASE":
       if (state.authPhase === action.phase) return state;
       return { ...state, authPhase: action.phase };
