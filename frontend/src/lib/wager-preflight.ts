@@ -24,7 +24,7 @@
 
 import type { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
-import { ARENA_ABORT_CODES } from "./arena-aborts";
+import { ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES } from "./arena-aborts";
 import { assertTxSucceeded } from "./tx-result";
 
 export type PreflightResult =
@@ -114,7 +114,7 @@ export async function simulateWagerTx(
     result,
   );
   try {
-    assertTxSucceeded(result, ctxLabel, ARENA_ABORT_CODES);
+    assertTxSucceeded(result, ctxLabel, ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
     return { ok: true };
   } catch (err: any) {
     return {

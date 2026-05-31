@@ -684,11 +684,23 @@ function testFailedTransactionBranchingShape(): void {
     src.includes('from "@/lib/tx-result"'),
     'imports the shared tx-result helper module',
   );
-  // 2026-05-18 — both sites now pass ARENA_ABORT_CODES so the post-sign
+  // 2026-05-18 — both sites pass ARENA_ABORT_CODES so the post-sign
   // failure path emits the same humanized copy as the pre-flight. The
   // bare label call (`assertTxSucceeded(result, "...")`) is gone.
+  //
+  // 2026-05-31 — additionally, every site now passes
+  // ARENA_EXPECTED_ABORT_CODES as the fourth arg so handled race-loss
+  // codes (13, 11, …) log at warn instead of error. The assertion
+  // accepts either form so the test pins the friendly-copy plumbing
+  // but doesn't break if the expected-set arg is reordered.
+  function hasArenaCall(src: string, fn: string): boolean {
+    return (
+      src.includes(`assertTxSucceeded(result, "${fn}", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES)`) ||
+      src.includes(`assertTxSucceeded(result, "${fn}", ARENA_ABORT_CODES)`)
+    );
+  }
   truthy(
-    src.includes('assertTxSucceeded(result, "create_wager", ARENA_ABORT_CODES)'),
+    hasArenaCall(src, 'create_wager'),
     'create_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   // v5.2 (2026-05-30) — accept_wager is REMOVED; the v5.2 handshake
@@ -697,19 +709,19 @@ function testFailedTransactionBranchingShape(): void {
   // Each new entrypoint passes ARENA_ABORT_CODES at its own assertTxSucceeded
   // site for the post-sign humanizer.
   truthy(
-    src.includes('assertTxSucceeded(result, "request_accept_wager", ARENA_ABORT_CODES)'),
+    hasArenaCall(src, 'request_accept_wager'),
     'request_accept_wager path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   truthy(
-    src.includes('assertTxSucceeded(result, "approve_challenger", ARENA_ABORT_CODES)'),
+    hasArenaCall(src, 'approve_challenger'),
     'approve_challenger path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   truthy(
-    src.includes('assertTxSucceeded(result, "decline_challenger", ARENA_ABORT_CODES)'),
+    hasArenaCall(src, 'decline_challenger'),
     'decline_challenger path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   truthy(
-    src.includes('assertTxSucceeded(result, "withdraw_challenge", ARENA_ABORT_CODES)'),
+    hasArenaCall(src, 'withdraw_challenge'),
     'withdraw_challenge path passes ARENA_ABORT_CODES to assertTxSucceeded',
   );
   truthy(

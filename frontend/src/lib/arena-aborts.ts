@@ -147,3 +147,61 @@ export const ARENA_ABORT_CODES: AbortCodeMap = {
   // Frontend pre-routes; this fires on programmatic bypass.
   23: "This wager is awaiting approval — use the challenge-expiry function instead.",
 };
+
+/**
+ * Codes that represent BENIGN race / state-moved-on outcomes — the
+ * contract is correctly rejecting an action that became invalid because
+ * the world changed between the user's click and the tx landing. These
+ * are NOT bugs; the user still gets the friendly humanized message, but
+ * the console logs them at `warn` (one concise line) instead of `error`
+ * (full red trace + raw envelope dump).
+ *
+ * 2026-05-31 (bug ledger): adversarial QA surfaced the over-logging.
+ * Challenger withdrew at the same moment creator approved. Chain
+ * correctly rejected the late approve with code 13 (ENotPendingApproval),
+ * both players ended in a clean state, no stranded escrow. But the
+ * console screamed with two red errors (the structured throw + the raw
+ * dump) for what was a perfectly handled race-loss. Real bugs got
+ * drowned out by handled outcomes.
+ *
+ * Classification rule: "did the world legitimately change between the
+ * user's intent and the tx landing?" If yes (race, drift, state moved
+ * on), it's expected. If no (frontend gate failed, programmatic
+ * bypass, wrong wallet, treasury misuse), it's a real failure.
+ *
+ * Borderline cases noted in the JSDoc per-code below — when in doubt,
+ * keep the abort LOUD (console.error) so a real bug stays visible.
+ */
+export const ARENA_EXPECTED_ABORT_CODES: ReadonlySet<number> = new Set([
+  // 1  EMatchNotWaiting — wager already accepted/cancelled between
+  //                       lobby render and click. Canonical race.
+  1,
+  // 3  EStakeMismatch — chain stake drifted after lobby cache. Race
+  //                     against a re-create / admin path.
+  3,
+  // 6  EMatchAlreadySettled — already settled. Concurrent settle, or
+  //                           the caller's view was stale.
+  6,
+  // 11 EAlreadyHasOpenWager — caller has open wager. Almost always a
+  //                            lobby-state-drift case (see the 2026-05-31
+  //                            server-restart incident).
+  11,
+  // 13 ENotPendingApproval — challenger withdrew / declined / expired
+  //                           between approve-click and tx-land. The
+  //                           exact race that motivated this set.
+  13,
+  // 14 EChallengerSlotTaken — someone else challenged first. Race.
+  14,
+  // 17 EChallengeNotExpired — clicked Clear-Expired-Challenge a tick
+  //                            before the 5-min timer crossed. Benign;
+  //                            user can retry.
+  17,
+  // 19 EWagerNotStalled — same shape as 17 but for the 30-min reclaim
+  //                       timer. Benign; user can retry.
+  19,
+  // 21 ECreatorFightLocked — multi-tab race (a fight started on another
+  //                          tab between this tab's create_wager prep and
+  //                          submit). User-recoverable.
+  21,
+]);
+

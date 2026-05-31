@@ -22,7 +22,7 @@ import { registerWagerWithServer, deriveHttpBaseUrl } from "@/lib/wager-register
 import { parseWagerInput, MIN_STAKE_SUI } from "@/lib/wager-input";
 import { canAcceptWager, canAcceptWagerWithBalance } from "@/lib/wager-accept-gate";
 import { assertTxSucceeded, extractTxDigest, humanizeChainError } from "@/lib/tx-result";
-import { ARENA_ABORT_CODES } from "@/lib/arena-aborts";
+import { ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES } from "@/lib/arena-aborts";
 import { simulateWagerTx } from "@/lib/wager-preflight";
 import {
   WAGER_STATUS,
@@ -549,7 +549,7 @@ export function MatchmakingQueue() {
         // `assertTxSucceeded` helper. Now carries the arena-aborts
         // humanizer (2026-05-18) so any unexpected post-sign abort
         // surfaces with the same friendly copy as the pre-flight.
-        assertTxSucceeded(result, "create_wager", ARENA_ABORT_CODES);
+        assertTxSucceeded(result, "create_wager", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
         const resultAny = result as any;
         const txData = resultAny.Transaction || resultAny;
 
@@ -774,7 +774,7 @@ export function MatchmakingQueue() {
 
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      assertTxSucceeded(result, "request_accept_wager", ARENA_ABORT_CODES);
+      assertTxSucceeded(result, "request_accept_wager", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
       const digest = extractTxDigest(result);
 
       // v5.2 — wager stays in lobby but transitions to PENDING_APPROVAL.
@@ -826,7 +826,7 @@ export function MatchmakingQueue() {
       }
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      assertTxSucceeded(result, "approve_challenger", ARENA_ABORT_CODES);
+      assertTxSucceeded(result, "approve_challenger", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
       const digest = extractTxDigest(result);
 
       // The fight starts on the server's chain-observed ACTIVE transition.
@@ -865,7 +865,7 @@ export function MatchmakingQueue() {
       }
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      assertTxSucceeded(result, "decline_challenger", ARENA_ABORT_CODES);
+      assertTxSucceeded(result, "decline_challenger", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
       const digest = extractTxDigest(result);
 
       state.socket.send({
@@ -901,7 +901,7 @@ export function MatchmakingQueue() {
       }
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      assertTxSucceeded(result, "withdraw_challenge", ARENA_ABORT_CODES);
+      assertTxSucceeded(result, "withdraw_challenge", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
       const digest = extractTxDigest(result);
 
       state.socket.send({
@@ -938,7 +938,7 @@ export function MatchmakingQueue() {
       }
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      assertTxSucceeded(result, "cancel_expired_challenge", ARENA_ABORT_CODES);
+      assertTxSucceeded(result, "cancel_expired_challenge", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
       const digest = extractTxDigest(result);
 
       state.socket.send({
@@ -981,7 +981,7 @@ export function MatchmakingQueue() {
       }
       const signer = new CurrentAccountSigner(dAppKit as any);
       const result = await signer.signAndExecuteTransaction({ transaction: tx });
-      assertTxSucceeded(result, "cancel_wager", ARENA_ABORT_CODES);
+      assertTxSucceeded(result, "cancel_wager", ARENA_ABORT_CODES, ARENA_EXPECTED_ABORT_CODES);
 
       // Optimistic local removal — same race as the accept path.
       dispatch({
