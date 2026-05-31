@@ -16,6 +16,7 @@ import { setOnChainObjectId, restoreCharacterFromChain, deleteCharacter } from '
 import { getConnectedClients, adoptWagerIntoLobby, broadcastToAuthenticated } from './ws/handler';
 import { startMarketplaceIndex, shutdownMarketplaceIndex, subscribeMarketplace, listingToWire } from './data/marketplace';
 import { sweepOrphanActiveWagers } from './data/orphan-wager-recovery';
+import { bootRehydrateLobby } from './data/lobby-rehydration';
 import {
   sweepStalePresence,
   sweepStalePresenceInDb,
@@ -628,6 +629,21 @@ setInterval(() => {
 // Supabase is initialised.
 sweepOrphanActiveWagers().catch((err) => {
   console.error('[OrphanWager] sweep failed:', err?.message || err);
+});
+
+// === Boot lobby rehydration from chain OpenWagerRegistry ===
+//
+// 2026-05-31 incident: a server restart wipes the in-memory wagerLobby
+// map, but the on-chain registry survives. WAITING / PENDING_APPROVAL
+// wagers become invisible in the UI; the creator can't open a new one
+// (EAlreadyHasOpenWager) and has no card to cancel from. This boot pass
+// reads the registry, fetches each WagerMatch, and re-adopts every
+// WAITING / PENDING_APPROVAL entry into the lobby map. ACTIVE entries
+// are owned by the orphan-recovery sweeper above; SETTLED is logged but
+// not resurrected (the v5.2 contract removes registry entries on
+// settle, so a SETTLED registry row would indicate a contract bug).
+bootRehydrateLobby().catch((err) => {
+  console.error('[LobbyRehydrate] boot rehydration failed:', err?.message || err);
 });
 
 // === Initialize Marketplace event index ===

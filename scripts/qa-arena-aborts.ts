@@ -33,7 +33,12 @@
  * Exits 0 on full pass, 1 on any failure.
  */
 import { ARENA_ABORT_CODES } from "../frontend/src/lib/arena-aborts";
-import { humanizeChainError } from "../frontend/src/lib/tx-result";
+import {
+  humanizeChainError,
+  readStructuredAbort,
+  formatStructuredAbort,
+  assertTxSucceeded,
+} from "../frontend/src/lib/tx-result";
 
 let passes = 0;
 let failures = 0;
@@ -181,6 +186,150 @@ function testNoMatchReturnsNull(): void {
 }
 
 // ============================================================================
+// Structured ExecutionError path — 2026-05-31 create_wager incident.
+// SDK 2.16 puts an OBJECT in `status.error` (not a string). The pre-fix
+// `assertTxSucceeded` only knew about strings, fell through to the
+// empty fallback, and the user saw the generic "aborted on-chain (see
+// console for raw result)" toast instead of the friendly EAlready copy.
+// ============================================================================
+
+function structured16Envelope(code: number, opts: { fnName?: string; instruction?: number } = {}) {
+  // Mirrors the @mysten/sui types.ts:350-362 SimulateTransactionResult
+  // FailedTransaction shape with the ExecutionStatus.error object that
+  // carries the structured MoveAbort. The real envelope has gas /
+  // changedObjects / etc — only the abort-relevant subset matters here.
+  return {
+    $kind: "FailedTransaction",
+    FailedTransaction: {
+      status: {
+        success: false,
+        status: "failure",
+        error: {
+          message: "", // INTENTIONALLY EMPTY — the bug's defining feature
+          command: 0,
+          $kind: "MoveAbort",
+          MoveAbort: {
+            abortCode: String(code),
+            location: {
+              package: "0x9c01ad55dd3aecafe671758fe4c9837b9fdfef1739793eb6bc094cc476f7d38f",
+              module: "arena",
+              function: 12,
+              functionName: opts.fnName ?? "create_wager",
+              instruction: opts.instruction ?? 14,
+            },
+          },
+        },
+      },
+    },
+    commandResults: undefined,
+  };
+}
+
+function testReadStructuredAbortMoveAbort(): void {
+  section("readStructuredAbort — extracts code + module + functionName from MoveAbort");
+  const err = structured16Envelope(11).FailedTransaction.status.error;
+  const sa = readStructuredAbort(err);
+  if (!sa) {
+    fail("returns a StructuredAbort", "got null");
+    return;
+  }
+  eq(sa.abortCode, 11, "abortCode is the numeric Move code");
+  eq(sa.module, "arena", "module preserved");
+  eq(sa.functionName, "create_wager", "functionName preserved");
+  eq(sa.instruction, 14, "instruction preserved");
+}
+
+function testReadStructuredAbortNonMoveAbort(): void {
+  section("readStructuredAbort — non-MoveAbort kinds → null");
+  const err = { $kind: "SizeError", message: "too big" };
+  eq(readStructuredAbort(err), null, "SizeError → null");
+  eq(readStructuredAbort(null), null, "null → null");
+  eq(readStructuredAbort("plain string"), null, "string → null");
+  eq(readStructuredAbort(undefined), null, "undefined → null");
+}
+
+function testFormatStructuredAbort(): void {
+  section("formatStructuredAbort — produces the same shape humanizeChainError does");
+  const sa = { abortCode: 11, module: "arena", functionName: "create_wager", instruction: 14 };
+  const out = formatStructuredAbort(sa, ARENA_ABORT_CODES);
+  includes(out, "You already have an open wager", "uses friendly copy for code 11");
+  includes(out, "arena::create_wager", "preserves module::function location");
+  includes(out, ":14", "preserves bytecode instruction offset");
+}
+
+function testAssertTxSucceededStructuredAbort(): void {
+  section("assertTxSucceeded — structured FailedTransaction with empty .message reaches code 11");
+  // This is the 2026-05-31 incident exactly. Pre-fix this case threw
+  // "create_wager aborted on-chain (see console for raw result)";
+  // post-fix it throws "You already have an open wager…".
+  const envelope = structured16Envelope(11);
+  let caught: Error | null = null;
+  try {
+    assertTxSucceeded(envelope, "create_wager", ARENA_ABORT_CODES);
+  } catch (e) {
+    caught = e as Error;
+  }
+  if (!caught) {
+    fail("assertTxSucceeded throws", "did not throw on FailedTransaction envelope");
+    return;
+  }
+  includes(
+    caught.message,
+    "You already have an open wager",
+    "thrown message contains friendly EAlreadyHasOpenWager copy",
+  );
+  includes(caught.message, "create_wager", "thrown message names the ctxLabel");
+  // Regression guard — the generic fallback substring must NOT appear.
+  if (caught.message.includes("aborted on-chain (see console for raw result)")) {
+    fail(
+      "no generic fallback substring",
+      "structured-abort branch fell through to the generic toast copy — humanizer regression",
+    );
+  } else {
+    ok("no generic fallback substring (modal-friendly copy reaches user)");
+  }
+}
+
+function testAssertTxSucceededStructuredCoversEveryCode(): void {
+  section("assertTxSucceeded — every arena abort code routes through the structured path");
+  for (const codeStr of Object.keys(ARENA_ABORT_CODES)) {
+    const code = Number(codeStr);
+    const envelope = structured16Envelope(code, { fnName: "create_wager" });
+    try {
+      assertTxSucceeded(envelope, "create_wager", ARENA_ABORT_CODES);
+      fail(`code ${code} throws`, "did not throw");
+    } catch (e) {
+      const msg = (e as Error).message;
+      const expectedCopy = ARENA_ABORT_CODES[code];
+      if (msg.includes(expectedCopy)) ok(`code ${code} → "${expectedCopy.slice(0, 40)}…"`);
+      else fail(`code ${code} surfaces friendly copy`, `got=${JSON.stringify(msg)}`);
+    }
+  }
+}
+
+function testAssertTxSucceededStructuredFallbackPreservesString(): void {
+  section("assertTxSucceeded — string-error legacy envelope still works (no regression)");
+  // Pre-2.16 envelope: status.error is a string, not an object.
+  const legacy = {
+    $kind: "FailedTransaction",
+    FailedTransaction: {
+      status: {
+        success: false,
+        error:
+          "MoveAbort in 1st command, abort code: 11, in '0xabc::arena::create_wager' (instruction 14)",
+      },
+    },
+  };
+  let caught: Error | null = null;
+  try {
+    assertTxSucceeded(legacy, "create_wager", ARENA_ABORT_CODES);
+  } catch (e) {
+    caught = e as Error;
+  }
+  includes(caught?.message ?? null, "You already have an open wager", "legacy string path still humanizes code 11");
+}
+
+// ============================================================================
 // Runner
 // ============================================================================
 
@@ -192,6 +341,13 @@ function runAll(): void {
   testEachCodeRoundTrips();
   testUnknownCodeStillReadable();
   testNoMatchReturnsNull();
+  // Structured-envelope path (2026-05-31 regression guard).
+  testReadStructuredAbortMoveAbort();
+  testReadStructuredAbortNonMoveAbort();
+  testFormatStructuredAbort();
+  testAssertTxSucceededStructuredAbort();
+  testAssertTxSucceededStructuredCoversEveryCode();
+  testAssertTxSucceededStructuredFallbackPreservesString();
 
   console.log(
     `\n\x1b[1m▸ arena-aborts gauntlet: ${passes} pass, ${failures} fail\x1b[0m`,
