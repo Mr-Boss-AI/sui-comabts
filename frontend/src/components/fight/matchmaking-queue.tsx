@@ -103,6 +103,7 @@ function WagerLobbyCard({
   onCancelExpiredChallenge,
   onCancel,
   onInspect,
+  onInspectChallenger,
   signing,
   disableAccept = false,
   disableReason,
@@ -118,7 +119,14 @@ function WagerLobbyCard({
   onWithdraw: () => void;
   onCancelExpiredChallenge: () => void;
   onCancel: () => void;
+  /** Opens the wager CREATOR's player-profile modal (Tavern scout). */
   onInspect?: () => void;
+  /** v5.2 — opens the PENDING CHALLENGER's player-profile modal. Set
+   *  only when status is PENDING_APPROVAL and pendingChallenger is
+   *  populated. The creator-side approve/decline decision needs to be
+   *  informed by scouting the challenger's gear/stats just like the
+   *  challenger-side accept decision uses onInspect for the creator. */
+  onInspectChallenger?: () => void;
   signing: boolean;
   /** Cross-mode busy gate (Fix A silent-accept + Fix 1 cross-mode). */
   disableAccept?: boolean;
@@ -315,12 +323,43 @@ function WagerLobbyCard({
           </div>
           {isPending && pending && (
             // v5.2 — challenger details + countdown for the creator's
-            // approve/decline decision.
+            // approve/decline decision. The whole panel is clickable (when
+            // onInspectChallenger is wired) so the creator can scout the
+            // challenger's full profile (gear, build, recent fights)
+            // before approving — same scout-before-sign UX the challenger
+            // already gets via onInspect on the outer card.
             <div
+              role={onInspectChallenger ? "button" : undefined}
+              tabIndex={onInspectChallenger ? 0 : undefined}
+              onClick={
+                onInspectChallenger
+                  ? (e) => {
+                      e.stopPropagation();
+                      onInspectChallenger();
+                    }
+                  : undefined
+              }
+              onKeyDown={
+                onInspectChallenger
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onInspectChallenger();
+                      }
+                    }
+                  : undefined
+              }
+              title={
+                onInspectChallenger
+                  ? `Inspect ${pending.name}'s build before approving`
+                  : undefined
+              }
               className="mt-2 pt-2 text-xs"
               style={{
                 borderTop: "1px dashed var(--sc-rim-2)",
                 color: "var(--fg-2)",
+                cursor: onInspectChallenger ? "pointer" : undefined,
               }}
             >
               <div className="flex items-center gap-2">
@@ -1468,6 +1507,23 @@ export function MatchmakingQueue() {
                                     type: "OPEN_PROFILE",
                                     walletAddress: entry.creatorWallet,
                                   })
+                          }
+                          onInspectChallenger={
+                            // v5.2 — when status is PENDING_APPROVAL the
+                            // creator scouts the challenger before
+                            // approving. Symmetric to the challenger
+                            // scouting the creator via onInspect on the
+                            // outer card. Wired only when there's a
+                            // challenger to inspect (pendingChallenger
+                            // populated by the server after
+                            // wager_request_accepted).
+                            entry.pendingChallenger
+                              ? () =>
+                                  dispatch({
+                                    type: "OPEN_PROFILE",
+                                    walletAddress: entry.pendingChallenger!.wallet,
+                                  })
+                              : undefined
                           }
                           signing={signing}
                           disableAccept={disableAccept}

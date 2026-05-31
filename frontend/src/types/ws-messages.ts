@@ -262,6 +262,22 @@ export type ServerMessage =
   // `pendingChallenger` payload.
   | { type: "wager_lobby_updated"; entry: WagerLobbyEntry }
   | { type: "wager_lobby_removed"; wagerMatchId: string }
+  /** v5.2 (2026-05-31) — targeted notification to the party affected
+   *  by a wager-state transition they DIDN'T sign:
+   *    declined         → sent to the pending challenger when creator declines
+   *    withdrawn        → sent to the creator when challenger withdraws
+   *    challengeExpired → sent to the pending challenger when anyone fires
+   *                       cancel_expired_challenge (5-min timeout)
+   *  Server-side toast surface — the lobby-card already updates via
+   *  wager_lobby_updated; this is the explicit "your stake was just
+   *  refunded" / "your challenger walked away" UX. Frontend routes
+   *  these to the existing toast via SET_ERROR (non-sticky). */
+  | {
+      type: "wager_notification";
+      kind: "declined" | "withdrawn" | "challengeExpired";
+      wagerMatchId: string;
+      message: string;
+    }
   | { type: "character_updated_onchain" }
   | { type: "character_deleted" }
   /** Level-up celebration trigger (Fix 3, 2026-05-04). Server emits

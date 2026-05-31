@@ -1628,7 +1628,12 @@ async function handleWagerHandshake(
   }
 
   // wager_declined / wager_withdrawn / wager_challenge_expired:
-  // wager returned to WAITING; clear pending fields.
+  // wager returned to WAITING; clear pending fields. Capture the
+  // pre-clear pending wallet BEFORE we drop it from the entry — we
+  // still need it for the targeted "you were declined" / "your
+  // challenger walked away" toast below.
+  const previousPendingWallet = entry.pendingChallenger?.wallet;
+  const previousChallengerName = entry.pendingChallenger?.name;
   const cleared: WagerLobbyEntry = {
     ...entry,
     status: STATUS_WAITING,
@@ -1639,6 +1644,51 @@ async function handleWagerHandshake(
   console.log(
     `[${messageType}] pending cleared: wager=${wagerMatchId.slice(0, 14)} returned to WAITING`,
   );
+
+  // v5.2 (2026-05-31) — targeted toast to the party that DIDN'T sign
+  // the transition. The lobby-card already updated via the broadcast
+  // above; this is the explicit "your stake was refunded" / "your
+  // challenger walked away" UX cue. The signer doesn't need a toast
+  // (they just clicked the button and saw the modal close).
+  if (messageType === 'wager_declined' && previousPendingWallet) {
+    // Creator declined → challenger gets the toast.
+    const target = getClientByWalletAddress(previousPendingWallet);
+    if (target?.authenticated) {
+      send(target, {
+        type: 'wager_notification',
+        kind: 'declined',
+        wagerMatchId,
+        message: `Your challenge to ${entry.creatorName} was declined — your stake has been refunded.`,
+      });
+    }
+  } else if (messageType === 'wager_withdrawn' && previousPendingWallet) {
+    // Challenger withdrew → creator gets the toast (the candidate they
+    // were considering walked away — the slot reopened).
+    const target = getClientByWalletAddress(entry.creatorWallet);
+    if (target?.authenticated) {
+      send(target, {
+        type: 'wager_notification',
+        kind: 'withdrawn',
+        wagerMatchId,
+        message: `${previousChallengerName ?? 'Your challenger'} withdrew their challenge — the wager is open again for a new accepter.`,
+      });
+    }
+  } else if (messageType === 'wager_challenge_expired' && previousPendingWallet) {
+    // 5-min CHALLENGE_TIMEOUT_MS elapsed → challenger gets the toast
+    // (their stake was just refunded). Creator already sees the slot
+    // reopen via the lobby_updated broadcast; the challenger needs the
+    // explicit "refund landed" cue because they may not be looking at
+    // the lobby tab.
+    const target = getClientByWalletAddress(previousPendingWallet);
+    if (target?.authenticated) {
+      send(target, {
+        type: 'wager_notification',
+        kind: 'challengeExpired',
+        wagerMatchId,
+        message: `Your challenge to ${entry.creatorName} timed out (5 min) — your stake has been refunded.`,
+      });
+    }
+  }
 }
 
 /**
