@@ -241,17 +241,38 @@ function handleDisconnect(client: ConnectedClient): void {
       getMatchmaking().removeFromQueue(client.walletAddress);
     } catch { /* matchmaking may not be initialized */ }
 
-    // Cancel any open wager lobby entry
-    for (const [id, entry] of wagerLobby) {
-      if (entry.creatorWallet === client.walletAddress) {
-        wagerLobby.delete(id);
-        broadcastAll({ type: 'wager_lobby_removed', wagerMatchId: id });
-        adminCancelWagerOnChain(id).catch((err) => {
-          console.error('[Wager Lobby] On-chain cancel after disconnect failed:', err.message);
-        });
-        break;
-      }
-    }
+    // === No disconnect-cancel for open wagers ===
+    //
+    // 2026-05-31 (bug-ledger): we used to sweep wagerLobby here for any
+    // entry created by the disconnecting wallet, broadcast
+    // `wager_lobby_removed`, and admin_cancel_wager on chain. That
+    // behaviour was harmful in three ways:
+    //
+    //   1. Any 5-second WiFi blip / page reload refunded the user's
+    //      stake. There is no UX rationale for "close tab = abandon
+    //      your wager" — modern PvP games keep the stake live and let
+    //      you reconnect into it.
+    //   2. It was racy: with rehydration (added the same day) the
+    //      disconnect-cancel could fire on the old socket's teardown
+    //      AFTER the new socket connected, leaving the new tab seeing
+    //      an empty lobby it had no way to repopulate.
+    //   3. The matching broadcast also wiped the wager from OTHER
+    //      players' UIs — collateral damage from one player's reload.
+    //
+    // A WAITING / PENDING_APPROVAL wager now stays alive across any
+    // disconnect, reload, or reconnect. The only paths that end a
+    // wager are:
+    //   • Explicit Cancel by the creator (handleCancelWagerLobby).
+    //   • The 10-min lobby-expiry timer (line ~1386).
+    //   • Explicit handshake transitions (handleWagerHandshake).
+    //   • Silent-accept autoRollback (decideAcceptOutcome).
+    //   • Fight-start cleanup of OTHER stragglers (post-accept).
+    //   • Treasury admin_cancel / chain-side cancel_expired_wager.
+    //
+    // In-fight forfeit is handled below by handlePlayerDisconnect
+    // (fight-room.ts:1037) which has its own reconnect-grace window
+    // and is independent of this branch — covers the case where the
+    // disconnecting player is in an ACTIVE wager fight.
 
     // Handle active fight disconnect (forfeit — settles wager on-chain via fight-room)
     handlePlayerDisconnect(client.walletAddress);
