@@ -94,6 +94,21 @@ export interface GameState {
   // wager lock that didn't register with the server.
   errorSticky: boolean;
 
+  // v5.2 (2026-05-31) — centered notification modal for the three
+  // wager-handshake transitions the OTHER party didn't sign:
+  //   declined         → creator declined the challenger's request
+  //   withdrawn        → challenger walked away from a pending request
+  //   challengeExpired → 5-min CHALLENGE_TIMEOUT_MS elapsed
+  // Routed here instead of through the SET_ERROR toast surface because
+  // these are stake-bearing financial events (a refund just landed) that
+  // deserve a deliberate dismiss, not a bottom-corner flash. Neutral
+  // tone — informational, not an error.
+  wagerNotification: {
+    kind: "declined" | "withdrawn" | "challengeExpired";
+    wagerMatchId: string;
+    message: string;
+  } | null;
+
   // v5.1 — Educational center-screen modal for the two-handed-weapon
   // conflict. Fires only when the user *attempts* an invalid action
   // (staging an off-hand while a 2H weapon is equipped); the correct
@@ -234,6 +249,7 @@ export const initialGameState: GameState = {
   errorTimestamp: null,
   errorSticky: false,
   twoHandedConflictModalOpen: false,
+  wagerNotification: null,
   onChainRefreshTrigger: 0,
   opponentDisconnect: null,
   levelUpEvent: null,
@@ -314,6 +330,8 @@ export type GameAction =
   | { type: "SET_ERROR"; message: string | null; sticky?: boolean }
   | { type: "SHOW_TWO_HANDED_CONFLICT_MODAL" }
   | { type: "HIDE_TWO_HANDED_CONFLICT_MODAL" }
+  | { type: "SET_WAGER_NOTIFICATION"; payload: GameState["wagerNotification"] }
+  | { type: "CLEAR_WAGER_NOTIFICATION" }
   | { type: "SET_AUTH_PHASE"; phase: AuthPhase }
   | { type: "SET_OPPONENT_DISCONNECT"; payload: GameState["opponentDisconnect"] }
   | { type: "SET_LEVEL_UP_EVENT"; payload: GameState["levelUpEvent"] }
@@ -591,6 +609,11 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case "HIDE_TWO_HANDED_CONFLICT_MODAL":
       if (!state.twoHandedConflictModalOpen) return state;
       return { ...state, twoHandedConflictModalOpen: false };
+    case "SET_WAGER_NOTIFICATION":
+      return { ...state, wagerNotification: action.payload };
+    case "CLEAR_WAGER_NOTIFICATION":
+      if (!state.wagerNotification) return state;
+      return { ...state, wagerNotification: null };
     case "SET_AUTH_PHASE":
       if (state.authPhase === action.phase) return state;
       return { ...state, authPhase: action.phase };

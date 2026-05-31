@@ -116,21 +116,106 @@ function testWsMessageTypeDeclared(): void {
   contains(src, '"declined" | "withdrawn" | "challengeExpired"', 'kind union covers all three transitions');
 }
 
-function testFrontendHandlerRoutesToToast(): void {
-  section('game-provider.tsx — wager_notification routed to SET_ERROR toast');
+function testFrontendHandlerRoutesToCenteredModal(): void {
+  section('game-provider.tsx — wager_notification routed to centered modal (NOT SET_ERROR toast)');
   const src = readFileSync(
     join(ROOT, 'frontend/src/app/game-provider.tsx'),
     'utf8',
   );
   const idx = src.indexOf('case "wager_notification":');
   if (idx < 0) {
-    fail('case "wager_notification" present', 'no handler — toast won\'t fire');
+    fail('case "wager_notification" present', 'no handler — modal won\'t fire');
     return;
   }
   ok('case "wager_notification" present in WS dispatch');
-  const block = src.slice(idx, idx + 600);
-  contains(block, 'SET_ERROR', 'handler dispatches SET_ERROR (existing toast surface)');
-  contains(block, 'msg.message', 'handler surfaces msg.message verbatim');
+  // Scan from the FIRST `dispatch(` after the case label through the
+  // following `break;` — i.e. the actual executable block, not the
+  // surrounding comment (which can mention SET_ERROR defensively as
+  // part of explaining the modal-route rationale).
+  const dispatchStart = src.indexOf('dispatch(', idx);
+  const dispatchEnd = src.indexOf('break;', dispatchStart);
+  if (dispatchStart < 0 || dispatchEnd < 0 || dispatchStart > dispatchEnd) {
+    fail(
+      'wager_notification handler has a dispatch() before break;',
+      `dispatchStart=${dispatchStart}, dispatchEnd=${dispatchEnd}`,
+    );
+    return;
+  }
+  const dispatchBlock = src.slice(dispatchStart, dispatchEnd);
+  contains(
+    dispatchBlock,
+    'SET_WAGER_NOTIFICATION',
+    'handler dispatches SET_WAGER_NOTIFICATION (centered-modal route)',
+  );
+  // Regression guard — must NOT fall back to the bottom-corner toast.
+  // These are stake-bearing financial events; a 5s-fade toast is the
+  // bug we just fixed. Scoped to the dispatch block only so the
+  // explanatory comment that NAMES the toast surface doesn't trip it.
+  if (dispatchBlock.includes('SET_ERROR')) {
+    fail(
+      'wager_notification handler must NOT dispatch SET_ERROR',
+      'found SET_ERROR in wager_notification dispatch block — modal-route regression; ' +
+      'stake-refund event would render as a transient bottom-corner toast again',
+    );
+  } else {
+    ok('wager_notification handler does NOT dispatch SET_ERROR (no toast regression)');
+  }
+  contains(dispatchBlock, 'msg.kind', 'handler forwards msg.kind to the modal state');
+  contains(dispatchBlock, 'msg.message', 'handler forwards msg.message verbatim');
+  contains(dispatchBlock, 'msg.wagerMatchId', 'handler forwards msg.wagerMatchId for traceability');
+}
+
+function testWagerNotificationModalRendered(): void {
+  section('WagerNotificationModal — exists, reads slice, mounted in game-screen');
+  // (a) component file exists with the expected wiring
+  const modalSrc = readFileSync(
+    join(ROOT, 'frontend/src/components/fight/wager-notification-modal.tsx'),
+    'utf8',
+  );
+  contains(modalSrc, 'export function WagerNotificationModal', 'component is exported');
+  contains(modalSrc, 'state.wagerNotification', 'reads wagerNotification slice');
+  contains(modalSrc, 'CLEAR_WAGER_NOTIFICATION', 'dismiss dispatches CLEAR_WAGER_NOTIFICATION');
+  contains(modalSrc, '<Modal', 'uses the shared centered <Modal> component');
+  // Per-kind titles — three distinct headings, all neutral / informational
+  // tone (not red error language).
+  contains(modalSrc, 'Challenge Declined', 'title for kind: declined');
+  contains(modalSrc, 'Challenger Withdrew', 'title for kind: withdrawn');
+  contains(modalSrc, 'Challenge Timed Out', 'title for kind: challengeExpired');
+  contains(modalSrc, 'Continue', 'single dismiss/Continue button present');
+
+  // (b) the modal is mounted in game-screen.tsx — otherwise the slice
+  //     would update but nothing would render.
+  const screenSrc = readFileSync(
+    join(ROOT, 'frontend/src/components/layout/game-screen.tsx'),
+    'utf8',
+  );
+  contains(
+    screenSrc,
+    'import { WagerNotificationModal }',
+    'WagerNotificationModal imported in game-screen',
+  );
+  contains(
+    screenSrc,
+    '<WagerNotificationModal />',
+    'WagerNotificationModal mounted in game-screen',
+  );
+}
+
+function testReducerSliceWired(): void {
+  section('useGameStore — wagerNotification slice + actions wired');
+  const src = readFileSync(
+    join(ROOT, 'frontend/src/hooks/useGameStore.ts'),
+    'utf8',
+  );
+  contains(src, 'wagerNotification:', 'wagerNotification field declared on GameState');
+  contains(src, 'wagerNotification: null', 'initial value null in initialGameState');
+  contains(src, 'SET_WAGER_NOTIFICATION', 'SET_WAGER_NOTIFICATION action declared');
+  contains(src, 'CLEAR_WAGER_NOTIFICATION', 'CLEAR_WAGER_NOTIFICATION action declared');
+  contains(
+    src,
+    '"declined" | "withdrawn" | "challengeExpired"',
+    'slice kind union matches the three transitions',
+  );
 }
 
 function testServerEmitsForAllThreeTransitions(): void {
@@ -157,6 +242,14 @@ function testServerEmitsForAllThreeTransitions(): void {
     contains(block, 'getClientByWalletAddress(entry.creatorWallet)', 'withdrawn targets the creator');
     contains(block, "kind: 'withdrawn'", 'withdrawn branch carries kind: withdrawn');
     contains(block, 'withdrew', 'withdrawn message uses user-friendly copy');
+    // Updated copy (2026-05-31): user shortened the tail from
+    // "open again for a new accepter" → "open again." Guard the
+    // shortened form so a future revert is caught.
+    contains(
+      block,
+      'the wager is open again.',
+      'withdrawn message uses the shortened "open again." tail',
+    );
   }
 
   // wager_challenge_expired → toast to challenger
@@ -252,7 +345,9 @@ function noteReclaimGap(): void {
 testCardAcceptsOnInspectChallengerProp();
 testRenderSitePassesPendingChallengerWallet();
 testWsMessageTypeDeclared();
-testFrontendHandlerRoutesToToast();
+testFrontendHandlerRoutesToCenteredModal();
+testWagerNotificationModalRendered();
+testReducerSliceWired();
 testServerEmitsForAllThreeTransitions();
 testNotificationFiresAfterBroadcast();
 testCaptureBeforeClear();

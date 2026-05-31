@@ -193,13 +193,24 @@ export default function GameProvider({
           dispatch({ type: "REMOVE_WAGER_LOBBY_ENTRY", wagerMatchId: msg.wagerMatchId });
           break;
         case "wager_notification":
-          // v5.2 (2026-05-31) — targeted toast to the party affected
-          // by a state transition they didn't sign. The wager-lobby
-          // entry has already updated (or removed) via the prior
-          // wager_lobby_updated broadcast; this is the explicit
-          // "your stake was just refunded" / "your challenger walked
-          // away" UX cue. Non-sticky — informational, not an error.
-          dispatch({ type: "SET_ERROR", message: msg.message });
+          // v5.2 (2026-05-31) — targeted CENTERED MODAL to the party
+          // affected by a state transition they didn't sign. The
+          // wager-lobby entry has already updated (or removed) via
+          // the prior wager_lobby_updated broadcast; this is the
+          // explicit "your stake was just refunded" / "your challenger
+          // walked away" UX cue. Routed through SET_WAGER_NOTIFICATION
+          // (not SET_ERROR) so it renders as the centered, deliberate-
+          // dismiss WagerNotificationModal rather than the bottom-corner
+          // 5s-fade error toast — these are stake-bearing financial
+          // events that warrant a deliberate ack.
+          dispatch({
+            type: "SET_WAGER_NOTIFICATION",
+            payload: {
+              kind: msg.kind,
+              wagerMatchId: msg.wagerMatchId,
+              message: msg.message,
+            },
+          });
           break;
         case "fight_start":
           dispatch({ type: "SET_FIGHT", fight: msg.fight });

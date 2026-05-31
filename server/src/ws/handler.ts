@@ -1670,7 +1670,7 @@ async function handleWagerHandshake(
         type: 'wager_notification',
         kind: 'withdrawn',
         wagerMatchId,
-        message: `${previousChallengerName ?? 'Your challenger'} withdrew their challenge — the wager is open again for a new accepter.`,
+        message: `${previousChallengerName ?? 'Your challenger'} withdrew their challenge — the wager is open again.`,
       });
     }
   } else if (messageType === 'wager_challenge_expired' && previousPendingWallet) {
