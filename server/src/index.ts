@@ -692,20 +692,32 @@ subscribeMarketplace((event) => {
 // === Start Server ===
 
 server.listen(CONFIG.PORT, () => {
+  // On a hosting platform (Railway/Render/Fly) the public URL is the
+  // platform-assigned hostname, NOT localhost — the boot log used to say
+  // "http://localhost:${PORT}" which read as broken in cloud logs even
+  // though the bind itself was fine. The HTTP server attaches to the
+  // platform's injected $PORT via CONFIG.PORT (config.ts:19), and the
+  // WebSocketServer rides on the same http.Server via `{ server }`
+  // (index.ts:507) — one port serves both transports, which is what
+  // single-port platforms like Railway require.
   console.log(`
 ====================================
   SUI Combats Game Server
 ====================================
-  HTTP:      http://localhost:${CONFIG.PORT}
-  WebSocket: ws://localhost:${CONFIG.PORT}
-  Network:   ${CONFIG.SUI_NETWORK}
+  Bound on port: ${CONFIG.PORT}
+  Network:       ${CONFIG.SUI_NETWORK}
 ====================================
   Endpoints:
     GET /health
     GET /api/leaderboard
     GET /api/character/:walletAddress
     GET /api/fights/:fightId
-    WS  /  (WebSocket)
+    WS  /                       (WebSocket — same port)
+====================================
+  Local dev:    http://localhost:${CONFIG.PORT}
+                ws://localhost:${CONFIG.PORT}
+  On a host (Railway/Render/Fly) the public URL is the platform-
+  assigned hostname; clients connect via wss://<host>/ for the WS.
 ====================================
   `);
 });
