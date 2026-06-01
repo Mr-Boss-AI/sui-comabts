@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { CONFIG, GAME_CONSTANTS } from '../config';
 import { settleWagerOnChain } from '../utils/sui-settle';
-import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain, settleTieOnChain, updateCharacterDrawOnChain, adminCancelWagerOnChain } from '../utils/sui-settle';
+import { updateCharacterOnChain, findCharacterObjectId, setFightLockOnChain, settleDrawBundleOnChain } from '../utils/sui-settle';
 import { fetchEquippedFromDOFs, applyDOFEquipment } from '../utils/sui-read';
 import { sanitizeCharacter } from '../utils/wire-sanitize';
 import {
@@ -764,50 +764,54 @@ function finishFight(
       }
     })();
   } else if (draw) {
-    // v5.1 — Mutual-KO outcome. (1) Server local XP bump + history record;
-    // (2) on-chain `update_after_fight_draw` for both Characters so the
-    // `draws: u32` counter increments (falls back to update_after_fight
-    // with won=false on v5.0 env); (3) for wager fights, `settle_tie` on
-    // the WagerMatch (falls back to admin_cancel_wager on v5.0 env).
-    // Pre-v5.1 the draw branch did NONE of the on-chain work — every
-    // tied wager stranded the escrow (incident 2026-05-28 wager
-    // 0xf2f3982266…).
+    // v5.2.1 (2026-06-01) — Mutual-KO outcome. Single atomic PTB does
+    // settle_tie + update_after_fight_draw(A) + set_fight_lock(A, 0) +
+    // update_after_fight_draw(B) + set_fight_lock(B, 0). One signature,
+    // one digest, all-or-nothing.
+    //
+    // Before this rewrite the three calls fired in parallel through the
+    // treasury queue. The queue is serial, but the post-signAndExecute
+    // window allowed the next queued task to read a stale gas-coin version
+    // from the load-balanced fullnode ("object 0x75914b66… version 0x…
+    // is unavailable for consumption"). Live testnet draw on 2026-06-01
+    // surfaced this — settle_tie + both draw-updates eventually retried
+    // through, but lock-release never even fired (the draw branch had
+    // no setFightLock call), so both players sat on a 10-min auto-expire
+    // window before they could create_wager again. The PTB closes both
+    // gaps in one shot.
+    //
+    // v5.0 fallback (no OPEN_WAGER_REGISTRY_ID) is delegated to
+    // settleDrawBundleOnChain — for wager draws it falls through to
+    // admin_cancel_wager + the legacy character update path. Won't fire
+    // on v5.2 testnet (registry env is set) but the function stays env-safe.
     const charA = getCharacterById(fight.playerA.characterId);
     const charB = getCharacterById(fight.playerB.characterId);
+
+    // Server-local XP + history first (optimistic — chain values mirror
+    // back below once the PTB lands). Compute both XPs up-front so the
+    // bundle call can use them.
+    let xpA = 0;
+    let xpB = 0;
     if (charA) {
-      const xp = calculateXpReward(fight.type, false, charA.rating, charA.rating);
-      applyXp(charA, xp);
+      xpA = calculateXpReward(fight.type, false, charA.rating, charA.rating);
+      applyXp(charA, xpA);
       updateCharacter(charA);
       addFightHistory(charA.id, {
         fightId: fight.id,
         type: fight.type,
         opponentName: charB?.name || 'Unknown',
         opponentWallet: fight.playerB.walletAddress,
-        // v5.1 — server-side history records 'draw' (frontend widens the
-        // FightHistoryEntry.result type from 'win' | 'loss' to include 'draw'
-        // and renders the neutral badge). On v5.0 frontends, the value will
-        // round-trip through any unknown-result fallback.
         result: 'draw' as any,
         ratingChange: 0,
-        xpGained: xp,
+        xpGained: xpA,
         lootGained: null,
         turns: fight.turn,
         timestamp: Date.now(),
       });
-      // v5.1 — On-chain draw recording. Fire-and-forget; failures log but
-      // don't break the user-visible flow (server cache already updated).
-      if (charA.onChainObjectId) {
-        updateCharacterDrawOnChain(charA.onChainObjectId, xp).catch((err) => {
-          console.error(
-            '[Character] update_after_fight_draw (A) failed:',
-            err?.message || err,
-          );
-        });
-      }
     }
     if (charB) {
-      const xp = calculateXpReward(fight.type, false, charB.rating, charB.rating);
-      applyXp(charB, xp);
+      xpB = calculateXpReward(fight.type, false, charB.rating, charB.rating);
+      applyXp(charB, xpB);
       updateCharacter(charB);
       addFightHistory(charB.id, {
         fightId: fight.id,
@@ -816,40 +820,120 @@ function finishFight(
         opponentWallet: fight.playerA.walletAddress,
         result: 'draw' as any,
         ratingChange: 0,
-        xpGained: xp,
+        xpGained: xpB,
         lootGained: null,
         turns: fight.turn,
         timestamp: Date.now(),
       });
-      if (charB.onChainObjectId) {
-        updateCharacterDrawOnChain(charB.onChainObjectId, xp).catch((err) => {
-          console.error(
-            '[Character] update_after_fight_draw (B) failed:',
-            err?.message || err,
-          );
-        });
-      }
     }
 
-    // v5.1 — Settle the wager on chain. 100% refund both sides via
-    // settle_tie (or admin_cancel fallback on v5.0). Pre-v5.1 this was the
-    // missing piece that stranded the escrow.
-    if (fight.type === 'wager' && fight.wagerMatchId) {
-      console.log(`[Wager] Draw — settling tie on chain for ${fight.wagerMatchId}`);
-      settleTieOnChain(fight.wagerMatchId).catch((err) => {
-        console.error(
-          `[Wager] settle_tie failed for ${fight.wagerMatchId}:`,
-          err?.message || err,
-        );
-        // Last-resort safety net: try admin_cancel_wager. Same outcome for
-        // ACTIVE wagers (50/50 split = stake each).
-        adminCancelWagerOnChain(fight.wagerMatchId!).catch((fallbackErr) => {
+    // Capture pre-bundle levels so we can fire `character_leveled_up`
+    // if the draw XP crossed a threshold (matches win/loss-branch UX).
+    const aLevelBefore = charA?.level ?? 0;
+    const bLevelBefore = charB?.level ?? 0;
+
+    const wagerMatchIdForBundle =
+      fight.type === 'wager' && fight.wagerMatchId ? fight.wagerMatchId : undefined;
+    const aBundle = charA?.onChainObjectId ? { id: charA.onChainObjectId, xp: xpA } : undefined;
+    const bBundle = charB?.onChainObjectId ? { id: charB.onChainObjectId, xp: xpB } : undefined;
+
+    if (aBundle || bBundle || wagerMatchIdForBundle) {
+      const charARef = charA;
+      const charBRef = charB;
+      const wagerIdRef = wagerMatchIdForBundle;
+      void (async () => {
+        try {
+          const effects = await settleDrawBundleOnChain({
+            charA: aBundle,
+            charB: bBundle,
+            wagerMatchId: wagerMatchIdForBundle,
+          });
+
+          // Mirror chain truth → server cache, push fresh state + level-up
+          // notifications to each client. Skip the per-character branch on
+          // the v5.0 fallback path (digest === '(v5.0-fallback)') because
+          // no DrawRecorded events were emitted there.
+          const haveChainEffects = effects.digest !== '(v5.0-fallback)';
+
+          if (charARef && haveChainEffects && effects.charA) {
+            charARef.xp = effects.charA.newXp;
+            charARef.draws = effects.charA.newDraws;
+            if (effects.charA.leveledUp) {
+              charARef.level = effects.charA.newLevel;
+              charARef.unallocatedPoints = effects.charA.newUnallocatedPoints;
+            }
+            updateCharacter(charARef);
+            sendToWallet(charARef.walletAddress, {
+              type: 'character_data',
+              character: sanitizeCharacter(charARef),
+            });
+            sendToWallet(charARef.walletAddress, { type: 'character_updated_onchain' });
+            if (effects.charA.leveledUp) {
+              const levelsGained = effects.charA.newLevel - aLevelBefore;
+              sendToWallet(charARef.walletAddress, {
+                type: 'character_leveled_up',
+                oldLevel: aLevelBefore,
+                newLevel: effects.charA.newLevel,
+                pointsGranted: GAME_CONSTANTS.STAT_POINTS_PER_LEVEL * Math.max(1, levelsGained),
+                newTotalUnallocated: effects.charA.newUnallocatedPoints,
+                fightId: fight.id,
+              });
+            }
+          }
+          if (charBRef && haveChainEffects && effects.charB) {
+            charBRef.xp = effects.charB.newXp;
+            charBRef.draws = effects.charB.newDraws;
+            if (effects.charB.leveledUp) {
+              charBRef.level = effects.charB.newLevel;
+              charBRef.unallocatedPoints = effects.charB.newUnallocatedPoints;
+            }
+            updateCharacter(charBRef);
+            sendToWallet(charBRef.walletAddress, {
+              type: 'character_data',
+              character: sanitizeCharacter(charBRef),
+            });
+            sendToWallet(charBRef.walletAddress, { type: 'character_updated_onchain' });
+            if (effects.charB.leveledUp) {
+              const levelsGained = effects.charB.newLevel - bLevelBefore;
+              sendToWallet(charBRef.walletAddress, {
+                type: 'character_leveled_up',
+                oldLevel: bLevelBefore,
+                newLevel: effects.charB.newLevel,
+                pointsGranted: GAME_CONSTANTS.STAT_POINTS_PER_LEVEL * Math.max(1, levelsGained),
+                newTotalUnallocated: effects.charB.newUnallocatedPoints,
+                fightId: fight.id,
+              });
+            }
+          }
+
+          // Drop the in-flight wager row + notify both wallets — settle_tie
+          // landed inside the same PTB so the refund tx is already final.
+          if (wagerIdRef) {
+            dbDeleteWagerInFlight(wagerIdRef).catch(() => {});
+            const settleMsg = {
+              type: 'wager_settled' as const,
+              txDigest: effects.digest,
+              wagerMatchId: wagerIdRef,
+            };
+            sendToWallet(fight.playerA.walletAddress, settleMsg);
+            sendToWallet(fight.playerB.walletAddress, settleMsg);
+          }
+        } catch (err: any) {
           console.error(
-            `[Wager] admin_cancel fallback ALSO failed for ${fight.wagerMatchId}:`,
-            fallbackErr?.message || fallbackErr,
+            '[Draw.bundle] Settlement failed after retries:',
+            err?.message || err,
           );
-        });
-      });
+          const detail = err?.message || String(err);
+          const stuck = wagerIdRef
+            ? 'Draw settlement failed on chain — refund will land via the 10-min auto-expire. Refresh once it clears.'
+            : 'Draw on-chain update failed — stats may be temporarily out of sync. Refresh in a few minutes.';
+          sendToWallet(fight.playerA.walletAddress, { type: 'error', message: stuck, sticky: true });
+          sendToWallet(fight.playerB.walletAddress, { type: 'error', message: stuck, sticky: true });
+          // Diagnostic only — keep the failure detail in logs, not in the
+          // toast (uncopyable on mobile + leaks chain-node URL).
+          console.error('[Draw.bundle] detail:', detail);
+        }
+      })();
     }
   }
 

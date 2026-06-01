@@ -12,6 +12,148 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — v5.2.1 Atomic draw-settlement + treasury-queue finality, 2026-06-01
+
+Live testnet mutual-KO surfaced a treasury gas-coin version race AND a
+missing-feature regression in the draw branch.
+
+### Symptoms
+- `[Character.setFightLock] attempt 1/3 failed: object 0x75914b66…
+  version 0x34daaf32 is unavailable for consumption, current version:
+  0x34db53e9`
+- `[Character.updateAfterFightDraw] attempt 1/3 failed: version unavailable`
+- `[Wager.settleTie] attempt 1/3 failed: version unavailable`
+- settle_tie + updateAfterFightDraw eventually retried through
+  (`draws=1` confirmed on chain for both characters), but on-chain
+  fight-lock release was never attempted at all → both characters sat
+  on the chain's 10-min auto-expire window before `create_wager`
+  would accept them again.
+
+### Two distinct bugs found
+1. **Treasury-queue inter-tx race.** `enqueueTreasury` is concurrency=1
+   and serializes tasks, but `client.signAndExecuteTransaction` returned
+   before the gas coin's new version was observable on the same
+   load-balanced fullnode. The next queued task's sign call then read
+   a stale gas-coin reference and aborted with "object unavailable for
+   consumption". The retry budget eventually rescued settle_tie and the
+   draw updates, but a single failure was enough to surface live.
+2. **Draw branch never released the fight-lock.** The v5.1 mutual-KO
+   path in `finishFight` (`server/src/ws/fight-room.ts:766-854`) did
+   server-local XP + history + on-chain draw updates + settle_tie, but
+   never called `setFightLockOnChain(char, 0)`. Players had to wait
+   the full `FIGHT_LOCK_DURATION_MS = 10min` auto-expire. The
+   win/loss branch (lines 647-665) does clear, so this was a v5.1
+   draw-branch parity miss.
+
+### Fix
+- **`settleDrawBundleOnChain` (server/src/utils/sui-settle.ts)** —
+  atomic PTB that runs in ONE tx:
+  `(if wager) arena::settle_tie` →
+  `character::update_after_fight_draw(A)` →
+  `character::set_fight_lock(A, 0)` →
+  `character::update_after_fight_draw(B)` →
+  `character::set_fight_lock(B, 0)`.
+  Sui guarantees PTB-internal atomicity over a locked input-version
+  set — the intra-bundle gas / Character / WagerMatch race is
+  structurally impossible. Returns parsed `DrawRecorded` + `LevelUp`
+  effects per character so the server cache mirrors chain truth
+  (fixes the stale Hall-of-Fame D=0 too).
+- **Finality wait inside `execAsTreasury`** — after every
+  `signAndExecuteTransaction`, await `client.waitForTransaction(digest,
+  5000ms)` inside the same queue slot. Closes the inter-tx race for
+  every other treasury-queue path (fight-start lock acquisition,
+  win/loss settlement, any future admin op). Timeout failure is
+  logged but not thrown — the tx already succeeded.
+- **fight-room.ts draw branch rewritten** to call
+  `settleDrawBundleOnChain` once and mirror per-character
+  `DrawRecorded` effects back into the in-memory `Character` (xp,
+  draws, level, unallocatedPoints), push fresh `character_data` +
+  `character_updated_onchain` + `character_leveled_up` messages,
+  drop `wager_in_flight` row + send `wager_settled` on the SAME
+  digest as settle_tie.
+
+### Admin-clear script (testnet triage tool)
+- **`scripts/admin-clear-fight-lock.ts`** — one-shot
+  TREASURY-signed `set_fight_lock(0)` over N character ids. Reads
+  the on-chain DF first, skips the tx if the lock is already absent
+  or expired, runs against `server/.env`. Used to verify the
+  2026-06-01 stuck pair: both characters report `CLEARED (DF
+  present, value 0 — chain treats as unlocked)`.
+
+### Live verification
+- **Stuck-state read (pre-script):** GraphQL `dynamicFields` on both
+  characters showed `fight_lock_expires_at = 1780349259916
+  = 2026-06-01T21:27:39Z`, which had auto-expired 3 min before
+  the read — chain `is_fight_locked` already returned false.
+- **draws counter on chain:** `Sx.draws = 1`, `Mr_Boss.draws = 1`
+  via `object.asMoveObject.contents.json` — confirms the draw
+  retries succeeded on `update_after_fight_draw`. Hall of Fame
+  D=0 was the stale server cache (the new
+  `settleDrawBundleOnChain` cache-mirror prevents this from
+  recurring).
+- **Admin-clear txs (belt-and-suspenders, explicitly zero the
+  DF):** `F594APiJ4MLnU9RtonfVreVvKF1TJiPZMNfyE1H999Nu` (Sx) +
+  `6ikZAEdem3quUay7ddAPk7mppL4gdbrfYT3sdEF8cncr` (Mr_Boss),
+  both SUCCESS.
+- **Post-script chain state:** both DFs now hold `0`,
+  `is_fight_locked` returns false. `create_wager` accepts both
+  wallets immediately.
+
+### Tests + Move impact
+- No Move source change — the bundle composes existing v5.2 functions
+  that the 105/105 Move test suite already covers. Sui's runtime
+  guarantees PTB atomicity; no new Move test path is introduced.
+- TypeScript server compiles clean.
+
+---
+
+## [Unreleased] — v5.2 Supabase schema-drift hotfix (draws + FK), 2026-06-01
+
+First v5.2 live wager surfaced two Supabase errors in Railway logs after
+the env-var fix:
+- `[DB] Failed to save character: Could not find the 'draws' column of
+  'characters' in the schema cache`
+- `[DB] Failed to save fight: insert or update on table "fight_history"
+  violates foreign key constraint "fight_history_winner_wallet_fkey"`
+
+### Root cause
+- The server has carried `Character.draws` since v5.1 (mirrors chain
+  `Character.draws: u32`) and `dbSaveCharacter` writes it on every
+  upsert. Migration 001 created `characters` with `wins`+`losses` only;
+  migration 002 backfilled `unallocated_points` + `onchain_character_id`
+  and forgot the draws column.
+- PostgREST rejected every upsert ⇒ characters table stayed empty on
+  live testnet ⇒ subsequent `fight_history` insert violated the
+  winner_wallet FK because the parent row was never persisted.
+- The draw branch in `finishFight` (server/src/ws/fight-room.ts:766-854)
+  does NOT call `dbSaveFight`, so the "NULL winner on draw" theory is
+  ruled out — Bug 2 was a pure downstream effect of Bug 1.
+
+### Fix
+- New migration: `server/src/data/migrations/005_v52_draws_column.sql`
+  - `ALTER TABLE characters ADD COLUMN IF NOT EXISTS draws INTEGER NOT
+    NULL DEFAULT 0`
+  - `NOTIFY pgrst, 'reload schema'` — flushes PostgREST's cached
+    catalog so the next REST call sees the new column without waiting
+    for the next auto-reload tick.
+- `server/setup-db.mjs` extended with a `draws`-column probe so the
+  operator gets `✓ draws column (v5.2) EXISTS` (or the explicit
+  `✗ MISSING — apply migration 005`) on every run.
+- No app-code change — writer already matches the new column shape.
+
+### Verification path
+1. Paste migration 005 into Supabase SQL Editor on project
+   `twkuqeinleqiilkeixse`, run.
+2. `cd server && node setup-db.mjs` → expect `✓ draws column (v5.2)`.
+3. Play one ranked or wager fight on testnet, watch Railway logs:
+   - `[DB] Failed to save character` should disappear.
+   - `[DB] Failed to save fight: …winner_wallet_fkey` should disappear.
+4. Spot-check the row landed:
+   `select wallet_address, wins, losses, draws from characters
+    where wallet_address = '0x03c33df0…443985f';`
+
+---
+
 ## [Unreleased] — Wager-accepted silent gate (Bug 7), 2026-05-19
 
 Second-round wager stuck on chain with 0.2 SUI locked. The

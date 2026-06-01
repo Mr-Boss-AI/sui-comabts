@@ -265,6 +265,33 @@ async function execAsTreasury(
         throw new Error(`Tx ${result.digest} failed: ${err}`);
       }
 
+      // v5.2.1 (2026-06-01 hotfix) — finality-wait inside the queue slot.
+      // Without this, the next queued task can read a stale view of the
+      // treasury gas coin from the load-balanced fullnode and fail with
+      // "object 0x75914b66… version 0x… is unavailable for consumption,
+      // current version: 0x…". Live draw-settlement incident triggered
+      // this on settle_tie / updateAfterFightDraw / setFightLock back-to-back.
+      // Atomic PTBs (see settleDrawBundleOnChain) close the intra-bundle
+      // race; this closes the inter-bundle race for the rest of the
+      // treasury queue (fight-start lock acquisition, win/loss settlement,
+      // any other admin op).
+      try {
+        await client.waitForTransaction({
+          digest: result.digest,
+          timeout: 5_000,
+          pollInterval: 200,
+        });
+      } catch (waitErr) {
+        // Timeout / RPC blip: tx already succeeded (we checked status above),
+        // so just log and move on. The next queued task MAY hit the version
+        // race in this rare path, in which case its own withRetry budget
+        // covers it. Don't throw — would surface a benign post-success
+        // delay as a hard failure.
+        console.warn(
+          `[${label}] post-tx finality wait timed out for ${result.digest}: ${(waitErr as Error)?.message || waitErr}`,
+        );
+      }
+
       return {
         digest: result.digest,
         events: (result.events ?? []) as SuiEvent[],
@@ -403,6 +430,207 @@ export async function updateCharacterDrawOnChain(
   });
   console.log(`[Character] Update-draw complete. Tx: ${digest}`);
   return { digest };
+}
+
+/**
+ * v5.2.1 (2026-06-01) — Atomic draw settlement.
+ *
+ * Bundles into a single PTB:
+ *   (if wager)  arena::settle_tie         — 100% refund both sides
+ *   character::update_after_fight_draw(A) — ticks draws, applies XP
+ *   character::set_fight_lock(A, 0)       — releases the fight-lock
+ *   character::update_after_fight_draw(B) — same for B
+ *   character::set_fight_lock(B, 0)       — same for B
+ *
+ * Why a PTB instead of 5 sequential queued txs (the v5.1 pattern):
+ *  - Sui executes every command inside a PTB against a single, locked
+ *    set of input object versions. The intra-bundle gas-coin /
+ *    Character / WagerMatch version race that hit live testnet on
+ *    2026-06-01 (logs: "object 0x75914b66… version 0x… is unavailable
+ *    for consumption") is structurally impossible — there is no
+ *    between-tx window.
+ *  - All-or-nothing semantics: if any sub-call aborts (e.g.
+ *    EMatchNotActive because an admin_cancel ran first), the entire
+ *    bundle rolls back. Retries then re-attempt from a clean slate
+ *    instead of a half-applied state where draws ticked but lock
+ *    never cleared.
+ *  - One Tx digest, one set of effects, one wager_settled message to
+ *    the frontend — simpler client + log triage.
+ *
+ * Returns the parsed per-character effects so the server cache can
+ * mirror chain truth (xp, draws, level, unallocated_points) exactly
+ * like the win/loss path does via update_after_fight's
+ * FightResultUpdated event. Without this, Hall of Fame keeps showing
+ * D=0 until the next character restore.
+ *
+ * Caller responsibilities:
+ *  - Pre-validate xp values are <= MAX_XP_PER_FIGHT (1000) — the
+ *    Move side asserts this, so an over-cap value aborts the bundle.
+ *  - Pass `wagerMatchId = undefined` for ranked/casual draws so
+ *    settle_tie is skipped entirely.
+ *  - Pass `charA`/`charB` as undefined when the wallet hasn't minted
+ *    on-chain (server-only test sessions) — those sub-calls are
+ *    skipped. If BOTH are undefined and there's no wager, the call
+ *    throws ENoBundleWork because the caller is asking for an
+ *    empty PTB.
+ */
+export interface DrawCharacterEffects {
+  newXp: number;
+  newDraws: number;
+  leveledUp: boolean;
+  newLevel: number;             // 0 when no level-up fired
+  newUnallocatedPoints: number; // 0 when no level-up fired
+}
+
+export interface DrawBundleEffects {
+  digest: string;
+  /** Effects for charA — undefined when charA was skipped (no onChainObjectId). */
+  charA?: DrawCharacterEffects;
+  charB?: DrawCharacterEffects;
+}
+
+function parseDrawEffectsForCharacter(
+  events: SuiEvent[],
+  characterId: string,
+): DrawCharacterEffects | null {
+  const drawRecorded = events.find(
+    (ev) =>
+      ev.type.endsWith('::character::DrawRecorded') &&
+      (ev.parsedJson as Record<string, unknown> | undefined)?.character_id === characterId,
+  );
+  if (!drawRecorded?.parsedJson) return null;
+  const dr = drawRecorded.parsedJson as Record<string, string | number>;
+
+  // LevelUps are emitted in order; the LAST LevelUp for this character is
+  // authoritative for the post-bundle level / unallocated points. A draw
+  // can cross at most one level threshold (10% XP), but the parser is
+  // defensive and picks the last.
+  const levelUps = events.filter(
+    (ev) =>
+      ev.type.endsWith('::character::LevelUp') &&
+      (ev.parsedJson as Record<string, unknown> | undefined)?.character_id === characterId,
+  );
+  const lastLevelUp =
+    levelUps.length > 0 ? (levelUps[levelUps.length - 1].parsedJson as Record<string, string | number> | undefined) : undefined;
+
+  return {
+    newXp: Number(dr.new_xp),
+    newDraws: Number(dr.new_draws),
+    leveledUp: levelUps.length > 0,
+    newLevel: lastLevelUp ? Number(lastLevelUp.new_level) : 0,
+    newUnallocatedPoints: lastLevelUp ? Number(lastLevelUp.unallocated_points) : 0,
+  };
+}
+
+export async function settleDrawBundleOnChain(opts: {
+  charA?: { id: string; xp: number };
+  charB?: { id: string; xp: number };
+  wagerMatchId?: string;
+}): Promise<DrawBundleEffects> {
+  const { charA, charB, wagerMatchId } = opts;
+
+  if (!charA && !charB && !wagerMatchId) {
+    throw new Error(
+      '[Draw.bundle] ENoBundleWork — at least one of charA, charB, wagerMatchId is required',
+    );
+  }
+
+  // v5.0 fallback — if running against an env without OPEN_WAGER_REGISTRY_ID
+  // we can't call settle_tie (it requires the v5.1+ registry). Fall back to
+  // the legacy split: admin_cancel_wager for the escrow + per-character
+  // update_after_fight(won=false) calls. This branch shouldn't fire in v5.2
+  // testnet (registry is set in deployment.testnet-v5.2.json) but keeps
+  // the function safe to call from any env.
+  const haveRegistry = !!CONFIG.OPEN_WAGER_REGISTRY_ID;
+  if (wagerMatchId && !haveRegistry) {
+    console.log(
+      '[Draw.bundle] OPEN_WAGER_REGISTRY_ID unset — falling back to split admin_cancel + legacy character updates',
+    );
+    await adminCancelWagerOnChain(wagerMatchId);
+    // No DrawRecorded events on the v5.0 path; report empty effects so
+    // the caller's cache-mirror branch becomes a no-op (server keeps its
+    // optimistic local applyXp/draws values, which is the v5.0 behaviour).
+    return { digest: '(v5.0-fallback)' };
+  }
+
+  const label = wagerMatchId ? 'Draw.bundle.wager' : 'Draw.bundle.ranked';
+  // Five sub-calls + storage costs. 0.2 SUI is comfortably above the
+  // observed budget for a 4-call admin PTB on testnet (~0.04 SUI), with
+  // headroom for a level-up across both characters.
+  const gasBudget = 200_000_000;
+
+  const { digest, events } = await execAsTreasury(
+    label,
+    (tx) => {
+      if (wagerMatchId) {
+        tx.moveCall({
+          target: `${PKG()}::arena::settle_tie`,
+          arguments: [
+            tx.object(wagerMatchId),
+            tx.object(CONFIG.OPEN_WAGER_REGISTRY_ID),
+            tx.object(CLOCK),
+          ],
+        });
+      }
+      if (charA) {
+        tx.moveCall({
+          target: `${PKG()}::character::update_after_fight_draw`,
+          arguments: [
+            tx.object(ADMIN_CAP()),
+            tx.object(charA.id),
+            tx.pure.u64(charA.xp),
+            tx.object(CLOCK),
+          ],
+        });
+        tx.moveCall({
+          target: `${PKG()}::character::set_fight_lock`,
+          arguments: [
+            tx.object(ADMIN_CAP()),
+            tx.object(charA.id),
+            tx.pure.u64(0),
+            tx.object(CLOCK),
+          ],
+        });
+      }
+      if (charB) {
+        tx.moveCall({
+          target: `${PKG()}::character::update_after_fight_draw`,
+          arguments: [
+            tx.object(ADMIN_CAP()),
+            tx.object(charB.id),
+            tx.pure.u64(charB.xp),
+            tx.object(CLOCK),
+          ],
+        });
+        tx.moveCall({
+          target: `${PKG()}::character::set_fight_lock`,
+          arguments: [
+            tx.object(ADMIN_CAP()),
+            tx.object(charB.id),
+            tx.pure.u64(0),
+            tx.object(CLOCK),
+          ],
+        });
+      }
+    },
+    gasBudget,
+  );
+
+  const result: DrawBundleEffects = { digest };
+  if (charA) {
+    const e = parseDrawEffectsForCharacter(events, charA.id);
+    if (e) result.charA = e;
+  }
+  if (charB) {
+    const e = parseDrawEffectsForCharacter(events, charB.id);
+    if (e) result.charB = e;
+  }
+  console.log(
+    `[Draw.bundle] Settled. Tx: ${digest}` +
+      (result.charA ? `, A: draws=${result.charA.newDraws} xp=${result.charA.newXp}` : '') +
+      (result.charB ? `, B: draws=${result.charB.newDraws} xp=${result.charB.newXp}` : ''),
+  );
+  return result;
 }
 
 /**

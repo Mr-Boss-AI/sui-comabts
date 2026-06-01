@@ -181,6 +181,91 @@
 
 ---
 
+## Live-QA hotfix — 2026-06-01 (atomic draw-settlement + treasury finality)
+
+Live mutual-KO test surfaced a treasury gas-coin version race AND the
+missing fight-lock release in the v5.1 draw branch.
+
+**Symptoms.**
+- `[Character.setFightLock] attempt 1/3 failed: object 0x75914b66… is
+  unavailable for consumption`, same for `updateAfterFightDraw` +
+  `settleTie`. settle_tie retried through (digest
+  `3KFkL7mfUwzzXBmVDbyG9YL7uPLpu1Vpu1pP5wX5jLgH`), draws ticked
+  on chain (both characters `draws=1`), but lock release never even
+  fired — the draw branch had no `setFightLockOnChain` call. Players
+  saw `arena::create_wager:53` until the chain's 10-min auto-expire.
+
+**Root causes (2, independent).**
+1. *Treasury-queue inter-tx race.* `signAndExecuteTransaction` returned
+   before the new gas-coin version was observable on the same
+   load-balanced fullnode → next queued sign read stale.
+2. *Missing lock-release in draw branch.* `finishFight` draw arm
+   (fight-room.ts:766-854) cleared no fight-locks — v5.1 parity miss
+   vs. the win/loss arm (lines 647-665).
+
+**Fix (atomic-PTB + finality-wait, ships together).**
+- `server/src/utils/sui-settle.ts::settleDrawBundleOnChain` — single
+  PTB does `settle_tie` (if wager) + `update_after_fight_draw`(A) +
+  `set_fight_lock`(A, 0) + same for B. Sui's locked-input-version
+  semantics close the intra-bundle race structurally. Returns parsed
+  `DrawRecorded` + `LevelUp` effects per character so the server
+  cache mirrors chain truth (also fixes the stale Hall-of-Fame D=0
+  cache).
+- `execAsTreasury` now awaits `client.waitForTransaction(digest, 5s)`
+  inside its queue slot — closes inter-tx race for every OTHER
+  treasury path (fight-start lock acquire, win/loss settle, future
+  admin ops).
+- Draw branch rewritten to call the bundle once + mirror per-character
+  effects + send fresh `character_data` / `character_updated_onchain`
+  / `character_leveled_up` / `wager_settled` messages. Drops
+  `wager_in_flight` row on the same digest.
+
+**Admin triage tool.**
+`scripts/admin-clear-fight-lock.ts` — `npx tsx scripts/...
+<characterId> [...]`. Reads the on-chain DF, skips the tx if already
+unlocked, otherwise treasury-signs `set_fight_lock(_, 0)` and
+verifies. Used to clear the 2026-06-01 stuck pair (txs
+`F594APiJ4MLnU9RtonfVreVvKF1TJiPZMNfyE1H999Nu` for Sx,
+`6ikZAEdem3quUay7ddAPk7mppL4gdbrfYT3sdEF8cncr` for Mr_Boss).
+
+**Move impact.** None — the bundle composes existing v5.2 entries.
+Move tests stay 105/105.
+
+---
+
+## Live-QA hotfix — 2026-06-01 (Supabase schema drift)
+
+Two Railway-log errors surfaced during the first v5.2 live wager (env-vars
+patch confirmed setFightLock + updateAfterFight working on chain):
+
+- `[DB] Failed to save character: Could not find the 'draws' column of
+  'characters' in the schema cache`
+- `[DB] Failed to save fight: insert or update on table "fight_history"
+  violates foreign key constraint "fight_history_winner_wallet_fkey"`
+
+**Diagnosis.** The server has carried `Character.draws` since v5.1
+(mirrored from chain `Character.draws: u32`) and `dbSaveCharacter`
+(server/src/data/db.ts:53) writes the field on every upsert. Migration
+001 shipped `characters` with `wins`+`losses` but no `draws`; migration
+002 backfilled `unallocated_points` + `onchain_character_id` and forgot
+the column. PostgREST rejected every upsert ⇒ characters table stayed
+empty on live ⇒ subsequent fight_history insert violated the
+winner_wallet FK (parent row never persisted). The draw branch in
+`finishFight` (fight-room.ts:766-854) does NOT call `dbSaveFight`, so
+the "NULL winner on draw" hypothesis is ruled out — Bug 2 was a pure
+downstream of Bug 1.
+
+**Fix.** `server/src/data/migrations/005_v52_draws_column.sql`:
+`ALTER TABLE characters ADD COLUMN IF NOT EXISTS draws INTEGER NOT
+NULL DEFAULT 0` + `NOTIFY pgrst, 'reload schema'` (PostgREST cache
+reload — without it the next REST call still hits the stale cache on
+the hosted Supabase tier). No app-code change — writer already
+matches the new column shape. `setup-db.mjs` extended with a
+column-level probe so the operator gets `✓ draws column (v5.2)` (or
+the explicit `✗ MISSING — apply migration 005`) on every run.
+
+---
+
 ## v5.1 status — untouched
 
 - v5.1 package `0x308645f3…3717` still live on testnet.

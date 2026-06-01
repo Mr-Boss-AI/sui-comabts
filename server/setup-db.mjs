@@ -70,6 +70,13 @@ async function probe(table, selectCol) {
 }
 
 const charactersExist = await probe('characters', 'wallet_address');
+// v5.2 column-level probe — confirms migration 005 landed and PostgREST
+// reloaded its schema cache. If this is false but `charactersExist` is
+// true, the table is there but the draws column is missing → every
+// character upsert will fail with "Could not find the 'draws' column"
+// and fight_history inserts will then violate the winner FK because
+// the parent row never persisted.
+const charactersHasDraws = await probe('characters', 'draws');
 const wagerInFlightExists = await probe('wager_in_flight', 'wager_match_id');
 const presenceExists = await probe('presence', 'wallet_address');
 const fightRequestsExist = await probe('fight_requests', 'id');
@@ -78,6 +85,7 @@ const friendsExist = await probe('friends', 'owner');
 
 const allExist =
   charactersExist &&
+  charactersHasDraws &&
   wagerInFlightExists &&
   presenceExists &&
   fightRequestsExist &&
@@ -85,6 +93,7 @@ const allExist =
   friendsExist;
 
 console.log(`characters table:        ${charactersExist ? '✓ EXISTS' : '✗ MISSING'}`);
+console.log(`  └ draws column (v5.2): ${charactersHasDraws ? '✓ EXISTS' : '✗ MISSING — apply migration 005'}`);
 console.log(`wager_in_flight table:   ${wagerInFlightExists ? '✓ EXISTS' : '✗ MISSING'}`);
 console.log(`presence table:          ${presenceExists ? '✓ EXISTS' : '✗ MISSING'}`);
 console.log(`fight_requests table:    ${fightRequestsExist ? '✓ EXISTS' : '✗ MISSING'}`);
