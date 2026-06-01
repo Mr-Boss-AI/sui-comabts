@@ -1,13 +1,58 @@
 # SUI Combats — Mainnet Deployment Prep Checklist
 
 > **READ THIS BEFORE ANY MAINNET ACTION.** Testnet lessons encoded here.
-> Last updated: 2026-05-28, after the wager-accept finality-race fix
-> shipped and the mutual-KO / draw bundle was added to the v5.1
-> backlog (§C Contract layer). Earlier-dated content from 2026-05-03
-> (v5 testnet hardening + repo cleanup) and 2026-05-20 (KioskRegistry
-> bundling) remains canonical. The Sui-protocol content (sections
-> A–H) is unchanged from the original 2026-04-18 draft — those facts
-> are baked into the chain semantics, not our code state.
+> Last updated: 2026-06-02, after the v5.2.1 atomic-draw-settlement
+> bundle + v5.2.2 Test Bot Fight mode shipped to public testnet
+> preview on `main`. Earlier content from 2026-05-28 (wager-accept
+> finality-race), 2026-05-20 (KioskRegistry bundling), and 2026-05-03
+> (v5 testnet hardening + repo cleanup) remains canonical. The
+> Sui-protocol content (sections A–H) is unchanged from the original
+> 2026-04-18 draft — those facts are baked into the chain semantics,
+> not our code state.
+
+---
+
+## Current state — 2026-06-02 (public testnet preview live)
+
+**v5.2 is the testnet codename.** Mainline `main` at HEAD `1b20d50`.
+v5.2 contract live on testnet (`0x9c01ad55…7d38f`), Railway backend
++ Vercel frontend pointed at it, public testnet preview is live and
+stable. Hierarchy of patches stacked on the v5.2 baseline:
+
+- **`f84931f`** — Merge v5.2 wager-fairness — public testnet baseline
+- **`1aaad80`** — v5.2.1: atomic `settleDrawBundleOnChain` PTB closes
+  the intra-bundle treasury gas-coin version race AND adds the
+  missing fight-lock release in the draw branch; `execAsTreasury`
+  waits for tx finality (`client.waitForTransaction`, 5s timeout)
+  inside the queue slot to close the inter-tx race for every other
+  admin path. Plus Supabase migration 005 (`characters.draws`
+  column, applied manually against
+  `twkuqeinleqiilkeixse`) and `scripts/admin-clear-fight-lock.ts`
+  triage tool.
+- **`1b20d50`** — v5.2.2: Test Bot Fight (Arena Friendly tile →
+  instant solo match vs server-side synthetic opponent). Bot
+  mirrors player loadout, moves are random legal, zero on-chain
+  or DB side effects. `qa-bot-fight.ts` gauntlet, 28/28 PASS.
+
+**Live operational state**: TREASURY at 1.37 SUI (down from 2.16 after
+the 88-NFT marketplace mint). TREASURY v5.2 kiosk at
+`0x91f97327…51d12a359` holds 87 active listings (Lv1 → Lv8, Common →
+Legendary). Draws counter ticks correctly on chain after the v5.2.1
+bundle landed; Hall of Fame mirrors chain truth via the new
+`DrawRecorded`-event cache.
+
+**v5.3 / mainnet republish backlog (UNCHANGED from prior sessions)**:
+`settle_wager_attested` (dual-sig settlement), `sui::random`-based
+loot RNG, `respec_character` (5 SUI sink + 24h cooldown), confirm-modal
+wager gate (frontend), WS Zod validation + rate limiter (server),
+opponent scout pre-accept modal, AdminCap referee SPOF mitigation,
+Express/WS scalability review. None block testnet preview; all are
+mainnet candidates.
+
+**Mainnet readiness signal**: no new mainnet blockers introduced this
+session. The v5.2.1 + v5.2.2 work is purely server-side runtime
+hardening (no Move source change → Move tests stay 105/105
+PASS).
 
 ---
 

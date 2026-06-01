@@ -44,19 +44,26 @@ This project is indexed by GitNexus as **sui-comabts** (6737 symbols, 11652 rela
 
 ---
 
-# v5.2 testnet — current runtime (2026-05-30, post-cut-over)
+# v5.2.2 testnet — current runtime (2026-06-02, public preview live)
 
-> Hand-maintained reference for the live testnet runtime. Updated 2026-05-30
-> after the v5.2 wager-fairness app-code cut-over completed and is ready
-> for live QA. The GitNexus block above this line is auto-rewritten by
-> the post-commit hook; everything below this header is preserved.
+> Hand-maintained reference for the live testnet runtime. Updated 2026-06-02
+> after the v5.2.1 atomic-draw-settlement bundle + v5.2.2 Test Bot Fight
+> mode shipped and deployed via Railway/Vercel on `main`. The GitNexus block
+> above this line is auto-rewritten by the post-commit hook; everything
+> below this header is preserved.
 
 ## Branch + commit
 
-- Working branch: `feature/v5.2-wager-fairness` (local only — NOT pushed, NOT merged to `main`)
-- `main` at `6fdb18d` (v5.1 baseline, annotated tag `v5.1`) — untouched
-- v5.1 package + v5.1 shared objects still live on chain; v5.2 is the
-  parallel runtime the frontend + server are now pointed at
+- `main` at HEAD `1b20d50` (v5.2.2 Test Bot Fight) on origin
+- Lineage on `main`:
+  - `f84931f` — Merge v5.2 wager-fairness — public testnet baseline
+  - `1aaad80` — v5.2.1 atomic draw-settlement PTB + Supabase draws
+    column + treasury finality wait
+  - `1b20d50` — v5.2.2 Test Bot Fight (instant off-chain solo match)
+- Tags: `v5.1` annotated at `6fdb18d` (v5.1 baseline rollback point)
+- Railway backend (`https://sui-comabts-production.up.railway.app`) deploys
+  from `main` on push — both 2026-06-01/02 pushes went live within ~2-3 min
+- Vercel frontend deploys from `main`
 
 ## v5.2 deployment (testnet, live)
 
@@ -74,8 +81,10 @@ This project is indexed by GitNexus as **sui-comabts** (6737 symbols, 11652 rela
 | Display\<Character\> | `0x9c8fc218e52a7bab1a95aa2bbbfbf9199243523cc8cd94d7e5cecb1db2b07b8b` |
 | Display\<Item\> | `0x8b75f8f6d90be38f41ddd4105b73e8f3857ad53d510e140b18bd46c1580fa88e` |
 | TREASURY wallet | `0x975f1b348625cdb4f277efaefda1d644b17a4ffd97223892d93e93277fe19d4d` |
-| TREASURY kiosk (v5.1 — unchanged) | `0x9a492e52f998a76c355d65b0aad2db3c35812837da36aed9666c7b2661dfdb36` |
-| KioskOwnerCap (v5.1) | `0x668805a60262971d6044c1ad8c861dd6e0ce0d69bb93eda46690214d1820fed2` |
+| TREASURY v5.2 kiosk | `0x91f97327ed40e210b615fa8551677458e2a0aeb6434c843dc1d6dee51d12a359` — **87 active listings** (88 minted; +1 anomaly from prior sessions) |
+| TREASURY v5.2 KioskOwnerCap | `0x20d4534f6c0c3f122e76403e140d300b08f0bfacfd634f21f3a87918251a23a7` |
+| TREASURY v5.1 kiosk (parity reference) | `0x9a492e52f998a76c355d65b0aad2db3c35812837da36aed9666c7b2661dfdb36` |
+| TREASURY v5.1 KioskOwnerCap | `0x668805a60262971d6044c1ad8c861dd6e0ce0d69bb93eda46690214d1820fed2` |
 
 Royalty rule on v5.2 TransferPolicy: `amount_bp = 250` (2.5%), `min_amount = 1000` MIST. Matches v5.1 parity exactly.
 
@@ -89,6 +98,13 @@ v5.2 is a fresh publish — NOT an upgrade. The struct shape changed (WagerMatch
 - `reclaim_stalled_wager` participant escape hatch (30-min `WAGER_RESOLUTION_TIMEOUT_MS`).
 - Abort codes 12–23 added.
 
+## v5.2.x runtime patches (no Move source change)
+
+- **v5.2.1 — Atomic draw-settlement PTB.** `server/src/utils/sui-settle.ts::settleDrawBundleOnChain` bundles `settle_tie` + both `update_after_fight_draw` + both `set_fight_lock(0)` into ONE PTB. Sui's locked-input-version semantics close the intra-bundle gas-coin version race that hit live testnet 2026-06-01. `execAsTreasury` also now `await`s `client.waitForTransaction(digest, 5s)` inside its queue slot — closes the inter-tx race for every other admin path.
+- **v5.2.1 — Supabase migration 005.** `server/src/data/migrations/005_v52_draws_column.sql` adds the missing `characters.draws` column (server was writing it since v5.1 mutual-KO ship; migrations 001+002 forgot it). Applied manually to project `twkuqeinleqiilkeixse`.
+- **v5.2.1 — Admin-clear script.** `scripts/admin-clear-fight-lock.ts` bulk-clears stuck fight-locks via treasury-signed `set_fight_lock(0)`. Used for the 2026-06-01 stuck pair (Sx + Mr_Boss).
+- **v5.2.2 — Test Bot Fight.** Arena Friendly tile triggers `start_bot_fight` WS message → `createBotFight(player)` synth-opponent path. `bot:<uuid>` sentinel wallet (NOT `0x…` so no future code can route a chain call through it). `finishFight` short-circuits at the top when `fight.type === 'bot'` — every chain / DB / progression mutation skipped. Tavern human-vs-human friendly (`requestType === 'friendly'`) unchanged.
+
 ## Test wallets
 
 - Mr_Boss `0xf669789c…0590f33` — v5.1 character minted (still usable; Character module unchanged in v5.2)
@@ -96,10 +112,21 @@ v5.2 is a fresh publish — NOT an upgrade. The struct shape changed (WagerMatch
 
 ## Pinata CIDs (catalog)
 
-- Lv1 Common (Ponke set, 26 items): `bafybeib36hi7qupllhjymo2qnte2nghbiowkwxj2hb2fgbs5jly2ln3ida`
-- Lv2 Uncommon (Scavenger set, 26 items): `bafybeidsjl6kihow5vzgssvoyjo2nvworbwhmk53f5vfe3wp56tqzzv4oq`
+All four catalogs are now minted under the **v5.2 package's Item type** and listed in the v5.2 TREASURY kiosk. 88 mints total, 87 active listings.
 
-Both sets are minted under the v5.1 package's Item type. Player wallets can still HOLD them but they CANNOT be listed under the v5.2 TransferPolicy. A v5.2 catalog mint is a separate follow-up step.
+- Lv1 Common (Ponke set, 26 NFTs = 13 × 2 copies): `bafybeib36hi7qupllhjymo2qnte2nghbiowkwxj2hb2fgbs5jly2ln3ida`
+- Lv2 Uncommon (Scavenger set, 26 NFTs = 13 × 2 copies): `bafybeidsjl6kihow5vzgssvoyjo2nvworbwhmk53f5vfe3wp56tqzzv4oq`
+- Lv6-8 Epic / Legendary (9 NFTs): `bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i`
+- Named-22 loose PNGs (Lv2-6 Uncommon / Rare / Epic, 22 NFTs): `bafybeiarz5gk3selzpjclugdl2odmvdtbtvi7gtky65m7chkyjymci3yfy`
+  - same CID also hosts `character.png` (Display\<Character\> image)
+  - includes literal `ornate_mithril_breastplate.png.png` (double extension preserved verbatim — cosmetic; rename requires Pinata reupload + fresh mint)
+
+Mint scripts (some not pushed — see SESSION_HANDOFF for status):
+- `scripts/mint-v5.2-test-batch.ts`
+- `scripts/mint-ponke-starter-set.ts` (pre-existing, env-driven)
+- `scripts/mint-scavenger-lv2-set.ts` (pre-existing, env-driven)
+- `scripts/mint-lv6-8-v5.2-set.ts` (new — legacy `mint-lv6-8-catalog.ts` predated `slot_type`)
+- `scripts/mint-v5.2-named-22-set.ts` (new — supports `MINT_FROM`/`MINT_TO` for test-batch + bulk slicing)
 
 ## 13-slot loadout (unchanged from v5.1)
 
@@ -107,10 +134,14 @@ Both sets are minted under the v5.1 package's Item type. Player wallets can stil
 
 ## Where the canonical session state lives
 
-- `STATE_OF_PROJECT_2026-05-30.md` — repo-root canonical snapshot (current)
-- `STATE_OF_PROJECT_2026-05-29.md` — yesterday's snapshot (v5.1 QA complete; v5.2 spec drafted)
-- `docs/V5.2_QA_GAUNTLET.md` — **live-testnet QA script for v5.2 — top-to-bottom run-list**
+- `STATE_OF_PROJECT_2026-06-02.md` — repo-root canonical snapshot (current)
+- `SESSION_HANDOFF_2026-06-02.md` — **single-page next-session entry point**
+- `docs/archive/STATE_OF_PROJECT_2026-05-30.md` — prior snapshot (v5.2 cut-over complete)
+- `docs/archive/STATE_OF_PROJECT_2026-05-29.md` — v5.1 QA complete + v5.2 spec drafted
+- `docs/archive/SESSION_HANDOFF_2026-05-29.md` — prior session's handoff
+- `docs/V5.2_QA_GAUNTLET.md` — **live-testnet QA script for v5.2 — top-to-bottom run-list** (§5.3 + §5.3a now cover the v5.2.1 atomic-bundle draw flow + admin-clear rescue path)
 - `docs/V5.2_WAGER_FAIRNESS_SPEC.md` — v5.2 spec (with §14 implementation deviations)
 - `deployment.testnet-v5.2.json` — v5.2 deploy record
 - `deployment.testnet-v5.1.json` — v5.1 deploy record (kept for parity reference)
-- `MAINNET_PREP.md` — deploy protocol + threat model + change log
+- `MAINNET_PREP.md` — deploy protocol + threat model + change log (2026-06-02 row top-of-file)
+- `CHANGELOG.md` — day-by-day change history (Unreleased section currently has v5.2.1 + v5.2.2 + Supabase-drift entries)
