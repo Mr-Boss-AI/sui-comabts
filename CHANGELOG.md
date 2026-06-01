@@ -12,6 +12,104 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — v5.2.2 Test Bot Fight (off-chain solo practice), 2026-06-02
+
+Players arriving at the testnet preview often had no human to fight. The
+Arena "Friendly" card now starts an instant solo match against a
+server-side synthetic opponent — no matchmaking, no chain, no Supabase.
+
+### What changed
+- **Server: new `createBotFight(player)` in fight-room.ts.** Builds a
+  synthetic Character that mirrors the player's level / stats / cloned
+  equipment, gives it a `bot:<uuid>` sentinel wallet (deliberately NOT
+  `0x…` so no future code can route a chain call through it), drops it
+  straight into a FightState with `type: 'bot'`. No chain DOF reads, no
+  `setFightLockOnChain` acquire, no character registry write, no DB
+  upsert.
+- **Server: bot auto-move splice in `startNextTurn`.** When
+  `fight.type === 'bot'`, the bot's action is populated from
+  `generateRandomAction(offhand)` the same tick the turn starts — same
+  validator the existing AFK-timeout fallback uses, so moves are always
+  legal. Player submits → both `turnActions` present → `resolveFightTurn`
+  fires immediately. Engine, validation, HP, zones, win/loss/draw
+  resolution are all the existing code paths.
+- **Server: hard short-circuit at top of `finishFight`.** When
+  `fight.type === 'bot'`, the function sends `fight_end` with zero loot
+  and ratingChange=0, moves the fight to `finishedFights`, clears the
+  player's `currentFightId` + presence — then returns. Every later
+  branch (settle_wager, update_after_fight, set_fight_lock,
+  dbSaveCharacter, dbSaveFight, draw bundle) is unreachable.
+- **Server: new WS message `start_bot_fight`** routed by
+  handleStartBotFight. Same cross-mode busy gate as ranked/wager so the
+  player can't double-book a fight. No queue, no `queue_joined`
+  bounce — the bot fight starts within the same tick.
+- **Frontend: Arena card renamed Friendly → Test Bot Fight.** Tile
+  label, subtitle ("Practice against a bot — no stakes"), CTA ("Fight
+  a Bot"), and the page subtitle all updated. Click handler dispatches
+  `start_bot_fight` instead of `queue_fight` when the friendly tile is
+  selected. The internal type literal stays `"friendly"` so the
+  palette / icon / busy-state predicates don't need to widen.
+- **Tavern friendly is unchanged.** Human-vs-human friendly via tavern
+  challenges (server handler.ts:133 `requestType === 'friendly'` →
+  `createFight`) still works exactly as before. The bot path only
+  replaces the Arena tile entry.
+
+### Zero on-chain side effects — explicit audit
+For `fight.type === 'bot'`:
+- `createBotFight` skips the `findCharacterObjectId` + `fetchEquippedFromDOFs`
+  + `setFightLockOnChain` block that `createFight` runs.
+- `finishFight` returns before any `settleWagerOnChain` /
+  `adminCancelWagerOnChain` / `settleTieOnChain` /
+  `settleDrawBundleOnChain` / `updateCharacterOnChain` /
+  `setFightLockOnChain` / `updateCharacterDrawOnChain` call.
+- No `dbSaveCharacter` (no `updateCharacter` call), no `dbSaveFight`
+  (no parent row for the bot → would FK-violate anyway), no
+  `dbInsertWagerInFlight` (n/a), no `persistItems`.
+- The player's in-memory `Character` is never touched in the bot
+  branch — `wins`/`losses`/`draws`/`xp`/`rating`/`unallocatedPoints`
+  are bit-identical before and after. Hall of Fame ladder is unaffected.
+
+### How bot moves work
+`combat.ts::generateRandomAction(offhand)` is the same function the
+existing AFK-timeout fallback uses. Picks `attackSlots` random zones
+from `GAME_CONSTANTS.ZONES` for attacks; picks a random valid block
+line (shield → 3-zone line, dual_wield → single zone, normal →
+2-adjacent line). Every move passes `validateTurnAction` because the
+generator is shape-correct by construction.
+
+### Tests
+`scripts/qa-bot-fight.ts` — 28 assertions covering:
+- `isBotWallet` predicate
+- `createBotFight` shape: type, mirror stats, no `onChainObjectId`, no
+  wager fields, completes in <200ms (no chain RPC)
+- Bot's turn-1 action populated by `startNextTurn`
+- Player submit resolves immediately
+- Multi-turn fight runs to `finished`
+- Player record bit-identical before/after
+- Bot wallet not in `getCharacterByWallet` registry
+Live run: 7-turn fight, player won, all assertions ✔.
+
+### Files
+- `server/src/types.ts` — `FightType` widened with `'bot'`
+- `server/src/utils/elo.ts` — `'bot'` joins the zero-XP branch
+- `server/src/ws/fight-room.ts` — `createBotFight`, auto-move splice,
+  `finishFight` short-circuit, `isBotWallet` export
+- `server/src/ws/handler.ts` — `start_bot_fight` route + handler
+- `frontend/src/types/game.ts` — `FightType` widened
+- `frontend/src/types/ws-messages.ts` — `start_bot_fight` in ClientMessage
+- `frontend/src/components/fight/matchmaking-queue.tsx` — Arena tile
+  copy + dispatch branch
+- `scripts/qa-bot-fight.ts` — new gauntlet
+
+### Out of scope (not changed)
+- No Move source change — bot path is purely server-side runtime
+- No DB migration
+- No new env vars
+- Tavern `requestType === 'friendly'` unchanged
+- Wager / Ranked code paths untouched
+
+---
+
 ## [Unreleased] — v5.2.1 Atomic draw-settlement + treasury-queue finality, 2026-06-01
 
 Live testnet mutual-KO surfaced a treasury gas-coin version race AND a

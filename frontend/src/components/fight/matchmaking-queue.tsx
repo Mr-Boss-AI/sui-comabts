@@ -50,8 +50,14 @@ function suiFromMist(stakeMist: string): string {
   }
 }
 
+// v5.2.2 (2026-06-01) — the Friendly card is now a bot match. The internal
+// `type: "friendly"` literal is kept so existing palette/icon branches and
+// the cross-mode busy-state predicate don't need to widen; the click
+// handler branches on this value to send `start_bot_fight` instead of
+// `queue_fight`. Human-vs-human friendly is still reachable via tavern
+// challenges (server handler.ts:133 `requestType === 'friendly'` → createFight).
 const FIGHT_TYPES: { type: FightType; label: string; desc: string; minLevel: number }[] = [
-  { type: "friendly", label: "Friendly", desc: "No stakes, just practice", minLevel: 1 },
+  { type: "friendly", label: "Test Bot Fight", desc: "Practice against a bot — no stakes", minLevel: 1 },
   { type: "ranked", label: "Ranked", desc: "ELO rating on the line", minLevel: 1 },
   { type: "wager", label: "Wager", desc: "Stake real SUI on the outcome", minLevel: 1 },
 ];
@@ -655,7 +661,17 @@ export function MatchmakingQueue() {
       return;
     }
 
-    // Non-wager: queue normally
+    // v5.2.2 (2026-06-01) — Friendly card is now an instant bot fight.
+    // Send `start_bot_fight` instead of `queue_fight`; the server creates
+    // the bot, fight_start fires within the same tick, no matchmaking hop.
+    // Zero on-chain side effects in the bot path (see fight-room.ts::createBotFight).
+    if (selectedType === "friendly") {
+      state.socket.send({ type: "start_bot_fight" });
+      return;
+    }
+
+    // Ranked: queue normally (wager handled above). Item-stake is queue too
+    // if/when it ships.
     state.socket.send({
       type: "queue_fight",
       fightType: selectedType,
@@ -1013,7 +1029,7 @@ export function MatchmakingQueue() {
       <ScreenLayout>
         <TopBanner
           title="Arena"
-          subtitle="Friendly · Ranked · Wager — pick your queue. Real SUI rides on wagers."
+          subtitle="Test Bot Fight · Ranked · Wager — pick your queue. Real SUI rides on wagers."
           pill="testnet"
           tone="blood"
         />
@@ -1278,7 +1294,7 @@ export function MatchmakingQueue() {
                     }}
                   >
                     {type === "friendly"
-                      ? "Find a sparring partner"
+                      ? "Fight a Bot"
                       : type === "ranked"
                         ? "Enter Queue ▾"
                         : "Create Wager ▾"}

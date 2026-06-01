@@ -57,6 +57,7 @@ import { sanitizeEquipment, sanitizeCharacter } from '../utils/wire-sanitize';
 import { getMarketplaceListings, listingToWire } from '../data/marketplace';
 import {
   createFight,
+  createBotFight,
 } from './fight-room';
 import {
   dispatchTavernMessage,
@@ -178,7 +179,13 @@ async function onAcceptFightRequest(req: FightRequest, accepter: ConnectedClient
 }
 
 function isValidFightType(v: unknown): v is FightType {
-  return v === 'friendly' || v === 'ranked' || v === 'wager' || v === 'item_stake';
+  return (
+    v === 'friendly' ||
+    v === 'ranked' ||
+    v === 'wager' ||
+    v === 'item_stake' ||
+    v === 'bot'
+  );
 }
 
 function sendError(client: ConnectedClient, message: string): void {
@@ -437,6 +444,9 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
       break;
     case 'queue_fight':
       handleQueueFight(client, msg);
+      break;
+    case 'start_bot_fight':
+      handleStartBotFight(client);
       break;
     case 'cancel_queue':
       handleCancelQueue(client);
@@ -1059,6 +1069,51 @@ function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
     type: 'queue_joined',
     fightType,
   });
+}
+
+// === Start Bot Fight (v5.2.2, 2026-06-01) ===
+//
+// Instant solo practice match against a server-side synthetic opponent.
+// Reuses the same busy gate as `handleQueueFight` so a player can't start
+// a bot fight while in another fight / wager lobby / matchmaking queue —
+// the gate's purpose (one fight at a time per wallet) holds regardless of
+// fight type. Zero chain side effects in this whole path: no Move calls,
+// no DB writes, no fight-lock acquire, no XP/ELO mutation. See
+// `fight-room.ts::createBotFight` for the chain-zero audit chain.
+function handleStartBotFight(client: ConnectedClient): void {
+  if (!client.characterId || !client.walletAddress) {
+    sendError(client, 'Create a character first');
+    return;
+  }
+
+  // Same cross-mode busy gate as ranked / wager so the player gets a single
+  // toast and the same render predicate the disabled-button check uses.
+  let ownWagerId: string | null = null;
+  for (const entry of wagerLobby.values()) {
+    if (entry.creatorWallet === client.walletAddress) {
+      ownWagerId = entry.wagerMatchId;
+      break;
+    }
+  }
+  const busy = evaluateServerBusy({
+    hasFight: !!client.currentFightId,
+    ownWagerId,
+    inMatchmakingQueue: getMatchmaking().isInQueue(client.walletAddress),
+  });
+  if (busy.busy) {
+    sendError(client, busy.reason);
+    return;
+  }
+
+  const character = getCharacterByWallet(client.walletAddress);
+  if (!character) {
+    sendError(client, 'Character not found');
+    return;
+  }
+
+  // Build + start the bot fight synchronously. createBotFight sends the
+  // `fight_start` message itself.
+  createBotFight(character);
 }
 
 // === Cancel Queue ===

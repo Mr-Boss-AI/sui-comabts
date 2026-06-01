@@ -181,6 +181,49 @@
 
 ---
 
+## Feature — 2026-06-02 (Test Bot Fight, off-chain solo practice)
+
+The Arena's "Friendly" tile is now an instant bot match. Players arriving
+at the testnet preview can practice without a human opponent.
+
+**Trigger.** New WS message `start_bot_fight`. The Arena tile (now
+labelled "Test Bot Fight", CTA "Fight a Bot") sends this instead of
+`queue_fight` when the friendly slot is selected. Server creates the
+fight + sends `fight_start` within the same tick — no matchmaking, no
+queue, no `queue_joined` bounce.
+
+**Bot character.** Synthetic Character built by `buildBotCharacter` in
+fight-room.ts — mirrors the player's level + stats, reference-shares
+equipment for visual fidelity, sentinel wallet `bot:<uuid>`,
+`onChainObjectId: undefined` (the single signal `createFight`-class
+code uses to decide whether to read chain). NEVER added to
+`characters` / `walletToCharacter` registries → invisible to every
+read path.
+
+**Bot moves.** `combat.ts::generateRandomAction(offhand)` — the same
+function the AFK-timeout fallback uses. Shape-correct by construction
+so `validateTurnAction` always accepts. Bot's action is filled
+inside `startNextTurn` the moment the turn opens.
+
+**Chain-zero audit.**
+- `createBotFight` skips the `findCharacterObjectId` +
+  `fetchEquippedFromDOFs` + `setFightLockOnChain` block in `createFight`.
+- `finishFight` short-circuits before any `settle*` / `update*` /
+  `set_fight_lock` / `dbSave*` call when `fight.type === 'bot'`.
+- Player `wins/losses/draws/xp/rating/unallocatedPoints` bit-identical
+  before and after (verified by qa-bot-fight gauntlet).
+
+**Tavern friendly is unchanged.** Human-vs-human friendly via
+tavern challenges (handler.ts:133 `requestType === 'friendly'`
+→ `createFight`) still works as before. Only the Arena tile entry
+swapped.
+
+**Tests.** `scripts/qa-bot-fight.ts` — 28 assertions, 7-turn live
+fight, all ✔. Run via `cd server && NODE_PATH=node_modules npx tsx
+../scripts/qa-bot-fight.ts`.
+
+---
+
 ## Live-QA hotfix — 2026-06-01 (atomic draw-settlement + treasury finality)
 
 Live mutual-KO test surfaced a treasury gas-coin version race AND the

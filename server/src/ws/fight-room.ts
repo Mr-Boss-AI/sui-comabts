@@ -13,6 +13,7 @@ import {
   resolveTurn,
   validateTurnAction,
 } from '../game/combat';
+// v5.2.2 — uuid is already imported above for fight ids; reuse for bot ids.
 // BUG 3 (live test 2026-05-02) — `rollLoot` is intentionally not imported
 // here. v5 is NFT-only; the off-chain loot path violates that contract.
 // The function is preserved in `../game/loot` so v5.1 can reuse the rarity
@@ -35,6 +36,7 @@ import { pauseFightTimer, resumeFightTimer } from './fight-pause';
 import type {
   Character,
   ConnectedClient,
+  EquipmentSlots,
   FightHistoryEntry,
   FightState,
   FightType,
@@ -274,6 +276,127 @@ export async function createFight(
   return fight;
 }
 
+// === Bot fight (v5.2.2, 2026-06-01) =========================================
+//
+// Builds a synthetic opponent that mirrors the player so the loadout looks
+// real, then drops straight into a fight with NO chain reads, NO chain writes,
+// NO Supabase writes, and NO matchmaking-queue hop. The bot's moves are
+// generated server-side each turn (auto-resolve splice in startNextTurn).
+//
+// The bot Character is NEVER added to the `characters` map / `walletToCharacter`
+// index — it lives ONLY inside the FightState while the fight runs and falls
+// out of scope when activeFights drops the entry. That means:
+//   - getCharacterByWallet('bot:…') → undefined (intentional)
+//   - dbSaveCharacter is never called for the bot (no row to FK from)
+//   - findCharacterObjectId is never called for the bot (no chain lookup)
+//
+// The synthetic walletAddress is a `bot:<uuid>` string — deliberately NOT
+// `0x…` so any future code that gates behind `walletAddress.startsWith('0x')`
+// can't accidentally route a chain call through the bot.
+
+const BOT_WALLET_PREFIX = 'bot:';
+
+export function isBotWallet(walletAddress: string | undefined | null): boolean {
+  return !!walletAddress && walletAddress.startsWith(BOT_WALLET_PREFIX);
+}
+
+/** Build a synthetic bot Character that mirrors the player's level, stats, and
+ *  equipment loadout. The equipment items are reference-shared (deriveCombatStats
+ *  only reads them); the bot's progression counters are zeroed so any code that
+ *  somehow leaks across the fight boundary doesn't corrupt the player record.
+ *
+ *  The bot's `onChainObjectId` is left intentionally undefined — that's the
+ *  single signal `createFight` (legacy path) uses to decide whether to read
+ *  chain DOFs or set a fight-lock. We bypass `createFight` entirely here
+ *  anyway, but leaving the field unset is the belt-and-braces guarantee that
+ *  a future refactor cannot accidentally reach for the chain through the bot.
+ */
+function buildBotCharacter(player: Character): Character {
+  const botId = `bot_${uuidv4().slice(0, 8)}`;
+  const botWallet = `${BOT_WALLET_PREFIX}${botId}`;
+  // Reference-share the equipment slots (deriveCombatStats is read-only) but
+  // wrap in a shallow copy so a future write to the bot's slots cannot leak
+  // back into the player's record.
+  const equipment: EquipmentSlots = { ...player.equipment };
+  return {
+    id: botId,
+    name: 'Test Bot',
+    level: player.level,
+    xp: 0,
+    walletAddress: botWallet,
+    onChainObjectId: undefined,
+    stats: { ...player.stats },
+    equipment,
+    inventory: [],
+    gold: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    rating: 1000,
+    unallocatedPoints: 0,
+    fightHistory: [],
+    createdAt: Date.now(),
+  };
+}
+
+/** Start an instant bot fight for the given player. No matchmaking, no chain
+ *  reads, no chain writes, no Supabase writes. The bot's character mirrors the
+ *  player's loadout for visual fidelity. Returns the FightState so the caller
+ *  can wire `client.currentFightId`.
+ *
+ *  IMPORTANT: this function deliberately does NOT call `createFight`. The
+ *  legacy path reads chain DOFs + sets a fight-lock on chain for both
+ *  participants. The bot has no chain identity (no on-chain Character NFT),
+ *  and the player should not be lock-acquired for a no-stakes practice match.
+ *  Re-creating the minimal subset here keeps the chain blast-radius at zero.
+ */
+export function createBotFight(player: Character): FightState {
+  const bot = buildBotCharacter(player);
+
+  // Build the two FighterStates from the in-memory characters. createFighterState
+  // calls deriveCombatStats which is pure — no I/O, no chain, no DB.
+  const fighterPlayer = createFighterState(player, bot);
+  const fighterBot = createFighterState(bot, player);
+
+  const fight: FightState = {
+    id: uuidv4(),
+    type: 'bot',
+    playerA: fighterPlayer,
+    playerB: fighterBot,
+    turn: 0,
+    turnResults: [],
+    status: 'active',
+    spectators: new Set(),
+    turnActions: new Map(),
+    disconnectedWallets: new Set(),
+    startedAt: Date.now(),
+  };
+
+  activeFights.set(fight.id, fight);
+
+  const clientA = getClientByWallet(player.walletAddress);
+  if (clientA) clientA.currentFightId = fight.id;
+  // No clientB — bot has no socket. Spectator broadcasting + bucket-3
+  // presence broadcasts skip the bot side naturally because they look up
+  // ConnectedClient by wallet and the bot's wallet is the `bot:` sentinel.
+  notifyFightChanged(player.walletAddress, fight.id);
+
+  const fightPayload = buildFightStatePayload(fight);
+  sendToWallet(player.walletAddress, { type: 'fight_start', fight: fightPayload });
+
+  console.log(
+    `[Bot] Fight started id=${fight.id.slice(0, 8)} player=${player.walletAddress.slice(0, 10)} ` +
+    `vs bot=${bot.id} lvl=${player.level}`,
+  );
+
+  // Start first turn — startNextTurn detects fight.type === 'bot' and
+  // auto-fills the bot's action immediately after broadcasting turn_start,
+  // so the player only needs to wait for their own move.
+  startNextTurn(fight);
+
+  return fight;
+}
+
 // === Turn Management ===
 
 function startNextTurn(fight: FightState): void {
@@ -314,6 +437,18 @@ function startNextTurn(fight: FightState): void {
   fight.turnTimer = setTimeout(() => {
     handleTurnTimeout(fight);
   }, GAME_CONSTANTS.TURN_TIMER_MS);
+
+  // v5.2.2 — bot opponent has no client to wait on. Generate a legal random
+  // action for player B (the bot) here, INSIDE the same tick. The player's
+  // own submit (via handleFightAction → submitTurnAction) is the only thing
+  // left for this turn, and as soon as it lands resolveFightTurn fires
+  // because both turnActions are present. Same engine, same validation
+  // (the random action is constrained by the bot's offhand type so
+  // validateTurnAction would accept it identically).
+  if (fight.type === 'bot') {
+    const botOffhand = getOffhandType(fight.playerB.character.equipment);
+    fight.turnActions.set(fight.playerB.characterId, generateRandomAction(botOffhand));
+  }
 }
 
 function handleTurnTimeout(fight: FightState): void {
@@ -478,6 +613,55 @@ function finishFight(
   fight.turnDeadline = undefined;
   fight.turnPaused = false;
   fight.turnPausedRemainingMs = undefined;
+
+  // v5.2.2 — bot fights end here. No chain, no DB, no stat mutation. The
+  // player just sees the fight_end modal with zero loot and ratingChange=0.
+  // Branching this early (BEFORE any wins/losses++ / updateCharacter call)
+  // is the hard guarantee that practice matches can't pollute the player's
+  // record. The audit chain is:
+  //   - no settle_wager / admin_cancel_wager / settle_tie (no wagerMatchId)
+  //   - no update_after_fight / update_after_fight_draw (skipped here)
+  //   - no set_fight_lock (was never set — createBotFight skips lock acquire)
+  //   - no dbSaveCharacter (no updateCharacter call)
+  //   - no dbSaveFight (no fight_history insert — would FK-violate anyway
+  //     because the bot wallet isn't in the characters table)
+  //   - no addFightHistory persistence (server-local only; falls out when
+  //     activeFights drops the entry — no rating, no XP, nothing to keep)
+  if (fight.type === 'bot') {
+    const playerWallet = fight.playerA.walletAddress;
+    const botWon = !!winnerId && fight.playerB.characterId === winnerId;
+    const playerWon = !!winnerId && fight.playerA.characterId === winnerId;
+    const fightPayload = buildFightStatePayload(fight);
+    fightPayload.status = 'finished';
+    fightPayload.winner = playerWon
+      ? playerWallet
+      : botWon
+        ? fight.playerB.walletAddress
+        : null;
+    const fightEndMsg: ServerMessage = {
+      type: 'fight_end',
+      fight: fightPayload,
+      loot: { xpGained: 0, ratingChange: 0 },
+    };
+    sendToWallet(playerWallet, fightEndMsg);
+    broadcastToSpectators(fight, fightEndMsg);
+    // Move fight to the finished store so reconnect-replay still works for
+    // this session (matches the win/loss / draw branches below).
+    finishedFights.set(fight.id, fight);
+    activeFights.delete(fight.id);
+    // Clear bucket-3 presence + currentFightId on the player's client so the
+    // Arena card re-enables for the next bot fight.
+    const playerClient = getClientByWallet(playerWallet);
+    if (playerClient && playerClient.currentFightId === fight.id) {
+      playerClient.currentFightId = undefined;
+    }
+    notifyFightChanged(playerWallet, null);
+    console.log(
+      `[Bot] Fight end id=${fight.id.slice(0, 8)} winner=${playerWon ? 'player' : botWon ? 'bot' : 'draw'} ` +
+      `turns=${fight.turn} — zero chain/DB side effects`,
+    );
+    return;
+  }
 
   let winnerWallet: string | undefined;
   let loserWallet: string | undefined;

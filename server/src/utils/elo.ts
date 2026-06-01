@@ -97,8 +97,12 @@ export function calculateXpReward(
       break;
     }
     case 'friendly':
+    case 'bot':
     default: {
-      // No progression for practice fights — design intent.
+      // No progression for practice fights — design intent. v5.2.2 bot
+      // fights take the same zero-XP branch as human-vs-human friendlies;
+      // additionally, the `bot` branch in finishFight skips the in-memory
+      // wins++/applyXp/persistence so even the 0 XP write never lands.
       reward = 0;
       break;
     }

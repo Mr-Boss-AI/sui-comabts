@@ -256,7 +256,13 @@ export interface Item {
 }
 
 // ===== FIGHT =====
-export type FightType = "friendly" | "ranked" | "wager" | "item_stake";
+// v5.2.2 (2026-06-01) — `bot` is a server-only synthetic-opponent fight.
+// Triggered by the Arena's "Test Bot Fight" card (which still uses
+// "friendly" as its tile-internal type literal so palette / icon / busy-state
+// branches don't need to widen). The server sends `fight.type === "bot"`
+// in `fight_start` payloads so the frontend can render bot-specific copy
+// (post-fight modal, fight history badge) when needed.
+export type FightType = "friendly" | "ranked" | "wager" | "item_stake" | "bot";
 
 export interface TurnAction {
   attackZones: Zone[];

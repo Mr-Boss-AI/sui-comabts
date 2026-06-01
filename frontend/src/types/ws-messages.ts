@@ -54,6 +54,10 @@ export type ClientMessage =
   | { type: "delete_character" }
   | { type: "allocate_points"; strength: number; dexterity: number; intuition: number; endurance: number }
   | { type: "queue_fight"; fightType: FightType; wagerAmount?: number; wagerMatchId?: string; onChainEquipment?: Record<string, unknown> }
+  // v5.2.2 (2026-06-01) — instant server-side synthetic-opponent fight.
+  // No matchmaking, no fields. Zero on-chain side effects (see
+  // server/src/ws/fight-room.ts::createBotFight).
+  | { type: "start_bot_fight" }
   | { type: "cancel_queue" }
   // txDigest is observability-only — the server re-reads chain state via
   // getWagerStatus, so an absent digest is non-fatal. Optional so the

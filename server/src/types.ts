@@ -4,7 +4,18 @@ import type WebSocket from 'ws';
 
 export type Zone = 'head' | 'chest' | 'stomach' | 'belt' | 'legs';
 
-export type FightType = 'friendly' | 'ranked' | 'wager' | 'item_stake';
+/**
+ * v5.2.2 (2026-06-01) — `bot` is a server-only synthetic-opponent type.
+ *   - Bot fights NEVER touch chain (no fight-lock, no settlement, no Move calls).
+ *   - Bot fights NEVER write to Supabase (no character upsert, no
+ *     fight_history insert — the bot has no wallet_address row to FK against).
+ *   - Bot fights NEVER mutate the player's wins / losses / draws / xp / rating —
+ *     fight progression is paused for the duration so practice doesn't pollute
+ *     the Hall of Fame ladder or the on-chain Character.
+ * Lobby/queue handling routes `bot` through the `start_bot_fight` WS message,
+ * NOT through the matchmaking queue (no opponent to wait for).
+ */
+export type FightType = 'friendly' | 'ranked' | 'wager' | 'item_stake' | 'bot';
 
 export type Rarity = 1 | 2 | 3 | 4 | 5;
 
