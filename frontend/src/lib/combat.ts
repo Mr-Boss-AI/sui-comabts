@@ -59,6 +59,10 @@ export const LEVEL_WEAPON_DAMAGE = [
   126, // L20
 ] as const;
 
+// Flat max-HP per point of Endurance, on top of the level curve. MUST equal
+// server `GAME_CONSTANTS.HP_PER_ENDURANCE` — pinned by qa-combat-stats.ts.
+export const HP_PER_ENDURANCE = 3;
+
 function sumEquipmentStat(
   equipment: EquipmentSlots,
   key: keyof Item["statBonuses"]
@@ -91,7 +95,7 @@ export function computeDerivedStats(
   const eqEvasion = sumEquipmentStat(equipment, "evasionBonus");
   const weaponDmg = getWeaponDamage(equipment);
 
-  const maxHp = (LEVEL_HP[level] || 40) + eqHp;
+  const maxHp = (LEVEL_HP[level] || 40) + stats.endurance * HP_PER_ENDURANCE + eqHp;
 
   const baseWeaponDmg = LEVEL_WEAPON_DAMAGE[level] || 6;
   const attackPower = baseWeaponDmg + weaponDmg

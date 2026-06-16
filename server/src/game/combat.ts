@@ -156,9 +156,16 @@ export function deriveCombatStats(
   const effectiveInt = character.stats.intuition + equip.intuitionBonus;
   const effectiveEnd = character.stats.endurance + equip.enduranceBonus;
 
-  // HP is purely level-based (Fibonacci scaling)
+  // HP = level curve + Endurance contribution + equipment hp_bonus.
+  // (Endurance added 2026-06-16; uses effectiveEnd so equipment END bonuses
+  // raise HP too, matching how defense/anti-crit consume effectiveEnd.)
   const level = character.level;
-  const maxHp = Math.max(1, (GAME_CONSTANTS.LEVEL_HP[level] || 40) + equip.hpBonus);
+  const maxHp = Math.max(
+    1,
+    (GAME_CONSTANTS.LEVEL_HP[level] || 40)
+      + effectiveEnd * GAME_CONSTANTS.HP_PER_ENDURANCE
+      + equip.hpBonus
+  );
 
   // Base weapon damage from level, plus stat bonuses
   const baseWeaponDmg = GAME_CONSTANTS.LEVEL_WEAPON_DAMAGE[level] || 6;

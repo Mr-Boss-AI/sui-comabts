@@ -29,6 +29,7 @@ import { GAME_CONSTANTS } from '../server/src/config';
 import {
   LEVEL_HP as FE_LEVEL_HP,
   LEVEL_WEAPON_DAMAGE as FE_LEVEL_WEAPON_DAMAGE,
+  HP_PER_ENDURANCE as FE_HP_PER_ENDURANCE,
   computeDerivedStats,
 } from '../frontend/src/lib/combat';
 import type { CharacterStats, EquipmentSlots, Item, StatBonuses } from '../frontend/src/types/game';
@@ -94,6 +95,8 @@ function main(): void {
      `LEVEL_WEAPON_DAMAGE length (frontend ${FE_LEVEL_WEAPON_DAMAGE.length}, server ${GAME_CONSTANTS.LEVEL_WEAPON_DAMAGE.length})`);
   eq(FE_LEVEL_HP.length, 21, 'LEVEL_HP has 21 slots (L0..L20)');
   eq(FE_LEVEL_WEAPON_DAMAGE.length, 21, 'LEVEL_WEAPON_DAMAGE has 21 slots (L0..L20)');
+  eq(FE_HP_PER_ENDURANCE, GAME_CONSTANTS.HP_PER_ENDURANCE,
+     `HP_PER_ENDURANCE (frontend ${FE_HP_PER_ENDURANCE}, server ${GAME_CONSTANTS.HP_PER_ENDURANCE})`);
 
   // ===========================================================================
   // 2 — element-by-element parity (the actual desync guard)
@@ -137,8 +140,9 @@ function main(): void {
     }),
   };
   const mrBoss = computeDerivedStats(mrBossStats, mrBossGear, undefined, 4);
-  eq(mrBoss.maxHp, 93,
-    'Mr_Boss Lv4 (Chainmail HP+8) → maxHp=93 (was 178 pre-fix; combat used 93)');
+  // L4=85 base + END6*3=18 + Chainmail hp+8 = 111. (Was 93 before END->HP, 2026-06-16.)
+  eq(mrBoss.maxHp, 111,
+    'Mr_Boss Lv4 (END 6 → +18, Chainmail HP+8) → maxHp=111');
 
   const sxStats: CharacterStats = { strength: 6, dexterity: 13, intuition: 5, endurance: 5 };
   const sxGear: EquipmentSlots = {
@@ -149,18 +153,21 @@ function main(): void {
     }),
   };
   const sx = computeDerivedStats(sxStats, sxGear, undefined, 4);
-  eq(sx.maxHp, 88,
-    'Sx Lv4 (Garb HP+3) → maxHp=88 (was 173 pre-fix; combat used 88)');
+  // L4=85 base + END5*3=15 + Garb hp+3 = 103. (Was 88 before END->HP, 2026-06-16.)
+  eq(sx.maxHp, 103,
+    'Sx Lv4 (END 5 → +15, Garb HP+3) → maxHp=103');
 
   // ===========================================================================
   // 5 — maxHp formula sanity at every level (no equipment bonus)
   // ===========================================================================
-  console.log('\n[5] maxHp = LEVEL_HP[level] when no hp_bonus equipment');
+  console.log('\n[5] maxHp = LEVEL_HP[level] + END*HP_PER_ENDURANCE (no hp_bonus equipment)');
   const blankStats: CharacterStats = { strength: 5, dexterity: 5, intuition: 5, endurance: 5 };
+  const blankEndHp = blankStats.endurance * GAME_CONSTANTS.HP_PER_ENDURANCE;
   for (let level = 1; level <= 20; level++) {
     const d = computeDerivedStats(blankStats, EMPTY_EQUIP, undefined, level);
-    eq(d.maxHp, GAME_CONSTANTS.LEVEL_HP[level],
-       `L${level}: maxHp=${d.maxHp} === LEVEL_HP[${level}]=${GAME_CONSTANTS.LEVEL_HP[level]}`);
+    const expected = GAME_CONSTANTS.LEVEL_HP[level] + blankEndHp;
+    eq(d.maxHp, expected,
+       `L${level}: maxHp=${d.maxHp} === LEVEL_HP[${level}](${GAME_CONSTANTS.LEVEL_HP[level]}) + END5*${GAME_CONSTANTS.HP_PER_ENDURANCE}=${expected}`);
   }
 
   // ===========================================================================
@@ -173,16 +180,16 @@ function main(): void {
   });
   for (const level of [1, 5, 10, 20]) {
     const d = computeDerivedStats(blankStats, { ...EMPTY_EQUIP, chest: heavyChest }, undefined, level);
-    const expected = GAME_CONSTANTS.LEVEL_HP[level] + 50;
-    eq(d.maxHp, expected, `L${level} +50 hpBonus → ${expected}`);
+    const expected = GAME_CONSTANTS.LEVEL_HP[level] + 50 + blankEndHp;
+    eq(d.maxHp, expected, `L${level} +50 hpBonus +END5 → ${expected}`);
   }
 
   // ===========================================================================
   // 7 — out-of-range level fallback uses the same default both ways
   // ===========================================================================
-  console.log('\n[7] Out-of-range level → default 40');
+  console.log('\n[7] Out-of-range level → default 40 + END contribution');
   const oob = computeDerivedStats(blankStats, EMPTY_EQUIP, undefined, 99);
-  eq(oob.maxHp, 40, 'L99 → maxHp=40 (fallback table miss)');
+  eq(oob.maxHp, 40 + blankEndHp, `L99 → maxHp=${40 + blankEndHp} (fallback 40 + END5*${GAME_CONSTANTS.HP_PER_ENDURANCE})`);
 
   // ===========================================================================
   // 8 — base attackPower at sample levels uses LEVEL_WEAPON_DAMAGE[level]
@@ -218,7 +225,7 @@ function main(): void {
     undefined,
     undefined,
   );
-  eq(sxServer.maxHp, 88, 'server deriveCombatStats Sx Lv4 → 88 (matches frontend Sx)');
+  eq(sxServer.maxHp, 103, 'server deriveCombatStats Sx Lv4 → 103 (matches frontend Sx)');
   const mbServer = deriveCombatStats(
     {
       id: 'mb',
@@ -233,7 +240,7 @@ function main(): void {
     undefined,
     undefined,
   );
-  eq(mbServer.maxHp, 93, 'server deriveCombatStats Mr_Boss Lv4 → 93 (matches frontend Mr_Boss)');
+  eq(mbServer.maxHp, 111, 'server deriveCombatStats Mr_Boss Lv4 → 111 (matches frontend Mr_Boss)');
 
   // ===========================================================================
   // Summary

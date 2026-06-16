@@ -142,6 +142,12 @@ export const GAME_CONSTANTS = {
   CRIT_MULTIPLIER_PER_INTUITION: 0.01,
   DEFENSE_PER_ENDURANCE: 0.3,
   ANTI_CRIT_PER_ENDURANCE: 0.3,
+  // Flat max-HP granted per point of (effective) Endurance, on top of the
+  // level-based LEVEL_HP curve. Added 2026-06-16 so END drives HP as the
+  // stat tooltip promises ("Increases HP, defense, and anti-crit"). END 3->11
+  // at creation now swings L1 HP 49->73. Mirrored in frontend/src/lib/combat.ts
+  // and pinned by scripts/qa-combat-stats.ts.
+  HP_PER_ENDURANCE: 3,
   ANTI_EVASION_PER_STRENGTH: 0.3,
   CRIT_ARMOR_PEN: 0.5,
   DEFAULT_ATTACK_ZONES: 1,
