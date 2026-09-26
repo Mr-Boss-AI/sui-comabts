@@ -10,6 +10,7 @@ import {
   createFighterState,
   generateRandomAction,
   getOffhandType,
+  judgeByHp,
   resolveTurn,
   validateTurnAction,
 } from '../game/combat';
@@ -270,10 +271,28 @@ export async function createFight(
     }
   })();
 
+  armFightDeadline(fight);
+
   // Start first turn
   startNextTurn(fight);
 
   return fight;
+}
+
+/**
+ * v5.3 — Arm the hard fight time limit. For wager fights the window is
+ * anchored to the chain `accepted_at` (the clock the on-chain expiry path
+ * uses), not the server's fight start.
+ */
+function armFightDeadline(fight: FightState): void {
+  const anchor = Math.min(fight.startedAt, fight.wagerAcceptedAtMs ?? fight.startedAt);
+  const remaining = Math.max(0, anchor + GAME_CONSTANTS.MAX_FIGHT_DURATION_MS - Date.now());
+  fight.fightDeadlineTimer = setTimeout(() => {
+    fight.fightDeadlineTimer = undefined;
+    if (fight.status !== 'active') return;
+    const verdict = judgeByHp(fight.playerA, fight.playerB);
+    finishFight(fight, verdict.winner, verdict.draw, 'time_limit');
+  }, remaining);
 }
 
 // === Bot fight (v5.2.2, 2026-06-01) =========================================
@@ -583,7 +602,7 @@ function resolveFightTurn(fight: FightState): void {
 
 // === Finish Fight ===
 
-type FinishReason = 'hp_zero' | 'draw' | 'disconnect';
+type FinishReason = 'hp_zero' | 'draw' | 'disconnect' | 'time_limit';
 
 function finishFight(
   fight: FightState,
@@ -609,6 +628,10 @@ function finishFight(
   if (fight.turnTimer) {
     clearTimeout(fight.turnTimer);
     fight.turnTimer = undefined;
+  }
+  if (fight.fightDeadlineTimer) {
+    clearTimeout(fight.fightDeadlineTimer);
+    fight.fightDeadlineTimer = undefined;
   }
   fight.turnDeadline = undefined;
   fight.turnPaused = false;

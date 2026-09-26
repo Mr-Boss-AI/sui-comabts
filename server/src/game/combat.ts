@@ -437,6 +437,20 @@ export function checkFightEnd(playerA: FighterState, playerB: FighterState): {
   return { finished: false };
 }
 
+/**
+ * v5.3 — Time-limit judgment. Higher remaining HP fraction wins; equal
+ * fractions are a draw. Cross-multiplied so there's no float rounding.
+ */
+export function judgeByHp(playerA: FighterState, playerB: FighterState): {
+  winner?: string;
+  draw: boolean;
+} {
+  const a = Math.max(0, playerA.currentHp) * playerB.maxHp;
+  const b = Math.max(0, playerB.currentHp) * playerA.maxHp;
+  if (a === b) return { draw: true };
+  return { winner: a > b ? playerA.characterId : playerB.characterId, draw: false };
+}
+
 // === XP and Leveling (cumulative — matches chain character.move::xp_for_level) ===
 
 /**

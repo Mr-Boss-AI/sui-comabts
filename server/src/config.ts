@@ -76,6 +76,15 @@ export const CONFIG = {
 
 export const GAME_CONSTANTS = {
   TURN_TIMER_MS: 20_000,
+  // v5.3 — Hard cap on a single fight's wall-clock length. When it fires,
+  // the fight ends by remaining-HP% judgment (equal % → draw). MUST stay
+  // below the chain's permissionless ACTIVE-wager expiry
+  // (arena::SETTLEMENT_TIMEOUT_MS — 10 min on the live v5.2 package)
+  // minus settlement latency, otherwise the losing player can force a
+  // 50/50 refund via cancel_expired_wager before the referee settles.
+  // Anchored to the chain accepted_at for wager fights. Also keeps every
+  // fight inside FIGHT_LOCK_DURATION_MS.
+  MAX_FIGHT_DURATION_MS: 8 * 60 * 1000,
   // Server level cap matches chain MAX_LEVEL.
   MAX_LEVEL: 20,
   STAT_POINTS_PER_LEVEL: 3,

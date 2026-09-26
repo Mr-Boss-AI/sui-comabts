@@ -221,6 +221,9 @@ export interface FightState {
   spectators: Set<string>;
   turnActions: Map<string, TurnAction>;
   turnTimer?: ReturnType<typeof setTimeout>;
+  /** v5.3 — Fires once at the fight's hard time limit
+   *  (GAME_CONSTANTS.MAX_FIGHT_DURATION_MS) and ends it by HP judgment. */
+  fightDeadlineTimer?: ReturnType<typeof setTimeout>;
   /** Absolute Date.now() ms when the current turn expires. Sent to clients
    *  via `turn_start` so they can compute the countdown locally. Updated
    *  on `timer_resumed` so the client UI re-syncs after a pause. */

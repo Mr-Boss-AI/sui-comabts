@@ -518,4 +518,12 @@ module sui_combats::character {
     public fun registry_get(registry: &CharacterRegistry, who: address): ID {
         *table::borrow(&registry.table, who)
     }
+
+    /// v5.3 — Package-internal handle on the CharacterRegistry UID. Used by
+    /// guild::create_guild_registry to plant a one-time marker so the
+    /// GuildRegistry can only ever be created once (new modules added via
+    /// upgrade don't get an `init` call).
+    public(package) fun registry_uid_mut(registry: &mut CharacterRegistry): &mut UID {
+        &mut registry.id
+    }
 }

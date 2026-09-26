@@ -1456,12 +1456,13 @@ module sui_combats::arena_tests {
         ts::end(scenario);
     }
 
-    /// cancel_expired_wager still callable on ACTIVE pre-reclaim — proves
-    /// the permissionless 10-min backstop and the participant 30-min escape
-    /// hatch coexist (no mutual exclusion). Permissionless usually fires
-    /// first; both paths terminate safely.
+    /// v5.3 regression — the exploit. Before v5.3, anyone (incl. the
+    /// losing player) could force a 50/50 split via cancel_expired_wager
+    /// once an ACTIVE fight passed 10 min. Now the public expiry path is
+    /// closed until SETTLEMENT_TIMEOUT_MS (30 min) — aborts ENotExpired (9).
     #[test]
-    fun test_cancel_expired_active_still_works_pre_reclaim() {
+    #[expected_failure(abort_code = 9, location = sui_combats::arena)]
+    fun test_cancel_expired_active_at_11_min_aborts() {
         let mut scenario = ts::begin(ALICE);
         let mut clock = bootstrap(&mut scenario);
         let alice_char = mint_character_at_level(&mut scenario, ALICE, 1, &clock);
@@ -1470,9 +1471,41 @@ module sui_combats::arena_tests {
         request_accept_helper(&mut scenario, BOB, bob_char, STAKE_1_SUI, &clock);
         approve_helper(&mut scenario, ALICE, &clock);
 
-        // Past SETTLEMENT_TIMEOUT_MS (10 min) but BEFORE
-        // WAGER_RESOLUTION_TIMEOUT_MS (30 min). cancel_expired_wager fires.
         clock::increment_for_testing(&mut clock, 700_000);  // 11.6 min
+
+        // BOB (losing mid-fight) tries to escape the loss.
+        ts::next_tx(&mut scenario, BOB);
+        {
+            let mut wager = ts::take_shared<WagerMatch>(&scenario);
+            let mut wager_registry = ts::take_shared<OpenWagerRegistry>(&scenario);
+            arena::cancel_expired_wager(&mut wager, &mut wager_registry, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(wager_registry);
+            ts::return_shared(wager);
+        };
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    /// v5.3 — public expiry window never opens before the participant
+    /// escape hatch.
+    #[test]
+    fun test_settlement_timeout_not_shorter_than_reclaim() {
+        assert!(arena::settlement_timeout_ms() >= arena::wager_resolution_timeout_ms(), 0);
+    }
+
+    /// cancel_expired_wager still works on ACTIVE once SETTLEMENT_TIMEOUT_MS
+    /// has elapsed — the permissionless backstop is preserved, just later.
+    #[test]
+    fun test_cancel_expired_active_after_timeout_works() {
+        let mut scenario = ts::begin(ALICE);
+        let mut clock = bootstrap(&mut scenario);
+        let alice_char = mint_character_at_level(&mut scenario, ALICE, 1, &clock);
+        let bob_char = mint_character_at_level(&mut scenario, BOB, 1, &clock);
+        create_wager_helper(&mut scenario, ALICE, alice_char, STAKE_1_SUI, &clock);
+        request_accept_helper(&mut scenario, BOB, bob_char, STAKE_1_SUI, &clock);
+        approve_helper(&mut scenario, ALICE, &clock);
+
+        clock::increment_for_testing(&mut clock, arena::settlement_timeout_ms());
 
         ts::next_tx(&mut scenario, EVE);
         {
@@ -1480,9 +1513,36 @@ module sui_combats::arena_tests {
             let mut wager_registry = ts::take_shared<OpenWagerRegistry>(&scenario);
             arena::cancel_expired_wager(&mut wager, &mut wager_registry, &clock, ts::ctx(&mut scenario));
             assert!(arena::status(&wager) == 2, 0);  // SETTLED (50/50 split)
+            assert!(!arena::registry_has(&wager_registry, ALICE), 1);
             ts::return_shared(wager_registry);
             ts::return_shared(wager);
         };
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    /// v5.3 — challenger cannot request to join while fight-locked.
+    #[test]
+    #[expected_failure(abort_code = 24, location = sui_combats::arena)]
+    fun test_request_while_challenger_fight_locked_aborts() {
+        let mut scenario = ts::begin(ALICE);
+        let clock = bootstrap(&mut scenario);
+        let alice_char = mint_character_at_level(&mut scenario, ALICE, 1, &clock);
+        let bob_char = mint_character_at_level(&mut scenario, BOB, 1, &clock);
+        create_wager_helper(&mut scenario, ALICE, alice_char, STAKE_1_SUI, &clock);
+
+        // ALICE holds the AdminCap from init — lock BOB's character.
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let admin_cap = ts::take_from_sender<character::AdminCap>(&scenario);
+            let mut character = ts::take_shared_by_id<Character>(&scenario, bob_char);
+            let now = clock::timestamp_ms(&clock);
+            character::set_fight_lock(&admin_cap, &mut character, now + 600_000, &clock);
+            ts::return_shared(character);
+            ts::return_to_sender(&scenario, admin_cap);
+        };
+
+        request_accept_helper(&mut scenario, BOB, bob_char, STAKE_1_SUI, &clock);
         clock::destroy_for_testing(clock);
         ts::end(scenario);
     }

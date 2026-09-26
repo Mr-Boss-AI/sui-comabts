@@ -94,6 +94,10 @@ module sui_combats::arena {
     /// misleading ENoOpponent abort. Added 2026-05-30 to tie off the
     /// last v5.2 spec deviation before publish.
     const EWrongExpiryEntrypoint: u64 = 23;
+    /// v5.3 — request_accept_wager called with a challenger Character that
+    /// is currently fight-locked (mid-fight elsewhere). Mirror of
+    /// ECreatorFightLocked (= 21) for the challenger side.
+    const EChallengerFightLocked: u64 = 24;
 
     // ===== Status constants =====
     const STATUS_WAITING: u8 = 0;
@@ -109,7 +113,12 @@ module sui_combats::arena {
 
     // ===== Timeouts =====
     const MATCH_EXPIRY_MS: u64 = 600_000;        // 10 min, unchanged
-    const SETTLEMENT_TIMEOUT_MS: u64 = 600_000;  // 10 min, unchanged
+    /// v5.3 — Raised 10 min → 30 min (= WAGER_RESOLUTION_TIMEOUT_MS).
+    /// At 10 min, anyone (including a losing player) could force a 50/50
+    /// split via cancel_expired_wager on any fight that ran past ~30 turns,
+    /// escaping a loss before the referee settled. The public expiry path
+    /// must never open before the participant escape hatch does.
+    const SETTLEMENT_TIMEOUT_MS: u64 = 1_800_000;
     /// v5.2 — PENDING_APPROVAL auto-refund. 5 min: short enough that a
     /// creator who abandons the tab doesn't lock the challenger out for
     /// long; long enough for a real creator to see, scout, and click.
@@ -119,7 +128,7 @@ module sui_combats::arena {
     /// with no settlement, either participant can call
     /// reclaim_stalled_wager to refund both stakes (no winner declared).
     /// MUST be clearly longer than any legitimate fight could take —
-    /// 30 min is 6× typical fight, 3× SETTLEMENT_TIMEOUT_MS, room for
+    /// 30 min is 6× typical fight, = SETTLEMENT_TIMEOUT_MS (v5.3), room for
     /// chain congestion and server-restart recovery. Tunable; revisit
     /// once 99th-percentile settle latency is measured on live testnet.
     const WAGER_RESOLUTION_TIMEOUT_MS: u64 = 1_800_000;
@@ -366,6 +375,9 @@ module sui_combats::arena {
 
         // v5.2 — character ownership (anti-spoofing).
         assert!(character::owner(challenger_character) == sender, ENotCharacterOwner);
+
+        // v5.3 — challenger cannot join while mid-fight elsewhere.
+        assert!(!character::is_fight_locked(challenger_character, clock), EChallengerFightLocked);
 
         // v5.2 — ±LEVEL_BRACKET window. u8 subtraction underflows in
         // Move, so compute as a two-side compare.
@@ -920,6 +932,8 @@ module sui_combats::arena {
     public fun wager_resolution_timeout_ms(): u64 { WAGER_RESOLUTION_TIMEOUT_MS }
     #[test_only]
     public fun level_bracket(): u8 { LEVEL_BRACKET }
+    #[test_only]
+    public fun settlement_timeout_ms(): u64 { SETTLEMENT_TIMEOUT_MS }
 
     /// v5.2 — Test-only state mutator. EChallengerSlotTaken (= 14) is
     /// belt-and-suspenders: with the public-API state machine intact,
