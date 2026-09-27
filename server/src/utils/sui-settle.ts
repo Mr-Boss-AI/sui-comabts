@@ -9,7 +9,7 @@ import { CONFIG } from '../config';
 // =============================================================================
 
 const network = (CONFIG.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as 'mainnet' | 'testnet';
-const client = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl(network), network });
+const client = new SuiJsonRpcClient({ url: (CONFIG.SUI_RPC_URL || getJsonRpcFullnodeUrl(network)), network });
 
 let cachedKeypair: Ed25519Keypair | null = null;
 function treasury(): Ed25519Keypair {
@@ -903,4 +903,70 @@ export async function readObjectWithRetry(
     const type = (obj.data?.type as string | undefined) ?? null;
     return { fields, type };
   });
+}
+
+// =============================================================================
+// v5.3 — GUILD WARS (TREASURY-signed)
+// =============================================================================
+
+export interface WarRefs {
+  warId: string;
+  guildA: string;
+  guildB: string;
+}
+
+function warArgs(tx: Transaction, r: WarRefs) {
+  return [
+    tx.object(r.warId),
+    tx.object(CONFIG.WAR_REGISTRY_ID),
+    tx.object(r.guildA),
+    tx.object(r.guildB),
+  ];
+}
+
+/**
+ * start_war — drops ex-members, trims both sides to the smaller one,
+ * war-locks both guilds. Returns the final rosters from `WarStarted`
+ * (or `cancelled: true` when fewer than 2 per side were left).
+ */
+export async function startWarOnChain(r: WarRefs): Promise<{
+  digest: string;
+  cancelled: boolean;
+  sideA: string[];
+  sideB: string[];
+}> {
+  const { digest, events } = await execAsTreasury('War.start', (tx) => {
+    tx.moveCall({
+      target: `${PKG()}::guild_war::start_war`,
+      arguments: [...warArgs(tx, r), tx.object(CLOCK)],
+    });
+  }, 100_000_000);
+  const started = findEventByType(events, '::guild_war::WarStarted');
+  const p = (started?.parsedJson ?? {}) as { side_a?: string[]; side_b?: string[] };
+  console.log(`[War] start ${r.warId.slice(0, 10)} → ${started ? 'ACTIVE' : 'CANCELLED'} (${digest})`);
+  return { digest, cancelled: !started, sideA: p.side_a ?? [], sideB: p.side_b ?? [] };
+}
+
+/** settle_war — winner 1 = side A, 2 = side B, 3 = draw (full refunds). */
+export async function settleWarOnChain(r: WarRefs, winner: 1 | 2 | 3): Promise<{ digest: string }> {
+  const { digest } = await execAsTreasury('War.settle', (tx) => {
+    tx.moveCall({
+      target: `${PKG()}::guild_war::settle_war`,
+      arguments: [...warArgs(tx, r), tx.pure.u8(winner), tx.object(CLOCK)],
+    });
+  }, 100_000_000);
+  console.log(`[War] settled ${r.warId.slice(0, 10)} winner=${winner} (${digest})`);
+  return { digest };
+}
+
+/** expire_war (permissionless) — refunds a war nobody started in time. */
+export async function expireWarOnChain(r: WarRefs): Promise<{ digest: string }> {
+  const { digest } = await execAsTreasury('War.expire', (tx) => {
+    tx.moveCall({
+      target: `${PKG()}::guild_war::expire_war`,
+      arguments: [...warArgs(tx, r), tx.object(CLOCK)],
+    });
+  }, 100_000_000);
+  console.log(`[War] expired ${r.warId.slice(0, 10)} (${digest})`);
+  return { digest };
 }

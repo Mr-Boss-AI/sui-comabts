@@ -20,6 +20,12 @@ export const CONFIG = {
   SUPABASE_URL: optional('SUPABASE_URL'),
   SUPABASE_KEY: optional('SUPABASE_KEY'),
   SUI_NETWORK: optional('SUI_NETWORK', 'testnet'),
+  // Optional RPC override (localnet testing / private fullnode).
+  SUI_RPC_URL: optional('SUI_RPC_URL'),
+  // v5.3 — guild + guild-war shared registries. Guild wars are run by the
+  // server only when WAR_REGISTRY_ID is set.
+  GUILD_REGISTRY_ID: optional('GUILD_REGISTRY_ID'),
+  WAR_REGISTRY_ID: optional('WAR_REGISTRY_ID'),
 
   // v5 has ONE package ID — no upgrade dichotomy. Required.
   SUI_PACKAGE_ID: required('SUI_PACKAGE_ID'),

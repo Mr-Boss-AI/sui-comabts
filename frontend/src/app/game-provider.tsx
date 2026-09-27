@@ -68,6 +68,8 @@ export default function GameProvider({
   // explicit retry.
   const chainCheckInFlight = useRef(false);
   const toastedFightIdRef = useRef<string | null>(null);
+  // v5.3 — auto-open the war screen once per war the player fights in.
+  const shownWarIdRef = useRef<string | null>(null);
   // BUG E (2026-05-02 retest #2) — handleMessage is memoised over
   // [walletAddress, socket, client], so it closes over a stale snapshot of
   // state.character. Reading state.character.onChainObjectId from inside
@@ -81,6 +83,16 @@ export default function GameProvider({
   const handleMessage = useCallback(
     (msg: ServerMessage) => {
       switch (msg.type) {
+        case "war_state": {
+          const war = { ...msg, receivedAt: Date.now() };
+          dispatch({ type: "SET_WAR_STATE", war });
+          if (war.mySide && !war.result && shownWarIdRef.current !== war.warId) {
+            shownWarIdRef.current = war.warId;
+            dispatch({ type: "SET_AREA", area: "guild" });
+            playSoundIf("challenge");
+          }
+          break;
+        }
         case "auth_ok":
           // BUG D fix (2026-05-02 retest): the server's auth_ok payload
           // already carries the fully-hydrated character (DOF equipment
@@ -674,6 +686,8 @@ export default function GameProvider({
       socket.send({ type: "get_pending_fight_requests" });
       socket.send({ type: "get_dm_channels" });
       socket.send({ type: "enter_room", room: state.currentArea as never });
+      // v5.3 — re-join a guild-war battle after a reload / reconnect.
+      socket.send({ type: "war_watch" });
     } else {
       // Wallet disconnected / token expired / fresh page load — roll the gate
       // back to "auth_pending" so the LoadingScreen renders during the

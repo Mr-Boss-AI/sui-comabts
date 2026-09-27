@@ -29,6 +29,7 @@ import {
 import { rehydrateFromDb as rehydrateDmChannels } from './data/dm-channels';
 import { rehydrateRecentFromDb as rehydrateDmMessages } from './data/dm-messages';
 import type { QueueEntry, WagerLobbyEntry } from './types';
+import { startWarRoom } from './ws/war-room';
 
 // === Express App ===
 
@@ -688,6 +689,9 @@ subscribeMarketplace((event) => {
     return;
   }
 });
+
+// === v5.3 guild-war runner (no-op unless WAR_REGISTRY_ID is set) ===
+startWarRoom();
 
 // === Start Server ===
 

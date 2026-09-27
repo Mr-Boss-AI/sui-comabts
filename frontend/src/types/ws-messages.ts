@@ -149,6 +149,10 @@ export type ClientMessage =
       peerWallet: string;
       body: string;
     }
+  // v5.3 guild wars
+  | { type: "war_watch"; warId?: string }
+  | { type: "war_unwatch"; warId?: string }
+  | { type: "war_action"; warId: string; attackZones: Zone[]; blockZones: Zone[] }
   | {
       type: "dm_history";
       peerWallet: string;
@@ -161,6 +165,10 @@ export type ClientMessage =
 
 // ===== SERVER → CLIENT =====
 export type ServerMessage =
+  // v5.3 guild wars
+  | ({ type: "war_state" } & WarStateWire)
+  | { type: "war_none"; warId: string | null }
+  | { type: "war_error"; warId: string; error: string }
   // Handshake: server sends `auth_challenge` after a fresh `auth_request`,
   // emits `auth_required` when an `auth_token` is invalid/expired (telling
   // the client to fall back to the signed flow), and replies with `auth_ok`
@@ -470,4 +478,34 @@ export interface FightHistoryEntry {
   turns: number;
   timestamp: number;
   wagerAmount?: number;
+}
+
+/** v5.3 — one fighter in a guild-war battle. */
+export interface WarFighterWire {
+  wallet: string;
+  name: string;
+  level: number;
+  side: "A" | "B";
+  hp: number;
+  maxHp: number;
+  exchanges: number;
+  /** Wallet of the current opponent, null when free / dead. */
+  fighting: string | null;
+}
+
+/** v5.3 — guild-war battle as one participant (or a spectator) sees it. */
+export interface WarStateWire {
+  warId: string;
+  result: "A" | "B" | "draw" | null;
+  startedAt: number;
+  endsBy: number;
+  now: number;
+  mySide: "A" | "B" | null;
+  fighters: WarFighterWire[];
+  exchange: { id: number; opponent: string; deadline: number; chosen: boolean } | null;
+  log: { at: number; text: string }[];
+  settled: boolean;
+  digest: string | null;
+  /** Client-only: local Date.now() when the push arrived. */
+  receivedAt?: number;
 }

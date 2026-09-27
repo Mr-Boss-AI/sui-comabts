@@ -11,6 +11,7 @@ import { useCurrentAccount, useDAppKit } from "@mysten/dapp-kit-react";
 import { CurrentAccountSigner } from "@mysten/dapp-kit-core";
 import type { Transaction } from "@mysten/sui/transactions";
 import { useGame } from "@/hooks/useGameStore";
+import { WarBattle } from "./war-battle";
 import { ScreenLayout, TopBanner, SectionHeader } from "@/components/v2/layout";
 import { BronzeButton, DangerButton, SecondaryButton, V2Input } from "@/components/v2";
 import {
@@ -52,7 +53,7 @@ function Panel({ title, right, children }: { title: string; right?: ReactNode; c
 }
 
 export function GuildHall() {
-  const { state } = useGame();
+  const { state, dispatch } = useGame();
   const account = useCurrentAccount();
   const dAppKit = useDAppKit();
   const me = account?.address ?? "";
@@ -105,11 +106,42 @@ export function GuildHall() {
 
   const myRole = useMemo(() => guild?.members.find((m) => m.address === me)?.role ?? -1, [guild, me]);
 
+  // v5.3 — live guild-war battle (server pushes war_state).
+  const war = state.warState;
+  const [hiddenWarId, setHiddenWarId] = useState<string | null>(null);
+  const watchWar = useCallback((warId: string) => {
+    setHiddenWarId(null);
+    state.socket.send({ type: "war_watch", warId });
+  }, [state.socket]);
+  const leaveWar = useCallback(() => {
+    if (!war) return;
+    if (war.result || !war.mySide) {
+      state.socket.send({ type: "war_unwatch", warId: war.warId });
+      dispatch({ type: "SET_WAR_STATE", war: null });
+      refresh();
+    } else setHiddenWarId(war.warId);
+  }, [war, state.socket, dispatch, refresh]);
+  const warInfo = war ? wars.find((w) => w.id === war.warId) : undefined;
+  const guildName = (id?: string) => (id ? guilds.find((g) => g.id === id)?.name : undefined);
+
   if (!GUILD_REGISTRY_ID) {
     return (
       <ScreenLayout>
         <TopBanner title="Guild Hall" subtitle="Guilds arrive with the v5.3 contracts." pill="testnet" tone="bronze" />
         <div style={panel}><p style={muted}>Set NEXT_PUBLIC_GUILD_REGISTRY_ID and NEXT_PUBLIC_WAR_REGISTRY_ID after running scripts/deploy-v5.3.ts.</p></div>
+      </ScreenLayout>
+    );
+  }
+
+  if (war && war.warId !== hiddenWarId) {
+    const mineIsA = warInfo ? warInfo.guildA === guild?.id : true;
+    return (
+      <ScreenLayout>
+        <WarBattle
+          guildName={guildName(warInfo ? (mineIsA ? warInfo.guildA : warInfo.guildB) : undefined)}
+          enemyName={guildName(warInfo ? (mineIsA ? warInfo.guildB : warInfo.guildA) : undefined)}
+          onLeave={leaveWar}
+        />
       </ScreenLayout>
     );
   }
@@ -120,10 +152,16 @@ export function GuildHall() {
       {toast && (
         <div style={{ ...panel, padding: 12, borderColor: toast.ok ? "var(--sc-bronze)" : "var(--sc-blood)", color: toast.ok ? "var(--sc-parchment)" : "var(--sc-blood)" }}>{toast.text}</div>
       )}
+      {war && war.mySide && !war.result && (
+        <div style={{ ...panel, padding: 12, borderColor: "var(--sc-blood)", ...row, justifyContent: "space-between" }}>
+          <strong>⚔ Your guild war is raging!</strong>
+          <BronzeButton size="sm" onClick={() => setHiddenWarId(null)}>Return to battle</BronzeButton>
+        </div>
+      )}
       {loading ? <div style={panel}><p style={muted}>Reading the guild rolls…</p></div>
         : !characterId ? <div style={panel}><p style={muted}>Create your character first.</p></div>
         : guild ? (
-          <MyGuild guild={guild} me={me} myRole={myRole} myLevel={myLevel} characterId={characterId} guilds={guilds} wars={wars} now={now} busy={busy} sign={sign} />
+          <MyGuild guild={guild} me={me} myRole={myRole} myLevel={myLevel} characterId={characterId} guilds={guilds} wars={wars} now={now} busy={busy} sign={sign} onWatch={watchWar} />
         ) : (
           <NoGuild guilds={guilds} characterId={characterId} busy={busy} sign={sign} />
         )}
@@ -174,7 +212,7 @@ function NoGuild({ guilds, characterId, busy, sign }: { guilds: GuildSummary[]; 
 
 function MyGuild(props: {
   guild: GuildDetail; me: string; myRole: number; myLevel: number; characterId: string; guilds: GuildSummary[];
-  wars: GuildWarInfo[]; now: number; busy: boolean; sign: Sign;
+  wars: GuildWarInfo[]; now: number; busy: boolean; sign: Sign; onWatch: (warId: string) => void;
 }) {
   const { guild, me, myRole, busy, sign } = props;
   const isLeader = myRole === ROLE_LEADER;
@@ -279,9 +317,9 @@ function MyGuild(props: {
 
 // ───────────────────────────── wars ─────────────────────────────
 
-function WarsPanel({ guild, me, myRole, myLevel, characterId, guilds, wars, now, busy, sign }: {
+function WarsPanel({ guild, me, myRole, myLevel, characterId, guilds, wars, now, busy, sign, onWatch }: {
   guild: GuildDetail; me: string; myRole: number; myLevel: number; characterId: string; guilds: GuildSummary[];
-  wars: GuildWarInfo[]; now: number; busy: boolean; sign: Sign;
+  wars: GuildWarInfo[]; now: number; busy: boolean; sign: Sign; onWatch: (warId: string) => void;
 }) {
   const isOfficer = myRole >= ROLE_OFFICER;
   const enemies = guilds.filter((g) => g.id !== guild.id);
@@ -345,7 +383,7 @@ function WarsPanel({ guild, me, myRole, myLevel, characterId, guilds, wars, now,
                   {canExpire && <SecondaryButton size="sm" disabled={busy} onClick={() => sign("War expired — refunded", buildExpireWarTx(w))}>Expire &amp; refund</SecondaryButton>}
                   {canReclaim && <DangerButton size="sm" disabled={busy} onClick={() => sign("Stakes reclaimed", buildReclaimWarTx(w))}>Reclaim stakes</DangerButton>}
                   {w.status === 1 && secs === 0 && <span style={muted}>Waiting for the arena master to open the battle…</span>}
-                  {w.status === 2 && <span style={muted}>⚔ Battle in progress</span>}
+                  {w.status === 2 && <BronzeButton size="sm" onClick={() => onWatch(w.id)}>{signedUp ? "⚔ Enter battle" : "⚔ Watch battle"}</BronzeButton>}
                 </div>
               </div>
             );

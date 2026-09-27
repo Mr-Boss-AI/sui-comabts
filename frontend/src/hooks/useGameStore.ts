@@ -20,6 +20,7 @@ import type {
   FightRequestWire,
   DmChannelWire,
   PlayerProfileWire,
+  WarStateWire,
 } from "@/types/ws-messages";
 import { EMPTY_EQUIPMENT, cloneEquipment } from "@/lib/loadout";
 import type { AuthPhase } from "@/lib/auth-phase";
@@ -83,6 +84,9 @@ export interface GameState {
     stakeAmount: number;
     opponentName: string;
   } | null;
+
+  // v5.3 — guild-war battle the player is fighting in / watching.
+  warState: WarStateWire | null;
 
   // UI
   currentArea: "character" | "arena" | "marketplace" | "tavern" | "hall_of_fame" | "guild";
@@ -243,6 +247,7 @@ export const initialGameState: GameState = {
   wagerLobby: [],
   pendingChallenge: null,
   pendingWagerAccept: null,
+  warState: null,
   currentArea: "character",
   authPhase: "auth_pending",
   errorMessage: null,
@@ -318,6 +323,7 @@ export type GameAction =
   | { type: "SET_SPECTATING"; fight: FightState | null }
   | { type: "SET_PENDING_CHALLENGE"; challenge: GameState["pendingChallenge"] }
   | { type: "SET_AREA"; area: GameState["currentArea"] }
+  | { type: "SET_WAR_STATE"; war: WarStateWire | null }
   | { type: "SET_PENDING_WAGER_ACCEPT"; payload: GameState["pendingWagerAccept"] }
   | { type: "SET_WAGER_LOBBY"; entries: WagerLobbyEntry[] }
   | { type: "ADD_WAGER_LOBBY_ENTRY"; entry: WagerLobbyEntry }
@@ -570,6 +576,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, pendingChallenge: action.challenge };
     case "SET_AREA":
       return { ...state, currentArea: action.area };
+    case "SET_WAR_STATE":
+      return { ...state, warState: action.war };
     case "SET_PENDING_WAGER_ACCEPT":
       return { ...state, pendingWagerAccept: action.payload };
     case "SET_WAGER_LOBBY":

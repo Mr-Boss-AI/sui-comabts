@@ -133,14 +133,14 @@ let activeStream: { abort: () => void } | null = null;
 // Single shared HTTP client for queryEvents + getObject. Same instance pattern
 // as the existing utilities use elsewhere in the server.
 const network = (CONFIG.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as 'mainnet' | 'testnet';
-const httpClient = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl(network), network });
+const httpClient = new SuiJsonRpcClient({ url: (CONFIG.SUI_RPC_URL || getJsonRpcFullnodeUrl(network)), network });
 
 // gRPC client for the live checkpoint subscription. Uses the same HTTPS
 // endpoint as the JSON-RPC client (Mysten's gRPC-Web is hosted on the same
 // fullnode endpoint).
 const grpcClient = new SuiGrpcClient({
   network,
-  baseUrl: getJsonRpcFullnodeUrl(network),
+  baseUrl: (CONFIG.SUI_RPC_URL || getJsonRpcFullnodeUrl(network)),
 });
 
 // ===== Public API =====

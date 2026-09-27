@@ -3,7 +3,7 @@ import { CONFIG } from '../config';
 import type { EquipmentSlots, Item, ItemType, Rarity } from '../types';
 
 const network = (CONFIG.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as 'mainnet' | 'testnet';
-const client = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl(network), network });
+const client = new SuiJsonRpcClient({ url: (CONFIG.SUI_RPC_URL || getJsonRpcFullnodeUrl(network)), network });
 
 // Chain stores slot names as utf8 String keys on dynamic_object_field. The
 // canonical chain names use snake_case for rings (ring_1, ring_2); the server

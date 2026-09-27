@@ -68,6 +68,7 @@ import {
   type TavernCtx,
 } from './tavern-handlers';
 import type { FightRequest } from '../data/fight-requests';
+import { dispatchWarMessage, isInActiveWar, setWarClientsRef } from './war-room';
 
 // === Connected Clients Registry ===
 
@@ -75,6 +76,7 @@ const connectedClients = new Map<string, ConnectedClient>();
 
 // Share with fight-room module
 setClientsRef(connectedClients);
+setWarClientsRef(connectedClients);
 
 // Wire Bucket 3 presence: fight-room broadcasts in_fight ↔ online via
 // this callback whenever a fight starts or ends. Kept lazy because
@@ -542,6 +544,8 @@ function handleMessage(client: ConnectedClient, msg: ClientMessage): void {
     case 'decline_challenge':
       break;
     default: {
+      // v5.3 guild-war battle messages.
+      if (dispatchWarMessage(client, msg)) break;
       // Tavern surface (Bucket 3). Returns true if the message was a
       // tavern message and was handled; otherwise we fall through to the
       // unknown-type error below.
@@ -957,6 +961,10 @@ function handleGetCharacter(client: ConnectedClient, msg: ClientMessage): void {
 function handleQueueFight(client: ConnectedClient, msg: ClientMessage): void {
   if (!client.characterId) {
     sendError(client, 'Create a character first');
+    return;
+  }
+  if (isInActiveWar(client.walletAddress?.toLowerCase())) {
+    sendError(client, 'You are fighting in a guild war');
     return;
   }
 

@@ -366,7 +366,7 @@ async function readRegistryEntriesProd(): Promise<RegistryEntry[]> {
   // setup. The chain reader is only constructed once we actually need it.
   const { SuiJsonRpcClient, getJsonRpcFullnodeUrl } = await import('@mysten/sui/jsonRpc');
   const network = (CONFIG.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as 'mainnet' | 'testnet';
-  const sdkClient = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl(network), network });
+  const sdkClient = new SuiJsonRpcClient({ url: (CONFIG.SUI_RPC_URL || getJsonRpcFullnodeUrl(network)), network });
 
   const entries: RegistryEntry[] = [];
   let cursor: string | null | undefined = null;

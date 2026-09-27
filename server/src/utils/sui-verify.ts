@@ -3,7 +3,7 @@ import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
 import { CONFIG } from '../config';
 
 const network = (CONFIG.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as 'mainnet' | 'testnet';
-const client = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl(network), network });
+const client = new SuiJsonRpcClient({ url: (CONFIG.SUI_RPC_URL || getJsonRpcFullnodeUrl(network)), network });
 
 /**
  * Verify a Wallet-Standard `signPersonalMessage` signature against an
