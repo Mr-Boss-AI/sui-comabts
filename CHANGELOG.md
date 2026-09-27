@@ -22,6 +22,11 @@ All notable changes to SUI Combats. Format follows
 ### Fixed
 - **combat:** `crit_chance_bonus` was added to the crit *multiplier* (+10 → crits ~11.5×). All 13 chain item stats now wired (`crit_multiplier_bonus`, `evasion_bonus`, `anti_crit_bonus`, `anti_evasion_bonus` were dropped).
 
+### Added
+- **Guild-war runner** (`server/src/ws/war-room.ts`): discovers wars from `WarDeclared` events, expires unaccepted ones, calls `start_war` at start time, snapshots fighters from chain, runs the group-combat engine (`game/group-combat.ts`, combats.ru pairing, 20 s exchanges, offline fighters act at random, 25-min cap judged by HP%), pushes `war_state`, calls `settle_war`. `scripts/e2e-war-localnet.ts` 14/14, `scripts/qa-group-combat.ts` 25/25.
+- **War battle screen** (`components/guild/war-battle.tsx`) inside the Guild Hall — rosters, current exchange zone picker, log, countdowns; opens automatically when your war starts.
+- **Grey-stone look** — flat medieval greys, iron-black top bar and accents, blood red only for HP/damage/danger, Cinzel + EB Garamond. Rarity removed from the UI (level pills + level-bracket filters).
+
 ### Changed
 - **combat — fighting styles rebalanced** (`scripts/offhand-balance.ts`): dual-wield now 2 strikes (same zone allowed) + 2 guards, strikes land 72.5%, offhand weapon adds 50% of its damage; two-handers ×1.5 landed damage; shield unchanged. Styles win 46–57% against each other from level 8 up (was: shield 86% vs empty offhand, 2-hand 14%). Frontend picker supports double strike (×2) and the 2-zone dual-wield guard. `scripts/qa-offhand-rules.ts` 17/17.
 
