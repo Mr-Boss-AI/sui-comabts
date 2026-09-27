@@ -83,11 +83,11 @@ function main(): void {
   contains(wm, 'layout: "stacked"', 'hero layout = stacked');
   contains(wm, 'layout: "inline"', 'navbar/footer layout = inline');
   // Stroke thickness scales with size
-  contains(wm, 'strokeWidth: 5', 'hero stroke = 5px');
+  contains(wm, 'strokeWidth: 3', 'hero stroke = 3px (blackletter)');
   // Phase 3 header polish (2026-05-16) bumped the navbar variant +20%:
   // suiSize 32 -> 38, combatsSize 32 -> 38, strokeWidth 1.5 -> 1.8.
   // The hero variant is unchanged.
-  contains(wm, 'strokeWidth: 1.8', 'navbar stroke = 1.8px (post-header-polish)');
+  contains(wm, 'strokeWidth: 1,', 'navbar stroke = 1px (blackletter)');
   contains(wm, 'suiSize: 38', 'navbar SUI = 38px (post-header-polish)');
   contains(wm, 'combatsSize: 38', 'navbar COMBATS = 38px (post-header-polish)');
 
@@ -101,7 +101,7 @@ function main(): void {
     'WebkitTextStroke: `${v.strokeWidth}px var(--wordmark-ink)`',
     '"SUI" stroke uses --wordmark-ink',
   );
-  contains(wm, '<span style={sui}>SUI</span>', '"SUI" rendered as the first half');
+  contains(wm, '<span style={sui}>Sui</span>', '"Sui" rendered as the first half');
 
   // ===========================================================================
   // [6] "COMBATS" half — yellow fill + ink stroke + red shadow
@@ -113,7 +113,7 @@ function main(): void {
     'textShadow: `${v.shadowOffset}px ${v.shadowOffset}px 0 var(--wordmark-red)',
     '"COMBATS" drop-shadow uses --wordmark-red',
   );
-  contains(wm, '<span style={combats}>COMBATS</span>', '"COMBATS" rendered as the second half');
+  contains(wm, '<span style={combats}>Combats</span>', '"Combats" rendered as the second half');
 
   // ===========================================================================
   // [7] Comic-outline guarantees — no soft glow, paint order correct

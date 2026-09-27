@@ -63,81 +63,43 @@ function main(): void {
   }
 
   // ===========================================================================
-  // [2] Hero left column wiring
+  // [2] v5.3 evil-medieval hero
   // ===========================================================================
-  console.log('\n[2] hero left column — pill + wordmark + tagline + CTAs');
-  contains(land, 'Testnet · Live', 'TESTNET · LIVE pill copy present');
+  console.log('\n[2] hero — iron scope, wordmark, copy, CTAs');
+  contains(land, 'className="theme-iron"', 'hero is a dark iron surface');
+  contains(land, 'Testnet · The gates stand open', 'testnet pill copy');
   contains(land, '<Wordmark size="hero"', 'hero variant of Wordmark used');
-  contains(
-    land,
-    'Mint a fighter. Gear up with NFTs. Lock real SUI on the line and',
-    'tagline line 1 verbatim',
-  );
-  contains(land, 'brawl through a 5-zone arena.', 'tagline line 2 verbatim');
-  contains(land, '95/5', '95/5 split copy present');
-  contains(land, 'split on every wager.', '95/5 split tail');
-  contains(land, '<DangerButton size="lg"', 'Connect Wallet primary danger button');
-  contains(land, 'Connect Wallet', 'Connect Wallet label');
-  contains(land, '<GhostButton', 'Watch a Fight ghost button');
-  contains(land, 'size="lg"', 'Watch a Fight ghost button is lg-sized');
-  contains(land, 'Watch a Fight ▾', 'Watch a Fight label + chevron');
-  // Bug 2 fix (2026-05-18) — button must drive the guest-spectator
-  // flag, not the pre-fix `sc:nav` custom event that nothing listened
-  // for. Pinning the literal dispatch wording keeps a future refactor
-  // from silently regressing the disconnected-button case.
+  contains(land, 'Sell thy soul to the arena.', 'headline');
+  contains(land, 'one coin', '5% fee line (one coin in twenty)');
+  contains(land, '<DangerButton size="lg" onClick={clickNavbarConnect}>', 'Enter the Pit fires wallet connect');
+  contains(land, 'Enter the Pit', 'primary CTA label');
+  contains(land, '<GhostButton', 'spectate ghost button');
+  contains(land, 'Watch the Slaughter ▾', 'spectate label + chevron');
   contains(
     land,
     'type: "SET_SPECTATOR_MODE", enabled: true',
-    'Watch a Fight onClick dispatches SET_SPECTATOR_MODE',
+    'Watch the Slaughter dispatches SET_SPECTATOR_MODE',
   );
-  // Bottom badge row
-  contains(land, 'Walrus · Decentralized', 'Walrus badge');
-  contains(land, 'Open Source · MIT', 'Open Source · MIT badge');
-  contains(land, 'Move v5 Contracts', 'Move v5 badge');
+  contains(land, '/v53/figures/figure-male.png', 'male warrior figure');
+  contains(land, '/v53/figures/figure-female.png', 'female warrior figure');
 
   // ===========================================================================
-  // [3] Floating NFT cards
+  // [3] Four rites
   // ===========================================================================
-  console.log('\n[3] hero right column — floating NFT cards');
-  contains(land, 'FloatingNftCard', 'FloatingNftCard component declared');
-  contains(land, 'const FEATURED', 'FEATURED catalog declared');
-  // 3 cards with distinct rotates / offsets / zIndexes
-  const rotateMatches = land.match(/rotate: -?\d/g) ?? [];
-  if (rotateMatches.length >= 3) {
-    ok(`at least 3 rotated cards (${rotateMatches.length} found)`);
-  } else {
-    fail('floating card count', `expected ≥3 rotated cards, got ${rotateMatches.length}`);
+  console.log('\n[3] four rites');
+  contains(land, 'Four rites. Then damnation.', 'section title');
+  contains(land, 'const RITES', 'RITES array declared');
+  for (const t of ['Summon thy champion', 'Arm the damned', 'Spill blood for silver', 'Raise a banner of war']) {
+    contains(land, t, `rite: ${t}`);
   }
-  // Hover lifts the card
-  contains(land, 'translateY(-4px)', 'cards lift on hover');
 
   // ===========================================================================
-  // [4] Three Steps tile row
+  // [4] Inscription + footer
   // ===========================================================================
-  console.log('\n[4] three-steps tile row');
-  contains(land, 'Three steps. Then chaos.', 'section title');
-  contains(land, 'const STEPS', 'STEPS array declared');
-  contains(land, '"01"', 'step 01 number');
-  contains(land, '"02"', 'step 02 number');
-  contains(land, '"03"', 'step 03 number');
-  contains(land, 'Mint your fighter', 'step 01 title');
-  contains(land, 'Gear up', 'step 02 title');
-  contains(land, 'Lock in, brawl', 'step 03 title');
-  contains(land, 'One-click character mint', 'step 01 body');
-  contains(land, 'kiosk marketplace', 'step 02 body');
-  contains(land, '20s turn timer, 5 zones', 'step 03 body');
-  // Tile palettes
-  contains(land, 'bg: "var(--sc-parchment)"', 'step 01 parchment fill');
-  contains(land, 'bg: "var(--sc-bronze)"', 'step 02 bronze fill');
-  contains(land, 'bg: "var(--sc-blood)"', 'step 03 blood-red fill');
-
-  // ===========================================================================
-  // [5] Footer
-  // ===========================================================================
-  console.log('\n[5] footer — small Wordmark + tech credits');
+  console.log('\n[4] inscription + footer');
+  contains(land, 'Carved above the gate of the Pit', 'gate inscription');
   contains(land, '<Wordmark size="footer"', 'footer Wordmark size');
-  contains(land, 'Built on Sui', 'tech credit prefix');
-  contains(land, '35/35 Move tests', 'Move test count');
+  contains(land, 'Forged on Sui', 'footer credit');
   contains(land, 'MIT licensed', 'MIT licensed string');
 
   // ===========================================================================
@@ -166,25 +128,12 @@ function main(): void {
   contains(land, 'mysten-dapp-kit-connect-button', 'queries the dapp-kit web component');
 
   // ===========================================================================
-  // [8] Featured NFT data references real catalog
-  // ===========================================================================
-  console.log('\n[8] Featured NFT data references real testnet catalog');
-  contains(land, 'Pendant of Wrath', 'Pendant of Wrath referenced');
-  contains(land, "Dancer's Aegis", "Dancer's Aegis referenced");
-  contains(land, 'Whisperwind Amulet', 'Whisperwind Amulet referenced');
-  contains(
-    land,
-    'bafybeihrlw3jdq6ws2m3bjrjoyisvyyvtsp6mb2wnd6lps5hjtgatbwh3i',
-    'Pinata folder CID matches deployment.testnet-v5.json catalog',
-  );
-
-  // ===========================================================================
   // [9] Responsive breakpoints exercised
   // ===========================================================================
   console.log('\n[9] responsive breakpoint usage');
   contains(land, "useBreakpoint", 'uses useBreakpoint');
   contains(land, "bpGte(\"lg\", bp)", 'gates hero side-by-side on lg');
-  contains(land, "!bpGte(\"md\", bp)", 'stacks steps below md');
+  contains(land, 'bpGte("md", bp) ? 2 : 1', 'rites stack 4 → 2 → 1 columns');
 
   // ===========================================================================
   // Summary

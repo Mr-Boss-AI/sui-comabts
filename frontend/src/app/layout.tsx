@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Cinzel, EB_Garamond, JetBrains_Mono } from "next/font/google";
+import { Cinzel, EB_Garamond, JetBrains_Mono, UnifrakturCook } from "next/font/google";
 import "./globals.css";
 import "../styles/design-tokens-v2.css";
 
@@ -33,6 +33,14 @@ const ui = EB_Garamond({
   display: "swap",
 });
 
+// Blackletter for the wordmark + roman numerals.
+const gothic = UnifrakturCook({
+  variable: "--font-gothic-src",
+  weight: "700",
+  subsets: ["latin"],
+  display: "swap",
+});
+
 const mono = JetBrains_Mono({
   variable: "--font-mono-src",
   weight: ["400", "500", "700"],
@@ -54,7 +62,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${display.variable} ${ui.variable} ${mono.variable} h-full antialiased`}
+      className={`${display.variable} ${ui.variable} ${mono.variable} ${gothic.variable} h-full antialiased`}
     >
       <body
         className="min-h-full flex flex-col"

@@ -96,17 +96,12 @@ function main(): void {
   contains(layout, "3: \"3rd\"", 'rank 3 label = "3rd"');
 
   // ===========================================================================
-  // [3] ListingCard rarity tint covers all 5 tiers
+  // [3] ListingCard — v5.3 level pill (rarity retired)
   // ===========================================================================
-  console.log('\n[3] ListingCard — rarity tint map');
-  for (let r = 1; r <= 5; r++) {
-    contains(layout, `${r}: { fg:`, `RARITY_TINT[${r}] declared`);
-  }
-  contains(layout, 'var(--rarity-common)', 'tint uses --rarity-common');
-  contains(layout, 'var(--rarity-uncommon)', 'tint uses --rarity-uncommon');
-  contains(layout, 'var(--rarity-rare)', 'tint uses --rarity-rare');
-  contains(layout, 'var(--rarity-epic)', 'tint uses --rarity-epic');
-  contains(layout, 'var(--rarity-legendary)', 'tint uses --rarity-legendary');
+  console.log('\n[3] ListingCard — level pill');
+  contains(layout, 'Lv {level}', 'listing card shows the level pill');
+  if (!layout.includes('RARITY_TINT')) ok('rarity tint map removed');
+  else fail('rarity tint', 'RARITY_TINT still present');
 
   // ===========================================================================
   // [4] layout.tsx exports

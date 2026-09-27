@@ -106,7 +106,6 @@ function main(): void {
     ['blood',             '#8b1111'],
     ['steel',             '#2f4a5c'],
     ['stone rim',         '#4a4946'],
-    ['rarity epic',       '#7d4ba5'],
   ];
   for (const [label, hex] of PINS) {
     contains(tokens.toLowerCase(), hex.toLowerCase(), `${label} ${hex}`);

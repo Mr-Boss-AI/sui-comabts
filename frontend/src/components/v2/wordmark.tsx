@@ -13,7 +13,7 @@
  *                   page focal element.
  *
  * Visual recipe (pinned in qa-wordmark.ts):
- *   - Slackey display font
+ *   - UnifrakturCook blackletter (v5.3 grey-stone redesign)
  *   - "SUI" fill = --wordmark-red  (deep red), thick black hard
  *     outline via -webkit-text-stroke
  *   - "COMBATS" fill = --wordmark-yellow (warm bronze yellow),
@@ -60,7 +60,7 @@ const VARIANTS: Record<
     layout: "inline",
     suiSize: 38,
     combatsSize: 38,
-    strokeWidth: 1.8,
+    strokeWidth: 1,
     shadowOffset: 2,
     gap: 5,
   },
@@ -76,8 +76,8 @@ const VARIANTS: Record<
     layout: "stacked",
     suiSize: 168,
     combatsSize: 132,
-    strokeWidth: 5,
-    shadowOffset: 6,
+    strokeWidth: 3,
+    shadowOffset: 5,
     gap: 0,
   },
 };
@@ -92,7 +92,8 @@ export function Wordmark({
   const Tag = (onClick ? "button" : "div") as "button" | "div";
 
   const sui: CSSProperties = {
-    fontFamily: "var(--font-display)",
+    // v5.3 — blackletter brand mark.
+    fontFamily: "var(--font-gothic)",
     // v5.3 — Cinzel runs wider than Slackey: cap the hero by viewport
     // width so it never overflows a phone screen.
     fontSize: size === "hero" ? `min(${v.suiSize}px, 24vw)` : v.suiSize,
@@ -102,12 +103,12 @@ export function Wordmark({
     textShadow: "none",
     letterSpacing: "0.01em",
     display: "block",
-    fontWeight: 400,
+    fontWeight: 700,
     paintOrder: "stroke fill",
   };
 
   const combats: CSSProperties = {
-    fontFamily: "var(--font-display)",
+    fontFamily: "var(--font-gothic)",
     fontSize: size === "hero" ? `min(${v.combatsSize}px, 14vw)` : v.combatsSize,
     lineHeight: 0.95,
     color: "var(--wordmark-yellow)",
@@ -118,7 +119,7 @@ export function Wordmark({
     textShadow: `${v.shadowOffset}px ${v.shadowOffset}px 0 var(--wordmark-red), ${v.shadowOffset * 2}px ${v.shadowOffset * 2}px 0 var(--wordmark-ink)`,
     letterSpacing: "0.01em",
     display: "block",
-    fontWeight: 400,
+    fontWeight: 700,
     paintOrder: "stroke fill",
   };
 
@@ -140,8 +141,8 @@ export function Wordmark({
       }}
       aria-label="SUI Combats"
     >
-      <span style={sui}>SUI</span>
-      <span style={combats}>COMBATS</span>
+      <span style={sui}>Sui</span>
+      <span style={combats}>Combats</span>
     </Tag>
   );
 }

@@ -123,6 +123,7 @@
   --font-display:      var(--font-display-src, 'Cinzel', Georgia, serif);
   --font-ui:           var(--font-ui-src, 'EB Garamond', Georgia, serif);
   --font-mono:         var(--font-mono-src, 'JetBrains Mono', ui-monospace, monospace);
+  --font-gothic:       var(--font-gothic-src, 'UnifrakturCook', 'Old English Text MT', serif);
   --ls-button:         0.06em;
   --ls-stamp:          0.14em;
 
