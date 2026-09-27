@@ -30,6 +30,10 @@ function getEquipmentBonuses(equipment: EquipmentSlots): {
   armorTotal: number;
   defenseBonus: number;
   critBonus: number;
+  critMultiplierBonus: number;
+  evasionBonus: number;
+  antiCritBonus: number;
+  antiEvasionBonus: number;
   damageBonus: number;
   strengthBonus: number;
   dexterityBonus: number;
@@ -42,6 +46,10 @@ function getEquipmentBonuses(equipment: EquipmentSlots): {
   let armorTotal = 0;
   let defenseBonus = 0;
   let critBonus = 0;
+  let critMultiplierBonus = 0;
+  let evasionBonus = 0;
+  let antiCritBonus = 0;
+  let antiEvasionBonus = 0;
   let damageBonus = 0;
   let strengthBonus = 0;
   let dexterityBonus = 0;
@@ -75,6 +83,10 @@ function getEquipmentBonuses(equipment: EquipmentSlots): {
     armorTotal += b.armor || 0;
     defenseBonus += b.defense || 0;
     critBonus += b.critBonus || 0;
+    critMultiplierBonus += b.critMultiplier || 0;
+    evasionBonus += b.evasion || 0;
+    antiCritBonus += b.antiCrit || 0;
+    antiEvasionBonus += b.antiEvasion || 0;
     damageBonus += b.damage || 0;
     strengthBonus += b.strength || 0;
     dexterityBonus += b.dexterity || 0;
@@ -92,6 +104,10 @@ function getEquipmentBonuses(equipment: EquipmentSlots): {
     armorTotal,
     defenseBonus,
     critBonus,
+    critMultiplierBonus,
+    evasionBonus,
+    antiCritBonus,
+    antiEvasionBonus,
     damageBonus,
     strengthBonus,
     dexterityBonus,
@@ -177,29 +193,35 @@ export function deriveCombatStats(
     + effectiveDex * GAME_CONSTANTS.DEX_DAMAGE_BONUS
     + equip.damageBonus;
 
-  // Crit (from INT, reduced by opponent END)
+  // Crit (from INT + item crit chance, reduced by opponent END + opponent
+  // anti-crit items). v5.3 — item crit_chance_bonus is percentage points of
+  // crit CHANCE; before v5.3 it was mistakenly added to the crit multiplier.
+  const oppEquip = opponentEquipment ? getEquipmentBonuses(opponentEquipment) : undefined;
   let opponentAntiCrit = 0;
   if (opponentStats) {
-    const oppEquip = opponentEquipment ? getEquipmentBonuses(opponentEquipment) : { enduranceBonus: 0 };
-    opponentAntiCrit = (opponentStats.endurance + oppEquip.enduranceBonus) * GAME_CONSTANTS.ANTI_CRIT_PER_ENDURANCE;
+    opponentAntiCrit = (opponentStats.endurance + (oppEquip?.enduranceBonus ?? 0)) * GAME_CONSTANTS.ANTI_CRIT_PER_ENDURANCE
+      + (oppEquip?.antiCritBonus ?? 0);
   }
   const critChance = Math.min(
     GAME_CONSTANTS.CRIT_CHANCE_CAP,
-    effectiveInt * GAME_CONSTANTS.CRIT_CHANCE_PER_INTUITION - opponentAntiCrit
+    effectiveInt * GAME_CONSTANTS.CRIT_CHANCE_PER_INTUITION + equip.critBonus - opponentAntiCrit
   );
+  // crit_multiplier_bonus is in hundredths (10 → +0.10×), matching the
+  // frontend mirror in frontend/src/lib/combat.ts.
   const critMultiplier = GAME_CONSTANTS.CRIT_MULTIPLIER_BASE
     + effectiveInt * GAME_CONSTANTS.CRIT_MULTIPLIER_PER_INTUITION
-    + equip.critBonus;
+    + equip.critMultiplierBonus / 100;
 
-  // Evasion (from DEX, reduced by opponent STR)
+  // Evasion (from DEX + item evasion, reduced by opponent STR + opponent
+  // anti-evasion items)
   let opponentAntiEvasion = 0;
   if (opponentStats) {
-    const oppEquip = opponentEquipment ? getEquipmentBonuses(opponentEquipment) : { strengthBonus: 0 };
-    opponentAntiEvasion = (opponentStats.strength + oppEquip.strengthBonus) * GAME_CONSTANTS.ANTI_EVASION_PER_STRENGTH;
+    opponentAntiEvasion = (opponentStats.strength + (oppEquip?.strengthBonus ?? 0)) * GAME_CONSTANTS.ANTI_EVASION_PER_STRENGTH
+      + (oppEquip?.antiEvasionBonus ?? 0);
   }
   const evasionChance = Math.min(
     GAME_CONSTANTS.EVASION_CAP,
-    effectiveDex * GAME_CONSTANTS.EVASION_PER_DEXTERITY - opponentAntiEvasion
+    effectiveDex * GAME_CONSTANTS.EVASION_PER_DEXTERITY + equip.evasionBonus - opponentAntiEvasion
   );
 
   const armor = equip.armorTotal;

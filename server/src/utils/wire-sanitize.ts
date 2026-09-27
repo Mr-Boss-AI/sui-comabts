@@ -70,14 +70,10 @@ export function sanitizeItem(item: any): unknown {
       defenseBonus: s.defense || 0,
       attackBonus: s.damage || 0,
       critChanceBonus: s.critBonus || 0,
-      // TODO(loadout-cleanup): server StatBonuses type is missing these 4
-      // fields. On-chain items have them but they're dropped here. Unify
-      // server/frontend stat shape as part of mainnet prep. Tracked in
-      // MAINNET_PREP.md.
-      critMultiplierBonus: 0,
-      evasionBonus: 0,
-      antiCritBonus: 0,
-      antiEvasionBonus: 0,
+      critMultiplierBonus: s.critMultiplier || 0,
+      evasionBonus: s.evasion || 0,
+      antiCritBonus: s.antiCrit || 0,
+      antiEvasionBonus: s.antiEvasion || 0,
     },
   };
 }

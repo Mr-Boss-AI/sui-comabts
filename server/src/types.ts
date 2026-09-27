@@ -61,8 +61,18 @@ export interface StatBonuses {
   hp?: number;
   armor?: number;
   defense?: number;
+  /** Crit chance, in percentage points (chain `crit_chance_bonus`). */
   critBonus?: number;
   damage?: number;
+  /** v5.3 — Crit damage multiplier, in hundredths (chain
+   *  `crit_multiplier_bonus`; 10 → +0.10×). */
+  critMultiplier?: number;
+  /** v5.3 — Evasion chance, percentage points (chain `evasion_bonus`). */
+  evasion?: number;
+  /** v5.3 — Lowers the OPPONENT's crit chance, percentage points. */
+  antiCrit?: number;
+  /** v5.3 — Lowers the OPPONENT's evasion chance, percentage points. */
+  antiEvasion?: number;
 }
 
 export interface DerivedStats {
