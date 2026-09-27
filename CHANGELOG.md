@@ -12,6 +12,24 @@ All notable changes to SUI Combats. Format follows
 
 ---
 
+## [Unreleased] — v5.3 work in progress (branch `claude/brave-feynman-zzga9j`), 2026-09-27
+
+### Security
+- **arena:** `SETTLEMENT_TIMEOUT_MS` 10 → 30 min. A losing player could force a 50/50 refund via `cancel_expired_wager` on any fight longer than ~10 min.
+- **arena:** `request_accept_wager` rejects a fight-locked challenger (`EChallengerFightLocked = 24`).
+- **server:** hard fight time limit (`MAX_FIGHT_DURATION_MS` = 8 min, HP% judgment) so live v5.2 wagers always settle before the old 10-min window.
+
+### Fixed
+- **combat:** `crit_chance_bonus` was added to the crit *multiplier* (+10 → crits ~11.5×). All 13 chain item stats now wired (`crit_multiplier_bonus`, `evasion_bonus`, `anti_crit_bonus`, `anti_evasion_bonus` were dropped).
+
+### Added
+- **guild.move:** guilds (1 SUI fee, 30 members, Leader/Officer/Member, invite/open join, treasury, disband, war-lock hook). 44 Move tests.
+- `scripts/e2e-localnet.ts` — full publish + characters + guilds + wagers + items + battles on a local chain (102/102).
+- `scripts/qa-item-stats.ts` (13/13), `scripts/balance-sim.ts`, `scripts/item-balance.ts`.
+- `docs/ITEM_DESIGN_GUIDE.md`, `docs/V5.3_GUILD_WARS_AND_REDESIGN_SPEC.md`, `frontend/public/v53/` art.
+
+---
+
 ## [Unreleased] — v5.2.2 Test Bot Fight (off-chain solo practice), 2026-06-02
 
 Players arriving at the testnet preview often had no human to fight. The
