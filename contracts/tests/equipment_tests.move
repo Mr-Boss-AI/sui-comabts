@@ -737,4 +737,45 @@ module sui_combats::equipment_tests {
         clock::destroy_for_testing(clock);
         ts::end(scenario);
     }
+
+    // ──────── v5.3 earrings (14th slot) ────────
+
+    #[test]
+    fun test_equip_unequip_earrings_happy() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::earrings_type(), 1, b"Iron Hoops");
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let e = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_earrings(&mut c, e, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            equipment::unequip_earrings(&mut c, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0, location = sui_combats::equipment)]  // EWrongItemType
+    fun test_equip_ring_as_earrings_aborts() {
+        let mut scenario = ts::begin(PUBLISHER);
+        let clock = bootstrap_alice(&mut scenario);
+        mint_misc_to_alice(&mut scenario, item::ring_type(), 1, b"Band");
+        ts::next_tx(&mut scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(&scenario);
+            let e = ts::take_from_sender<Item>(&scenario);
+            equipment::equip_earrings(&mut c, e, &clock, ts::ctx(&mut scenario));
+            ts::return_shared(c);
+        };
+        clock::destroy_for_testing(clock);
+        ts::end(scenario);
+    }
 }

@@ -54,6 +54,8 @@ module sui_combats::guild {
     const EZeroAmount: u64 = 21;
     const EAlreadyMember: u64 = 22;
     const EWarLockTooLong: u64 = 23;
+    /// v5.3 — guild already has an open (declared / accepted / active) war.
+    const EOpenWar: u64 = 24;
 
     // ===== Roles =====
     const ROLE_MEMBER: u8 = 0;
@@ -109,6 +111,9 @@ module sui_combats::guild {
         rating: u16,
         war_locked_until: u64,
         created_at: u64,
+        /// v5.3 — the guild's current open GuildWar (declared, accepted or
+        /// active). One at a time. Set / cleared only by guild_war.
+        open_war: Option<ID>,
     }
 
     // ===== Events =====
@@ -192,6 +197,7 @@ module sui_combats::guild {
             rating: DEFAULT_RATING,
             war_locked_until: 0,
             created_at: clock::timestamp_ms(clock),
+            open_war: option::none(),
         };
         let guild_id = object::id(&guild);
 
@@ -218,6 +224,7 @@ module sui_combats::guild {
         assert!(sender == guild.leader, ENotLeader);
         assert!(guild.member_count == 1, EGuildNotEmpty);
         assert_not_war_locked(&guild, clock);
+        assert!(option::is_none(&guild.open_war), EOpenWar);
 
         let guild_id = object::id(&guild);
         let Guild {
@@ -237,6 +244,7 @@ module sui_combats::guild {
             rating: _,
             war_locked_until: _,
             created_at: _,
+            open_war: _,
         } = guild;
 
         let payout = balance::value(&treasury);
@@ -473,6 +481,18 @@ module sui_combats::guild {
         guild.war_locked_until = until_ms;
     }
 
+    /// v5.3 — mark / clear the guild's open war (guild_war module only).
+    public(package) fun set_open_war(guild: &mut Guild, war_id: ID) {
+        assert!(option::is_none(&guild.open_war), EOpenWar);
+        guild.open_war = option::some(war_id);
+    }
+
+    public(package) fun clear_open_war(guild: &mut Guild, war_id: ID) {
+        if (option::is_some(&guild.open_war) && *option::borrow(&guild.open_war) == war_id) {
+            guild.open_war = option::none();
+        };
+    }
+
     /// Record a finished guild-war result.
     /// outcome: 0 = loss, 1 = win, 2 = draw.
     public(package) fun record_war_result(guild: &mut Guild, outcome: u8, new_rating: u16) {
@@ -546,6 +566,8 @@ module sui_combats::guild {
     public fun draws(guild: &Guild): u32 { guild.draws }
     public fun rating(guild: &Guild): u16 { guild.rating }
     public fun war_locked_until(guild: &Guild): u64 { guild.war_locked_until }
+    public fun open_war(guild: &Guild): Option<ID> { guild.open_war }
+    public fun has_open_war(guild: &Guild): bool { option::is_some(&guild.open_war) }
     public fun created_at(guild: &Guild): u64 { guild.created_at }
 
     public fun registry_has_member(registry: &GuildRegistry, who: address): bool {

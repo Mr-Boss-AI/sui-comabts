@@ -42,6 +42,8 @@ module sui_combats::item {
     /// (Third v5.1 slot is ring_3, which reuses the existing RING=8 type.)
     const PANTS: u8 = 10;
     const BRACELETS: u8 = 11;
+    /// v5.3 — 14th slot.
+    const EARRINGS: u8 = 12;
 
 
     // ===== Slot type constants (v5.1) =====
@@ -216,7 +218,7 @@ module sui_combats::item {
         max_damage: u16,
         ctx: &mut TxContext,
     ) {
-        assert!(item_type >= WEAPON && item_type <= BRACELETS, EInvalidItemType);
+        assert!(item_type >= WEAPON && item_type <= EARRINGS, EInvalidItemType);
         assert!(level_req >= 1, ELevelReqZero);
         assert!(level_req <= MAX_LEVEL_REQ, ELevelReqTooHigh);
         assert!(min_damage <= max_damage, EDamageRangeInvalid);
@@ -350,6 +352,7 @@ module sui_combats::item {
     /// (ring_3 reuses RING=8; no new type needed.)
     public fun pants_type(): u8 { PANTS }
     public fun bracelets_type(): u8 { BRACELETS }
+    public fun earrings_type(): u8 { EARRINGS }
 
     // v5.1 — slot_type constant accessors
     public fun slot_mainhand(): u8 { SLOT_MAINHAND }

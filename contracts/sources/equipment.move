@@ -354,6 +354,28 @@ module sui_combats::equipment {
         event::emit(ItemEquipped { character_id, item_id, slot });
     }
 
+    /// v5.3 — 14th slot.
+    public fun equip_earrings(
+        character: &mut Character,
+        item: Item,
+        clock: &Clock,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+        assert!(item::item_type(&item) == item::earrings_type(), EWrongItemType);
+        assert!(item::level_req(&item) <= character::level(character), ELevelTooLow);
+
+        let slot = string::utf8(b"earrings");
+        assert!(!dof::exists_<String>(character::uid(character), slot), ESlotOccupied);
+
+        let item_id = object::id(&item);
+        let character_id = object::id(character);
+        dof::add(character::uid_mut(character), slot, item);
+
+        event::emit(ItemEquipped { character_id, item_id, slot });
+    }
+
 
     // ===========================================================================
     //  UNEQUIP — owner + fight-lock + slot-filled (DOF presence) checks
@@ -599,6 +621,26 @@ module sui_combats::equipment {
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
         let slot = string::utf8(b"bracelets");
+        assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
+
+        let character_id = object::id(character);
+        let item: Item = dof::remove(character::uid_mut(character), slot);
+        let item_id = object::id(&item);
+
+        event::emit(ItemUnequipped { character_id, item_id, slot });
+        transfer::public_transfer(item, tx_context::sender(ctx));
+    }
+
+    /// v5.3 — 14th slot.
+    public fun unequip_earrings(
+        character: &mut Character,
+        clock: &Clock,
+        ctx: &TxContext,
+    ) {
+        assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
+        assert!(!character::is_fight_locked(character, clock), EFightLocked);
+
+        let slot = string::utf8(b"earrings");
         assert!(dof::exists_<String>(character::uid(character), slot), ESlotEmpty);
 
         let character_id = object::id(character);
