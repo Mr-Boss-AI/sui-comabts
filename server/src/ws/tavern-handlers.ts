@@ -57,6 +57,7 @@ const VALID_ROOMS: ReadonlySet<PresenceRoom> = new Set([
   'arena',
   'marketplace',
   'hall_of_fame',
+  'guild',
   'fight',
 ]);
 

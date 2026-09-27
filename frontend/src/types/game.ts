@@ -348,6 +348,7 @@ export type TavernRoom =
   | "arena"
   | "marketplace"
   | "hall_of_fame"
+  | "guild"
   | "fight";
 
 export interface OnlinePlayer {

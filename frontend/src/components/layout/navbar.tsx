@@ -41,6 +41,7 @@ const AREAS: {
   { id: "arena", label: "Arena" },
   { id: "marketplace", label: "Market" },
   { id: "tavern", label: "Tavern" },
+  { id: "guild", label: "Guild" },
   { id: "hall_of_fame", label: "Hall of Fame" },
 ];
 

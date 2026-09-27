@@ -1,5 +1,6 @@
 "use client";
 
+import { GuildHall } from "@/components/guild/guild-hall";
 import { useState } from "react";
 import { useGame } from "@/hooks/useGameStore";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
@@ -224,6 +225,8 @@ function AreaContent() {
       return <TavernRoom />;
     case "hall_of_fame":
       return <Leaderboard />;
+    case "guild":
+      return <GuildHall />;
     default:
       return null;
   }

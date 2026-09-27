@@ -46,6 +46,7 @@ const ROOM_BADGE: Record<NonNullable<OnlinePlayer["currentRoom"]>, string> = {
   arena: "Arena",
   marketplace: "Market",
   hall_of_fame: "HoF",
+  guild: "Guild",
   fight: "Fight",
 };
 

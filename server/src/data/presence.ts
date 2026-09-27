@@ -37,6 +37,7 @@ export type PresenceRoom =
   | 'arena'
   | 'marketplace'
   | 'hall_of_fame'
+  | 'guild'
   | 'fight';
 
 export type PresenceStatus = 'online' | 'in_fight' | 'in_marketplace' | 'idle';

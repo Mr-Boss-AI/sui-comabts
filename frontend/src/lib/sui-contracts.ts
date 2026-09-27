@@ -13,7 +13,7 @@ import type { Item } from "@/types/game";
 // pooling internally; no more raw fetch with bare try/catch.
 // =============================================================================
 let jsonRpcClientCache: SuiJsonRpcClient | null = null;
-function getJsonRpcClient(): SuiJsonRpcClient {
+export function getJsonRpcClient(): SuiJsonRpcClient {
   if (jsonRpcClientCache) return jsonRpcClientCache;
   const network = (process.env.NEXT_PUBLIC_SUI_NETWORK ?? "testnet") as "mainnet" | "testnet";
   jsonRpcClientCache = new SuiJsonRpcClient({

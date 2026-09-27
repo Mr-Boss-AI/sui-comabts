@@ -21,6 +21,7 @@ const AREAS: {
   { id: "arena", label: "Arena", desc: "Fight players" },
   { id: "marketplace", label: "Market", desc: "Buy & sell" },
   { id: "tavern", label: "Tavern", desc: "Chat & social" },
+  { id: "guild", label: "Guild Hall", desc: "Guilds & wars" },
   { id: "hall_of_fame", label: "Hall of Fame", desc: "Rankings" },
 ];
 

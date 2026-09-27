@@ -85,7 +85,7 @@ export interface GameState {
   } | null;
 
   // UI
-  currentArea: "character" | "arena" | "marketplace" | "tavern" | "hall_of_fame";
+  currentArea: "character" | "arena" | "marketplace" | "tavern" | "hall_of_fame" | "guild";
   authPhase: AuthPhase;
   errorMessage: string | null;
   errorTimestamp: number | null;
