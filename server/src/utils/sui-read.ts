@@ -25,6 +25,8 @@ const CHAIN_TO_SERVER_SLOT: Record<string, keyof EquipmentSlots> = {
   // (underscore stripped on the server side).
   pants: 'pants',
   bracelets: 'bracelets',
+  // v5.3 — 14th slot.
+  earrings: 'earrings',
 };
 
 const CHAIN_SLOT_NAMES = Object.keys(CHAIN_TO_SERVER_SLOT);
@@ -74,6 +76,7 @@ const EMPTY: DOFEquipment = {
   boots: null, belt: null, ring1: null, ring2: null, necklace: null,
   // v5.1 (final) — 3 new slots: ring_3, pants, bracelets.
   ring3: null, pants: null, bracelets: null,
+  earrings: null,
 };
 
 /**

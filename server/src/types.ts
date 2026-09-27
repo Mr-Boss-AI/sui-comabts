@@ -132,6 +132,8 @@ export interface EquipmentSlots {
   ring3?: Item | null;
   pants?: Item | null;
   bracelets?: Item | null;
+  /** v5.3 — 14th slot. */
+  earrings?: Item | null;
 }
 
 // === Character ===

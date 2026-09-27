@@ -38,6 +38,7 @@ const WIRE_SLOTS = [
   'necklace',
   'pants',
   'bracelets',
+  'earrings',
 ] as const;
 
 export function sanitizeItem(item: any): unknown {

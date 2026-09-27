@@ -1087,6 +1087,15 @@ function EquipmentFrame({
             gap: slotGap,
           }}
         >
+          {/* v5.3 — 14th slot. */}
+          <SlotTile
+            slot="earrings"
+            item={eq.earrings}
+            size={bigSize}
+            isDirty={dirtySlots.has("earrings")}
+            onClick={() => onSlot("earrings")}
+            emptyLabel="Earrings"
+          />
           <SlotTile
             slot="necklace"
             item={eq.necklace}

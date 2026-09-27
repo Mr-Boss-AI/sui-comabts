@@ -25,6 +25,8 @@ export const ITEM_TYPES = {
   // loadout. (Third v5.1 slot is ring_3, which reuses RING=8.)
   PANTS: 10,
   BRACELETS: 11,
+  // v5.3 — 14th slot.
+  EARRINGS: 12,
 } as const;
 export type ItemType = (typeof ITEM_TYPES)[keyof typeof ITEM_TYPES];
 
@@ -40,6 +42,7 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   9: "Necklace",
   10: "Pants",
   11: "Bracelets",
+  12: "Earrings",
 };
 
 // v5.1 — slot_type primitive. Mirrors contracts/sources/item.move SLOT_*
@@ -181,6 +184,8 @@ export interface EquipmentSlots {
   // v5.1 (2026-05-28 PM, final) — 3 new slots: ring_3, pants, bracelets.
   pants: Item | null;
   bracelets: Item | null;
+  /** v5.3 — 14th slot. */
+  earrings: Item | null;
 }
 
 export const EQUIPMENT_SLOT_LABELS: Record<keyof EquipmentSlots, string> = {
@@ -197,6 +202,7 @@ export const EQUIPMENT_SLOT_LABELS: Record<keyof EquipmentSlots, string> = {
   necklace: "Necklace",
   pants: "Pants",
   bracelets: "Bracelets",
+  earrings: "Earrings",
 };
 
 export const SLOT_TO_ITEM_TYPE: Record<keyof EquipmentSlots, ItemType[]> = {
@@ -213,6 +219,7 @@ export const SLOT_TO_ITEM_TYPE: Record<keyof EquipmentSlots, ItemType[]> = {
   necklace: [ITEM_TYPES.NECKLACE],
   pants: [ITEM_TYPES.PANTS],
   bracelets: [ITEM_TYPES.BRACELETS],
+  earrings: [ITEM_TYPES.EARRINGS],
 };
 
 // ===== ITEMS =====

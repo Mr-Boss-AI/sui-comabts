@@ -174,6 +174,7 @@ export function MiniEquipmentFrame({
           gap: slotGap,
         }}
       >
+        <SlotTile slot="earrings" item={equipment.earrings} size={bigSize} emptyLabel="Earrings" />
         <SlotTile slot="necklace" item={equipment.necklace} size={bigSize} emptyLabel="Necklace" />
         <div
           style={{

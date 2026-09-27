@@ -20,6 +20,7 @@ export const EQUIPMENT_SLOT_KEYS: readonly (keyof EquipmentSlots)[] = [
   "necklace",
   "pants",
   "bracelets",
+  "earrings",
 ] as const;
 
 // Empty loadout sentinel — every slot null. Used for initial state and for
@@ -38,6 +39,7 @@ export const EMPTY_EQUIPMENT: EquipmentSlots = {
   necklace: null,
   pants: null,
   bracelets: null,
+  earrings: null,
 };
 
 /** Shallow clone of an EquipmentSlots map. Items are shared references;
@@ -60,6 +62,7 @@ export function cloneEquipment(eq: EquipmentSlots): EquipmentSlots {
     // server WS messages) that pre-date the schema during the cutover.
     pants: eq.pants ?? null,
     bracelets: eq.bracelets ?? null,
+    earrings: eq.earrings ?? null,
   };
 }
 

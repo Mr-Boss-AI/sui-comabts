@@ -100,7 +100,9 @@ export type EquipSlotKey =
   | "boots" | "belt" | "ring_1" | "ring_2" | "ring_3" | "necklace"
   // v5.1 (2026-05-28 PM, final) — 3 new slots: ring_3, pants, bracelets.
   // ring_3 follows the existing snake_case ring_N convention.
-  | "pants" | "bracelets";
+  | "pants" | "bracelets"
+  // v5.3 — 14th slot.
+  | "earrings";
 
 // =============================================================================
 // CHARACTER NFT

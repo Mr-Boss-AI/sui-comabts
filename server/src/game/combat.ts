@@ -74,6 +74,8 @@ function getEquipmentBonuses(equipment: EquipmentSlots): {
     equipment.ring3 ?? null,
     equipment.pants ?? null,
     equipment.bracelets ?? null,
+    // v5.3 — 14th slot.
+    equipment.earrings ?? null,
   ];
 
   for (const item of slots) {
