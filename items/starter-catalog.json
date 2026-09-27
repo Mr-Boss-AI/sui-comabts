@@ -1,0 +1,1731 @@
+[
+ {
+  "name": "Iron Arming Sword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 3,
+  "stats": {
+   "STR": 1
+  },
+  "price": 0.2,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   3
+  ]
+ },
+ {
+  "name": "Steel Arming Sword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 5,
+  "stats": {
+   "STR": 2
+  },
+  "price": 0.3,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   4
+  ]
+ },
+ {
+  "name": "Iron Rondel Dagger",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 3,
+  "stats": {
+   "DEX": 3
+  },
+  "price": 0.2,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   3
+  ]
+ },
+ {
+  "name": "Steel Rondel Dagger",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 5,
+  "stats": {
+   "DEX": 4
+  },
+  "price": 0.3,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   4
+  ]
+ },
+ {
+  "name": "Iron Rune Blade",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 3,
+  "stats": {
+   "INT": 5
+  },
+  "price": 0.2,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   3
+  ]
+ },
+ {
+  "name": "Steel Rune Blade",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 5,
+  "stats": {
+   "INT": 4
+  },
+  "price": 0.3,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   4
+  ]
+ },
+ {
+  "name": "Iron Flanged Mace",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 3,
+  "stats": {
+   "END": 1
+  },
+  "price": 0.2,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   3
+  ]
+ },
+ {
+  "name": "Steel Flanged Mace",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 5,
+  "stats": {
+   "END": 2
+  },
+  "price": 0.3,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   2,
+   4
+  ]
+ },
+ {
+  "name": "Tempered Arming Sword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 8,
+  "stats": {
+   "STR": 3
+  },
+  "price": 0.45,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   4,
+   7
+  ]
+ },
+ {
+  "name": "Knight's Arming Sword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 10,
+  "stats": {
+   "STR": 4
+  },
+  "price": 0.55,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   5,
+   10
+  ]
+ },
+ {
+  "name": "Tempered Rondel Dagger",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 8,
+  "stats": {
+   "DEX": 4
+  },
+  "price": 0.45,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   3,
+   6
+  ]
+ },
+ {
+  "name": "Knight's Rondel Dagger",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 10,
+  "stats": {
+   "DEX": 5
+  },
+  "price": 0.55,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   5,
+   9
+  ]
+ },
+ {
+  "name": "Tempered Rune Blade",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 8,
+  "stats": {
+   "INT": 4
+  },
+  "price": 0.45,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   3,
+   6
+  ]
+ },
+ {
+  "name": "Knight's Rune Blade",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 10,
+  "stats": {
+   "INT": 4
+  },
+  "price": 0.55,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   5,
+   9
+  ]
+ },
+ {
+  "name": "Tempered Flanged Mace",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 8,
+  "stats": {
+   "END": 3
+  },
+  "price": 0.45,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   3,
+   6
+  ]
+ },
+ {
+  "name": "Knight's Flanged Mace",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 10,
+  "stats": {
+   "END": 4
+  },
+  "price": 0.55,
+  "copies": 1,
+  "twoHanded": false,
+  "damage": [
+   5,
+   9
+  ]
+ },
+ {
+  "name": "Iron Greatsword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 3,
+  "stats": {
+   "STR": 1
+  },
+  "price": 0.2,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   2,
+   3
+  ]
+ },
+ {
+  "name": "Steel Greatsword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 5,
+  "stats": {
+   "STR": 2
+  },
+  "price": 0.3,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   3,
+   5
+  ]
+ },
+ {
+  "name": "Iron War Staff",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 3,
+  "stats": {
+   "INT": 9
+  },
+  "price": 0.2,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   2,
+   4
+  ]
+ },
+ {
+  "name": "Steel War Staff",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 5,
+  "stats": {
+   "INT": 8
+  },
+  "price": 0.3,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   3,
+   6
+  ]
+ },
+ {
+  "name": "Tempered Greatsword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 8,
+  "stats": {
+   "STR": 3
+  },
+  "price": 0.45,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   5,
+   10
+  ]
+ },
+ {
+  "name": "Knight's Greatsword",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 10,
+  "stats": {
+   "STR": 4
+  },
+  "price": 0.55,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   7,
+   14
+  ]
+ },
+ {
+  "name": "Tempered War Staff",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 8,
+  "stats": {
+   "INT": 7
+  },
+  "price": 0.45,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   4,
+   8
+  ]
+ },
+ {
+  "name": "Knight's War Staff",
+  "image": "slots/slot-weapon.png",
+  "type": "weapon",
+  "level": 10,
+  "stats": {
+   "INT": 7
+  },
+  "price": 0.55,
+  "copies": 1,
+  "twoHanded": true,
+  "damage": [
+   6,
+   12
+  ]
+ },
+ {
+  "name": "Iron Heater Shield",
+  "image": "slots/slot-shield.png",
+  "type": "shield",
+  "level": 3,
+  "stats": {
+   "ARM": 1,
+   "HP": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Heater Shield",
+  "image": "slots/slot-shield.png",
+  "type": "shield",
+  "level": 5,
+  "stats": {
+   "ARM": 1,
+   "DEF": 1,
+   "HP": 2
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Heater Shield",
+  "image": "slots/slot-shield.png",
+  "type": "shield",
+  "level": 8,
+  "stats": {
+   "ARM": 2,
+   "DEF": 1,
+   "HP": 4
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Heater Shield",
+  "image": "slots/slot-shield.png",
+  "type": "shield",
+  "level": 10,
+  "stats": {
+   "ARM": 2,
+   "DEF": 1,
+   "HP": 6
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Great Helm",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 1,
+  "stats": {
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Great Helm",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 3,
+  "stats": {
+   "HP": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Great Helm",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 5,
+  "stats": {
+   "ARM": 1,
+   "HP": 5
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Leather Hood",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 1,
+  "stats": {
+   "EVA": 3,
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Leather Hood",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 3,
+  "stats": {
+   "EVA": 3,
+   "HP": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Leather Hood",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 5,
+  "stats": {
+   "EVA": 3,
+   "HP": 5
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Seer's Circlet",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 1,
+  "stats": {
+   "INT": 3,
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Seer's Circlet",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 3,
+  "stats": {
+   "INT": 3,
+   "HP": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Seer's Circlet",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 5,
+  "stats": {
+   "INT": 3,
+   "HP": 5
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Great Helm",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 8,
+  "stats": {
+   "ARM": 1,
+   "HP": 8
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Great Helm",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 10,
+  "stats": {
+   "ARM": 2,
+   "HP": 12
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Leather Hood",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 8,
+  "stats": {
+   "EVA": 3,
+   "HP": 8
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Leather Hood",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 10,
+  "stats": {
+   "EVA": 3,
+   "HP": 12
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Seer's Circlet",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 8,
+  "stats": {
+   "INT": 2,
+   "HP": 8
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Seer's Circlet",
+  "image": "slots/slot-helmet.png",
+  "type": "helmet",
+  "level": 10,
+  "stats": {
+   "INT": 3,
+   "HP": 12
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Mail Hauberk",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 1,
+  "stats": {
+   "ARM": 1,
+   "HP": 3
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Mail Hauberk",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 3,
+  "stats": {
+   "ARM": 1,
+   "HP": 4
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Mail Hauberk",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 5,
+  "stats": {
+   "ARM": 1,
+   "HP": 6
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Leather Jerkin",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 1,
+  "stats": {
+   "EVA": 4,
+   "DEX": 2,
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Leather Jerkin",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 3,
+  "stats": {
+   "EVA": 4,
+   "DEX": 2,
+   "HP": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Leather Jerkin",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 5,
+  "stats": {
+   "EVA": 4,
+   "DEX": 3,
+   "HP": 5
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Mystic Robe",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 1,
+  "stats": {
+   "INT": 5,
+   "HP": 3
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Mystic Robe",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 3,
+  "stats": {
+   "INT": 5,
+   "HP": 5
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Mystic Robe",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 5,
+  "stats": {
+   "INT": 5,
+   "HP": 8
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Mail Hauberk",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 8,
+  "stats": {
+   "ARM": 3,
+   "HP": 12
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Mail Hauberk",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 10,
+  "stats": {
+   "ARM": 4,
+   "HP": 16
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Leather Jerkin",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 8,
+  "stats": {
+   "EVA": 3,
+   "DEX": 3,
+   "HP": 9
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Leather Jerkin",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 10,
+  "stats": {
+   "EVA": 4,
+   "DEX": 3,
+   "HP": 12
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Mystic Robe",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 8,
+  "stats": {
+   "INT": 4,
+   "HP": 15
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Mystic Robe",
+  "image": "slots/slot-chest.png",
+  "type": "chest",
+  "level": 10,
+  "stats": {
+   "INT": 5,
+   "HP": 20
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Gauntlets",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 1,
+  "stats": {
+   "CRIT": 3
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Gauntlets",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 3,
+  "stats": {
+   "ATK": 1,
+   "CRIT": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Gauntlets",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 5,
+  "stats": {
+   "ATK": 1,
+   "CRIT": 3
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Archer's Grips",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 1,
+  "stats": {
+   "ANTIEVA": 2,
+   "DEX": 1
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Archer's Grips",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 3,
+  "stats": {
+   "ANTIEVA": 2,
+   "DEX": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Archer's Grips",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 5,
+  "stats": {
+   "ANTIEVA": 2,
+   "DEX": 2
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Gauntlets",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 8,
+  "stats": {
+   "ATK": 1,
+   "CRIT": 3
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Gauntlets",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 10,
+  "stats": {
+   "ATK": 2,
+   "CRIT": 3
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Archer's Grips",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 8,
+  "stats": {
+   "ANTIEVA": 2,
+   "DEX": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Archer's Grips",
+  "image": "slots/slot-gloves.png",
+  "type": "gloves",
+  "level": 10,
+  "stats": {
+   "ANTIEVA": 2,
+   "DEX": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Greaves",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 1,
+  "stats": {
+   "HP": 1
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Greaves",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 3,
+  "stats": {
+   "HP": 2
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Greaves",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 5,
+  "stats": {
+   "ARM": 1,
+   "HP": 3
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Soft Boots",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 1,
+  "stats": {
+   "EVA": 3,
+   "DEX": 1
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Soft Boots",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 3,
+  "stats": {
+   "EVA": 3,
+   "DEX": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Soft Boots",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 5,
+  "stats": {
+   "EVA": 3,
+   "DEX": 1
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Greaves",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 8,
+  "stats": {
+   "ARM": 1,
+   "HP": 6
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Greaves",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 10,
+  "stats": {
+   "ARM": 1,
+   "HP": 9
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Soft Boots",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 8,
+  "stats": {
+   "EVA": 2,
+   "DEX": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Soft Boots",
+  "image": "slots/slot-boots.png",
+  "type": "boots",
+  "level": 10,
+  "stats": {
+   "EVA": 3,
+   "DEX": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn War Girdle",
+  "image": "slots/slot-belt.png",
+  "type": "belt",
+  "level": 1,
+  "stats": {
+   "HP": 1
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron War Girdle",
+  "image": "slots/slot-belt.png",
+  "type": "belt",
+  "level": 3,
+  "stats": {
+   "END": 1,
+   "HP": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel War Girdle",
+  "image": "slots/slot-belt.png",
+  "type": "belt",
+  "level": 5,
+  "stats": {
+   "END": 1,
+   "HP": 2
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered War Girdle",
+  "image": "slots/slot-belt.png",
+  "type": "belt",
+  "level": 8,
+  "stats": {
+   "END": 1,
+   "HP": 4
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's War Girdle",
+  "image": "slots/slot-belt.png",
+  "type": "belt",
+  "level": 10,
+  "stats": {
+   "END": 2,
+   "HP": 6
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Mail Chausses",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 1,
+  "stats": {
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Mail Chausses",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 3,
+  "stats": {
+   "HP": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Mail Chausses",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 5,
+  "stats": {
+   "ARM": 1,
+   "HP": 5
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Leather Breeches",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 1,
+  "stats": {
+   "EVA": 3,
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Leather Breeches",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 3,
+  "stats": {
+   "EVA": 3,
+   "HP": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Leather Breeches",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 5,
+  "stats": {
+   "EVA": 3,
+   "HP": 5
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Mail Chausses",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 8,
+  "stats": {
+   "ARM": 1,
+   "HP": 8
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Mail Chausses",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 10,
+  "stats": {
+   "ARM": 2,
+   "HP": 12
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Leather Breeches",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 8,
+  "stats": {
+   "EVA": 3,
+   "HP": 8
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Leather Breeches",
+  "image": "slots/slot-legs.png",
+  "type": "legs",
+  "level": 10,
+  "stats": {
+   "EVA": 3,
+   "HP": 12
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Vambraces",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 1,
+  "stats": {
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Vambraces",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 3,
+  "stats": {
+   "STR": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Vambraces",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 5,
+  "stats": {
+   "STR": 1
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Rune Wraps",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 1,
+  "stats": {
+   "CRIT": 3,
+   "INT": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Rune Wraps",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 3,
+  "stats": {
+   "CRIT": 3,
+   "INT": 2
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Rune Wraps",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 5,
+  "stats": {
+   "CRIT": 3,
+   "INT": 2
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Vambraces",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 8,
+  "stats": {
+   "DEF": 1,
+   "STR": 1
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Vambraces",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 10,
+  "stats": {
+   "DEF": 1,
+   "STR": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Rune Wraps",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 8,
+  "stats": {
+   "CRIT": 3,
+   "INT": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Rune Wraps",
+  "image": "slots/slot-bracers.png",
+  "type": "bracers",
+  "level": 10,
+  "stats": {
+   "CRIT": 3,
+   "INT": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Amulet of Fury",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 1,
+  "stats": {
+   "CRIT": 3,
+   "ANTICRIT": 3
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Amulet of Fury",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 3,
+  "stats": {
+   "CRIT": 3,
+   "ANTICRIT": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Amulet of Fury",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 5,
+  "stats": {
+   "CRIT": 3,
+   "ANTICRIT": 3
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Talisman of Shadows",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 1,
+  "stats": {
+   "EVA": 2,
+   "ANTIEVA": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Talisman of Shadows",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 3,
+  "stats": {
+   "EVA": 2,
+   "ANTIEVA": 2
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Talisman of Shadows",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 5,
+  "stats": {
+   "EVA": 2,
+   "ANTIEVA": 2
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Amulet of Fury",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 8,
+  "stats": {
+   "CRIT": 3,
+   "ANTICRIT": 3
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Amulet of Fury",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 10,
+  "stats": {
+   "CRIT": 3,
+   "ANTICRIT": 3
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Talisman of Shadows",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 8,
+  "stats": {
+   "EVA": 2,
+   "ANTIEVA": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Talisman of Shadows",
+  "image": "slots/slot-necklace.png",
+  "type": "necklace",
+  "level": 10,
+  "stats": {
+   "EVA": 2,
+   "ANTIEVA": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Ring of Strength",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 1,
+  "stats": {
+   "STR": 1
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Ring of Strength",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 3,
+  "stats": {
+   "STR": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Ring of Strength",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 5,
+  "stats": {
+   "STR": 1
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Ring of Dexterity",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 1,
+  "stats": {
+   "DEX": 1
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Ring of Dexterity",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 3,
+  "stats": {
+   "DEX": 2
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Ring of Dexterity",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 5,
+  "stats": {
+   "DEX": 2
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Ring of Intuition",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 1,
+  "stats": {
+   "INT": 3
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Ring of Intuition",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 3,
+  "stats": {
+   "INT": 3
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Ring of Intuition",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 5,
+  "stats": {
+   "INT": 3
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Worn Ring of Endurance",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 1,
+  "stats": {
+   "HP": 2
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Ring of Endurance",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 3,
+  "stats": {
+   "END": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Ring of Endurance",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 5,
+  "stats": {
+   "END": 1
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Ring of Strength",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 8,
+  "stats": {
+   "STR": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Ring of Strength",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 10,
+  "stats": {
+   "STR": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Ring of Dexterity",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 8,
+  "stats": {
+   "DEX": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Ring of Dexterity",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 10,
+  "stats": {
+   "DEX": 3
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Ring of Intuition",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 8,
+  "stats": {
+   "INT": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Ring of Intuition",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 10,
+  "stats": {
+   "INT": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Ring of Endurance",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 8,
+  "stats": {
+   "END": 2
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Ring of Endurance",
+  "image": "slots/slot-ring.png",
+  "type": "ring",
+  "level": 10,
+  "stats": {
+   "END": 2
+  },
+  "price": 0.55,
+  "copies": 1
+ },
+ {
+  "name": "Worn Earrings",
+  "image": "slots/slot-earrings.png",
+  "type": "earrings",
+  "level": 1,
+  "stats": {
+   "EVA": 1,
+   "ANTIEVA": 1
+  },
+  "price": 0.1,
+  "copies": 1
+ },
+ {
+  "name": "Iron Earrings",
+  "image": "slots/slot-earrings.png",
+  "type": "earrings",
+  "level": 3,
+  "stats": {
+   "EVA": 1,
+   "ANTIEVA": 1
+  },
+  "price": 0.2,
+  "copies": 1
+ },
+ {
+  "name": "Steel Earrings",
+  "image": "slots/slot-earrings.png",
+  "type": "earrings",
+  "level": 5,
+  "stats": {
+   "EVA": 1,
+   "ANTIEVA": 1
+  },
+  "price": 0.3,
+  "copies": 1
+ },
+ {
+  "name": "Tempered Earrings",
+  "image": "slots/slot-earrings.png",
+  "type": "earrings",
+  "level": 8,
+  "stats": {
+   "EVA": 1,
+   "ANTIEVA": 1
+  },
+  "price": 0.45,
+  "copies": 1
+ },
+ {
+  "name": "Knight's Earrings",
+  "image": "slots/slot-earrings.png",
+  "type": "earrings",
+  "level": 10,
+  "stats": {
+   "EVA": 1,
+   "ANTIEVA": 1
+  },
+  "price": 0.55,
+  "copies": 1
+ }
+]
