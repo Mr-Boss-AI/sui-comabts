@@ -248,7 +248,8 @@ export function FightArena() {
   const hasShield = meEquip.offhand?.itemType === ITEM_TYPES.SHIELD;
   const hasDualWield = meEquip.offhand?.itemType === ITEM_TYPES.WEAPON;
   const maxAttacks = hasDualWield ? 2 : 1;
-  const maxBlocks = hasShield ? 3 : hasDualWield ? 1 : 2;
+  // v5.3 — dual-wield guards 2 zones like a normal weapon (was 1).
+  const maxBlocks = hasShield ? 3 : 2;
 
   // Local-only NFT portrait (cosmetic, no chain). Read once per render
   // from localStorage; readPortrait is pure + null-safe so SSR + missing
@@ -267,7 +268,12 @@ export function FightArena() {
   const handleAttackToggle = useCallback(
     (zone: Zone) => {
       setAttackZones((prev) => {
-        if (prev.includes(zone)) return prev.filter((z) => z !== zone);
+        const count = prev.filter((z) => z === zone).length;
+        // v5.3 — dual-wield may strike the same zone twice: clicking a
+        // chosen zone again while a strike is free doubles it; a third
+        // click clears it.
+        if (count === 1 && maxAttacks > 1 && prev.length < maxAttacks) return [...prev, zone];
+        if (count > 0) return prev.filter((z) => z !== zone);
         if (prev.length >= maxAttacks) return [...prev.slice(1), zone];
         return [...prev, zone];
       });

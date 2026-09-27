@@ -83,6 +83,13 @@ export interface DerivedStats {
   evasionChance: number;
   armor: number;
   defense: number;
+  /** v5.3 — Fraction of a blocked hit's damage that still lands on THIS
+   *  fighter. >0 only when this fighter blocks with a shield. */
+  blockLeak?: number;
+  /** v5.3 — Multiplier on final damage per landed hit (after armor):
+   *  dual-wield strikes are lighter, two-hand strikes heavier. Applied
+   *  after armor so the balance is the same at every level. */
+  damageMult?: number;
 }
 
 // === Items & Equipment ===

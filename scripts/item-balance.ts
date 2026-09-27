@@ -146,7 +146,6 @@ function buildItem(s: typeof SLOTS[number], level: number, rarity: typeof RARITI
 // Extra rows for the design tables (not part of the validated default set).
 const EXTRA_SLOTS: typeof SLOTS = [
   { slot: 'Weapon (2-hand, no shield)', chain: 'weapon', type: 1, slotType: 2, share: 0.32, mix: { weaponAvg: 0.8, strength: 0.2 } },
-  { slot: 'Offhand weapon (dual-wield)', chain: 'offhand', type: 1, slotType: 0, share: 0.10, mix: { damage: 0.5, critBonus: 0.5 } },
   { slot: 'Earrings (needs 14th slot)', chain: 'earrings', type: 0, slotType: 0, share: 0.03, mix: { evasion: 0.5, antiEvasion: 0.5 } },
 ];
 

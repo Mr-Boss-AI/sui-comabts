@@ -163,7 +163,21 @@ export const GAME_CONSTANTS = {
   DEFAULT_BLOCK_ZONES: 2,
   SHIELD_BLOCK_ZONES: 3,
   DUAL_WIELD_ATTACK_ZONES: 2,
-  DUAL_WIELD_BLOCK_ZONES: 1,
+  // v5.3 — dual-wield keeps a normal 2-zone guard (was 1).
+  DUAL_WIELD_BLOCK_ZONES: 2,
+  // v5.3 offhand balance (tuned with scripts/offhand-balance.ts so shield,
+  // dual-wield and two-hand builds of equal gear win ~50% against each other):
+  //   OFFHAND_WEAPON_DAMAGE_FACTOR — share of the offhand weapon's average
+  //     damage added to attack power when dual-wielding.
+  //   SHIELD_BLOCK_LEAK — share of a shield-blocked hit that still lands
+  //     (0 = shield unchanged; dual-wield's 2nd block already evens it out).
+  //   TWO_HAND_DAMAGE_MULT — landed-damage multiplier with a 2-hand weapon.
+  //   DUAL_WIELD_HIT_FACTOR — each dual-wield strike lands this share of
+  //     attack power (two lighter strikes instead of one full one).
+  OFFHAND_WEAPON_DAMAGE_FACTOR: 0.5,
+  DUAL_WIELD_HIT_FACTOR: 0.725,
+  SHIELD_BLOCK_LEAK: 0,
+  TWO_HAND_DAMAGE_MULT: 1.5,
   SHIELD_BLOCK_LINES: [
     ['head', 'chest', 'stomach'],
     ['chest', 'stomach', 'belt'],

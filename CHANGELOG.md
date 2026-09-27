@@ -22,6 +22,9 @@ All notable changes to SUI Combats. Format follows
 ### Fixed
 - **combat:** `crit_chance_bonus` was added to the crit *multiplier* (+10 → crits ~11.5×). All 13 chain item stats now wired (`crit_multiplier_bonus`, `evasion_bonus`, `anti_crit_bonus`, `anti_evasion_bonus` were dropped).
 
+### Changed
+- **combat — fighting styles rebalanced** (`scripts/offhand-balance.ts`): dual-wield now 2 strikes (same zone allowed) + 2 guards, strikes land 72.5%, offhand weapon adds 50% of its damage; two-handers ×1.5 landed damage; shield unchanged. Styles win 46–57% against each other from level 8 up (was: shield 86% vs empty offhand, 2-hand 14%). Frontend picker supports double strike (×2) and the 2-zone dual-wield guard. `scripts/qa-offhand-rules.ts` 17/17.
+
 ### Added
 - **guild.move:** guilds (1 SUI fee, 30 members, Leader/Officer/Member, invite/open join, treasury, disband, war-lock hook). 44 Move tests.
 - `scripts/e2e-localnet.ts` — full publish + characters + guilds + wagers + items + battles on a local chain (102/102).

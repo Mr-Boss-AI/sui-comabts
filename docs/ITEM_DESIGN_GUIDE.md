@@ -15,8 +15,8 @@
 
 | Slot | `item_type` | `slot_type` | Notes |
 |---|---|---|---|
-| Weapon (1-hand) | 1 | 0 | Main hand. A 1-hand weapon can also go in the offhand (dual-wield). |
-| Weapon (2-hand) | 1 | 2 | Takes weapon **and** offhand slot. See warning in §6. |
+| Weapon (1-hand) | 1 | 0 | Main hand, or offhand for dual-wield (§6). |
+| Weapon (2-hand) | 1 | 2 | Takes weapon **and** offhand slot. ×1.5 landed damage (§6). |
 | Shield | 2 | 1 | Offhand only. |
 | Helmet | 3 | 0 | |
 | Chest | 4 | 0 | |
@@ -124,27 +124,35 @@ Full set of each rarity vs the rarity below it, same level:
 
 ---
 
-## 6. ⚠️ Balance problems found in the engine (not item problems)
+## 6. Fighting styles (v5.3 rules — balanced)
 
-| Level | Empty shield (0 stats) vs no shield | Rare 2-hander set vs Rare 1-hand+shield set |
-|---|---|---|
-| 1 | 85% | 14% |
-| 10 | 86% | 15% |
-| 20 | 87% | 13% |
+| Style | Gear | Strikes | Guards | Special |
+|---|---|---|---|---|
+| Sword & shield | 1-hand weapon + shield | 1 | 3 (a line) | Unchanged. |
+| Dual-wield | 1-hand weapon in **both** hands | 2 — may hit the **same zone twice** | 2 | Each strike lands 72.5% damage; offhand weapon adds 50% of its damage + all its stats. Double strike into a guarded zone = both blocked (risk), into an open zone = both land (reward). |
+| Two-hander | 2-hand weapon (`slot_type` 2) | 1 | 2 | Landed damage ×1.5. |
 
-1. **Shields are too strong.** A shield with *zero stats* wins ~86% against no shield, because it blocks 3 zones instead of 2. Dual-wield is balanced against shields (≈49%).
-2. **Two-handed weapons are useless.** A Rare 2-hander loses ~86% against Rare 1-hand + shield, even with 60% more damage. Don't mint 2-handers until combat gives them a real bonus.
-3. **INT is a trap stat.** ~20 INT ≈ 1.4 STR at level 1. INT builds lose most fights.
-4. **Chain budget ignores level.** A Level 1 Legendary may legally hold 160 points (e.g. ARM +100) — unbeatable at level 1. Stick to the tables, or fix it on-chain in the v5.3 publish with a level-scaled budget.
+Tuned with `scripts/offhand-balance.ts` — same-rarity gear, win rate of the first style:
 
-These need a combat / contract decision before v5.3 ships (see chat).
+| Gear | Level | Dual vs shield | 2-hand vs shield | 2-hand vs dual |
+|---|---|---|---|---|
+| Common | 3 / 8 / 12 / 18 | 50 / 49 / 48 / 46% | 48 / 48 / 50 / 50% | 48 / 50 / 51 / 53% |
+| Rare | 3 / 8 / 12 / 18 | 64 / 55 / 50 / 48% | 56 / 51 / 51 / 50% | 48 / 50 / 52 / 50% |
+| Legendary | 3 / 8 / 12 / 18 | 71 / 57 / 53 / 51% | 56 / 51 / 51 / 50% | 41 / 46 / 47 / 50% |
+
+- Balanced from level 8 up. At level 3 high-rarity dual-wield is still ahead because low-level stats round to tiny whole numbers — keep Rare+ weapons out of levels 1–4.
+- Leaving the offhand **empty** is simply weaker (a free slot unused), as intended.
+
+### Still open (need a decision)
+1. **INT is a trap stat.** ~20 INT ≈ 1.4 STR at level 1. INT builds lose most fights.
+2. **Chain budget ignores level.** A Level 1 Legendary may legally hold 160 points (e.g. ARM +100) — unbeatable at level 1. Stick to the tables, or fix it on-chain in the v5.3 publish with a level-scaled budget.
 
 ---
 
 ## 7. Item tables (copy a cell into the mint call)
 
 `DMG a-b` → `min_damage = a`, `max_damage = b`. Everything else maps to its `*_bonus` field. Unlisted fields = 0.
-Small numbers at low levels are intentional: at level 1 one point of ARM already swings a fight by ~12%.
+For dual-wield, put a second **Weapon (1-hand)** in the offhand. Small numbers at low levels are intentional: at level 1 one point of ARM already swings a fight by ~12%.
 
 ### Level 1 items (level_req = 1)
 
@@ -164,7 +172,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | HP +1 | HP +1 | HP +2 | HP +2 | END +1 |
 | Ring (Dexterity) | DEX +1 | DEX +1 | DEX +1 | DEX +1 | DEX +2 |
 | Weapon (2-hand, no shield) | DMG 1-1, STR +1 | DMG 1-2, STR +1 | DMG 1-2, STR +1 | DMG 2-3, STR +1 | DMG 2-4, STR +1 |
-| Offhand weapon (dual-wield) | CRIT% +4 | CRIT% +5 | CRIT% +6 | CRIT% +8 | ATK +1, CRIT% +10 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 2 items (level_req = 2)
@@ -185,7 +192,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | HP +1 | HP +2 | HP +2 | END +1 | END +1 |
 | Ring (Dexterity) | DEX +1 | DEX +1 | DEX +1 | DEX +2 | DEX +2 |
 | Weapon (2-hand, no shield) | DMG 1-2, STR +1 | DMG 1-2, STR +1 | DMG 2-3, STR +1 | DMG 2-4, STR +1 | DMG 2-4, STR +2 |
-| Offhand weapon (dual-wield) | CRIT% +4 | CRIT% +5 | CRIT% +7 | ATK +1, CRIT% +8 | ATK +1, CRIT% +10 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 3 items (level_req = 3)
@@ -206,7 +212,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | HP +2 | HP +2 | END +1 | END +1 | END +1 |
 | Ring (Dexterity) | DEX +1 | DEX +1 | DEX +2 | DEX +2 | DEX +3 |
 | Weapon (2-hand, no shield) | DMG 1-2, STR +1 | DMG 2-3, STR +1 | DMG 2-4, STR +1 | DMG 3-5, STR +2 | DMG 3-6, STR +2 |
-| Offhand weapon (dual-wield) | CRIT% +4 | CRIT% +5 | ATK +1, CRIT% +7 | ATK +1, CRIT% +8 | ATK +1, CRIT% +10 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 4 items (level_req = 4)
@@ -227,7 +232,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | HP +2 | HP +3 | END +1 | END +1 | END +1 |
 | Ring (Dexterity) | DEX +1 | DEX +2 | DEX +2 | DEX +2 | DEX +3 |
 | Weapon (2-hand, no shield) | DMG 2-3, STR +1 | DMG 2-4, STR +1 | DMG 2-5, STR +2 | DMG 3-6, STR +2 | DMG 4-7, STR +2 |
-| Offhand weapon (dual-wield) | CRIT% +4 | ATK +1, CRIT% +5 | ATK +1, CRIT% +7 | ATK +1, CRIT% +8 | ATK +1, CRIT% +11 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 5 items (level_req = 5)
@@ -248,7 +252,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | HP +2 | END +1 | END +1 | END +1 | END +1 |
 | Ring (Dexterity) | DEX +1 | DEX +2 | DEX +2 | DEX +3 | DEX +4 |
 | Weapon (2-hand, no shield) | DMG 2-3, STR +1 | DMG 2-4, STR +1 | DMG 3-6, STR +2 | DMG 4-7, STR +2 | DMG 5-9, STR +3 |
-| Offhand weapon (dual-wield) | CRIT% +4 | ATK +1, CRIT% +5 | ATK +1, CRIT% +7 | ATK +1, CRIT% +8 | ATK +1, CRIT% +11 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 6 items (level_req = 6)
@@ -269,7 +272,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | END +1 | END +1 | END +1 | END +1 | END +1 |
 | Ring (Dexterity) | DEX +2 | DEX +2 | DEX +3 | DEX +3 | DEX +4 |
 | Weapon (2-hand, no shield) | DMG 2-4, STR +1 | DMG 3-5, STR +2 | DMG 4-7, STR +2 | DMG 4-8, STR +3 | DMG 6-10, STR +3 |
-| Offhand weapon (dual-wield) | ATK +1, CRIT% +4 | ATK +1, CRIT% +6 | ATK +1, CRIT% +7 | ATK +1, CRIT% +9 | ATK +2, CRIT% +11 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 8 items (level_req = 8)
@@ -290,7 +292,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | END +1 | END +1 | END +1 | END +1 | END +2 |
 | Ring (Dexterity) | DEX +2 | DEX +2 | DEX +3 | DEX +4 | DEX +5 |
 | Weapon (2-hand, no shield) | DMG 3-6, STR +2 | DMG 4-8, STR +2 | DMG 6-10, STR +3 | DMG 7-13, STR +4 | DMG 9-16, STR +5 |
-| Offhand weapon (dual-wield) | ATK +1, CRIT% +4 | ATK +1, CRIT% +6 | ATK +1, CRIT% +7 | ATK +2, CRIT% +9 | ATK +2, CRIT% +11 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 10 items (level_req = 10)
@@ -311,7 +312,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | END +1 | END +1 | END +2 | END +2 | END +2 |
 | Ring (Dexterity) | DEX +2 | DEX +2 | DEX +3 | DEX +4 | DEX +5 |
 | Weapon (2-hand, no shield) | DMG 4-8, STR +2 | DMG 6-11, STR +3 | DMG 7-13, STR +4 | DMG 9-17, STR +4 | DMG 11-21, STR +6 |
-| Offhand weapon (dual-wield) | ATK +1, CRIT% +4 | ATK +2, CRIT% +5 | ATK +2, CRIT% +6 | ATK +2, CRIT% +8 | ATK +3, CRIT% +10 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 12 items (level_req = 12)
@@ -332,7 +332,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | END +1 | END +2 | END +2 | END +2 | END +3 |
 | Ring (Dexterity) | DEX +2 | DEX +3 | DEX +4 | DEX +5 | DEX +6 |
 | Weapon (2-hand, no shield) | DMG 5-10, STR +3 | DMG 7-13, STR +4 | DMG 9-16, STR +5 | DMG 11-20, STR +6 | DMG 14-25, STR +7 |
-| Offhand weapon (dual-wield) | ATK +1, CRIT% +4 | ATK +2, CRIT% +5 | ATK +2, CRIT% +6 | ATK +3, CRIT% +8 | ATK +4, CRIT% +9 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 15 items (level_req = 15)
@@ -353,7 +352,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | END +1 | END +2 | END +2 | END +3 | END +4 |
 | Ring (Dexterity) | DEX +2 | DEX +3 | DEX +4 | DEX +5 | DEX +6 |
 | Weapon (2-hand, no shield) | DMG 7-13, STR +3 | DMG 9-17, STR +4 | DMG 12-22, STR +5 | DMG 14-27, STR +7 | DMG 18-34, STR +9 |
-| Offhand weapon (dual-wield) | ATK +2, CRIT% +3 | ATK +3, CRIT% +5 | ATK +3, CRIT% +6 | ATK +4, CRIT% +7 | ATK +5, CRIT% +9 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ### Level 18 items (level_req = 18)
@@ -374,7 +372,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | END +2 | END +3 | END +4 | END +4 | END +5 |
 | Ring (Dexterity) | DEX +2 | DEX +3 | DEX +4 | DEX +5 | DEX +6 |
 | Weapon (2-hand, no shield) | DMG 9-17, STR +3 | DMG 12-22, STR +4 | DMG 15-28, STR +6 | DMG 19-35, STR +7 | DMG 24-44, STR +9 |
-| Offhand weapon (dual-wield) | ATK +2, CRIT% +3 | ATK +3, CRIT% +4 | ATK +4, CRIT% +6 | ATK +5, CRIT% +7 | ATK +6, CRIT% +9 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 |
 
 ### Level 20 items (level_req = 20)
@@ -395,7 +392,6 @@ Small numbers at low levels are intentional: at level 1 one point of ARM already
 | Ring (Endurance) | END +2 | END +3 | END +4 | END +5 | END +6 |
 | Ring (Dexterity) | DEX +2 | DEX +3 | DEX +4 | DEX +5 | DEX +6 |
 | Weapon (2-hand, no shield) | DMG 10-19, STR +4 ⚠️ over budget | DMG 13-25, STR +5 | DMG 17-31, STR +6 | DMG 21-39, STR +7 | DMG 26-48, STR +9 |
-| Offhand weapon (dual-wield) | ATK +3, CRIT% +3 | ATK +4, CRIT% +4 | ATK +5, CRIT% +6 | ATK +6, CRIT% +7 | ATK +7, CRIT% +9 |
 | Earrings (needs 14th slot) | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +1, ANTIEVA% +1 | EVA% +2, ANTIEVA% +2 |
 
 ---

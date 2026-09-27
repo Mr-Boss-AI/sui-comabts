@@ -188,10 +188,26 @@ export function deriveCombatStats(
   const weaponBonus = equip.weaponMinDamage > 0
     ? (equip.weaponMinDamage + equip.weaponMaxDamage) / 2
     : 0;
-  const attackPower = baseWeaponDmg + weaponBonus
+  let attackPower = baseWeaponDmg + weaponBonus
     + effectiveStr * GAME_CONSTANTS.STR_DAMAGE_BONUS
     + effectiveDex * GAME_CONSTANTS.DEX_DAMAGE_BONUS
     + equip.damageBonus;
+
+  // v5.3 — offhand style. Dual-wield adds part of the offhand weapon's
+  // damage; a two-hand weapon multiplies attack power; a shield makes
+  // blocked hits leak a little damage (shield nerf).
+  const offhandType = getOffhandType(character.equipment);
+  const offhand = character.equipment.offhand;
+  if (offhandType === 'dual_wield' && offhand) {
+    const offAvg = ((offhand.minDamage || 0) + (offhand.maxDamage || 0)) / 2;
+    attackPower += offAvg * GAME_CONSTANTS.OFFHAND_WEAPON_DAMAGE_FACTOR;
+  }
+  const damageMult = offhandType === 'dual_wield'
+    ? GAME_CONSTANTS.DUAL_WIELD_HIT_FACTOR
+    : character.equipment.weapon?.slotType === 2 && !offhand
+      ? GAME_CONSTANTS.TWO_HAND_DAMAGE_MULT
+      : 1;
+  const blockLeak = offhandType === 'shield' ? GAME_CONSTANTS.SHIELD_BLOCK_LEAK : 0;
 
   // Crit (from INT + item crit chance, reduced by opponent END + opponent
   // anti-crit items). v5.3 — item crit_chance_bonus is percentage points of
@@ -235,6 +251,8 @@ export function deriveCombatStats(
     evasionChance: Math.max(0, evasionChance),
     armor,
     defense,
+    blockLeak,
+    damageMult,
   };
 }
 
@@ -261,7 +279,12 @@ function resolveAttack(
   defenderStats: DerivedStats
 ): HitResult {
   if (defenderBlockZones.includes(attackZone)) {
-    return { zone: attackZone, blocked: true, dodged: false, crit: false, damage: 0 };
+    // v5.3 — a shield block still lets `blockLeak` of the raw hit through.
+    const leak = defenderStats.blockLeak ?? 0;
+    const leaked = leak > 0
+      ? Math.round(attackerStats.attackPower * randomFloat(GAME_CONSTANTS.DAMAGE_RANGE_LOW, GAME_CONSTANTS.DAMAGE_RANGE_HIGH) * leak * 100) / 100
+      : 0;
+    return { zone: attackZone, blocked: true, dodged: false, crit: false, damage: leaked };
   }
 
   const evasionRoll = Math.random() * 100;
@@ -286,6 +309,8 @@ function resolveAttack(
   } else {
     damage = Math.max(1, rawDamage - defenderStats.armor - defenderStats.defense);
   }
+  // v5.3 — dual-wield / two-hand multiplier on the landed damage.
+  damage = Math.max(1, damage * (attackerStats.damageMult ?? 1));
 
   return {
     zone: attackZone,
@@ -357,8 +382,8 @@ export function validateTurnAction(
     }
   }
 
-  // Normal weapon: 2-zone adjacent line
-  if (offhand === 'none' && action.blockZones.length === 2) {
+  // Normal weapon / dual-wield (v5.3): 2-zone adjacent line
+  if ((offhand === 'none' || offhand === 'dual_wield') && action.blockZones.length === 2) {
     if (!isValidBlockLine(action.blockZones)) {
       return { valid: false, error: 'Block zones must be 2 adjacent zones' };
     }
@@ -388,8 +413,6 @@ export function generateRandomAction(offhand: OffhandType): TurnAction {
   if (offhand === 'shield') {
     const lines = GAME_CONSTANTS.SHIELD_BLOCK_LINES;
     blockZones = [...lines[randomInt(0, lines.length - 1)]] as Zone[];
-  } else if (offhand === 'dual_wield') {
-    blockZones = [allZones[randomInt(0, allZones.length - 1)]];
   } else {
     // Normal: pick a random 2-adjacent block line
     const lines = GAME_CONSTANTS.BLOCK_LINES;

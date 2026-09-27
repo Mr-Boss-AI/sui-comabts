@@ -78,10 +78,8 @@ export function ZoneSelector({
   function handleBlockClick(zone: Zone) {
     if (shieldMode) {
       onBlockPairSelect(SHIELD_LINES[zone]);
-    } else if (dualWieldMode) {
-      if (selectedBlock.includes(zone)) onBlockPairSelect([]);
-      else onBlockPairSelect([zone]);
     } else {
+      // Normal weapon and (v5.3) dual-wield: 2 adjacent zones.
       const pair = BLOCK_PAIRS[zone];
       if (selectedBlock.length === 2 && selectedBlock.includes(pair[0]) && selectedBlock.includes(pair[1])) {
         onBlockPairSelect([]);
@@ -101,6 +99,7 @@ export function ZoneSelector({
         onAttackToggle={onAttackToggle}
         onBlockClick={handleBlockClick}
         shieldMode={shieldMode}
+        dualWieldMode={dualWieldMode}
         disabled={disabled}
       />
     );
@@ -277,6 +276,8 @@ interface ZoneSelectorListProps {
   onAttackToggle: (zone: Zone) => void;
   onBlockClick: (zone: Zone) => void;
   shieldMode?: boolean;
+  /** v5.3 — enables the "×2" double-strike label. */
+  dualWieldMode?: boolean;
   disabled?: boolean;
 }
 
@@ -466,6 +467,7 @@ function ZoneSelectorList({
   onAttackToggle,
   onBlockClick,
   shieldMode,
+  dualWieldMode,
   disabled,
 }: ZoneSelectorListProps) {
   /**
@@ -518,6 +520,7 @@ function ZoneSelectorList({
           ATK{" "}
           <span style={{ color: "var(--sc-bronze)", fontWeight: 700 }}>
             {selectedAttack.length}/{maxAttacks}
+            {dualWieldMode ? " · tap twice = ×2" : ""}
           </span>
         </div>
         <div aria-hidden />
@@ -566,6 +569,7 @@ function ZoneSelectorList({
                 }}
               >
                 {ZONE_LABELS[zone].toUpperCase()}
+                {selectedAttack.filter((z) => z === zone).length > 1 ? " ×2" : ""}
               </div>
               <ZoneActionButton
                 kind="blk"
