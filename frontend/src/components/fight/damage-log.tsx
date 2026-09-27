@@ -135,6 +135,8 @@ export function DamageLog({ log, fight, myAddress }: DamageLogProps) {
 
 function formatMyAttack(hit: HitResult): string {
   const zone = ZONE_LABELS[hit.zone];
+  // v5.3 — a crit can smash through a block for part of its damage.
+  if (hit.blocked && hit.crit && hit.damage > 0) return `You → ${zone} · CRIT THROUGH BLOCK ${hit.damage.toFixed(1)}`;
   if (hit.blocked) return `You → ${zone} · BLOCKED`;
   if (hit.dodged) return `You → ${zone} · DODGED`;
   if (hit.crit) return `You → ${zone} · CRIT ${hit.damage.toFixed(1)}`;
@@ -143,6 +145,7 @@ function formatMyAttack(hit: HitResult): string {
 
 function formatOppAttack(hit: HitResult): string {
   const zone = ZONE_LABELS[hit.zone];
+  if (hit.blocked && hit.crit && hit.damage > 0) return `Foe → ${zone} · CRIT THROUGH YOUR BLOCK ${hit.damage.toFixed(1)}`;
   if (hit.blocked) return `Foe → ${zone} · YOU BLOCKED`;
   if (hit.dodged) return `Foe → ${zone} · YOU DODGED`;
   if (hit.crit) return `Foe → ${zone} · CRIT ${hit.damage.toFixed(1)}`;
@@ -150,6 +153,7 @@ function formatOppAttack(hit: HitResult): string {
 }
 
 function hitStyleOf(hit: HitResult, isMine: boolean): { color: string; fontWeight: number } {
+  if (hit.blocked && hit.crit && hit.damage > 0) return { color: "var(--sc-bronze)", fontWeight: 800 };
   if (hit.blocked) return { color: "var(--sc-steel)", fontWeight: 600 };
   if (hit.dodged) return { color: "var(--fg-3)", fontWeight: 500 };
   if (hit.crit) return { color: "var(--sc-bronze)", fontWeight: 800 };

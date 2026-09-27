@@ -22,13 +22,18 @@ const FIGHTS = Number(process.env.FIGHTS ?? 1500);
 const TABLE_LEVELS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20];
 
 // Contract budgets (contracts/sources/item.move) — sum of all *_bonus + max_damage.
+// minLevel = v5.3 on-chain rarity gate (item.move MIN_LEVEL_*).
 const RARITIES = [
-  { name: 'Common', id: 1, budget: 20, setEdges: 5.0 },
-  { name: 'Uncommon', id: 2, budget: 40, setEdges: 6.5 },
-  { name: 'Rare', id: 3, budget: 70, setEdges: 8.2 },
-  { name: 'Epic', id: 4, budget: 110, setEdges: 10.2 },
-  { name: 'Legendary', id: 5, budget: 160, setEdges: 12.8 },
+  { name: 'Common', id: 1, budget: 20, setEdges: 5.0, minLevel: 1 },
+  { name: 'Uncommon', id: 2, budget: 40, setEdges: 6.5, minLevel: 3 },
+  { name: 'Rare', id: 3, budget: 70, setEdges: 8.2, minLevel: 5 },
+  { name: 'Epic', id: 4, budget: 110, setEdges: 10.2, minLevel: 8 },
+  { name: 'Legendary', id: 5, budget: 160, setEdges: 12.8, minLevel: 11 },
 ];
+const MIN_HAND_ITEM_LEVEL = 3; // weapons + shields (item.move)
+const isHand = (type: number) => type === 1 || type === 2;
+const gated = (type: number, level: number, r: { minLevel: number }) =>
+  level < r.minLevel || (isHand(type) && level < MIN_HAND_ITEM_LEVEL);
 
 // Stat keys follow the server StatBonuses shape; weaponAvg is the weapon's
 // (min+max)/2. Counter stats are priced off the stat they counter.
@@ -161,6 +166,7 @@ function fmt(b: Built): string {
 function setChar(id: string, level: number, rarity: typeof RARITIES[number] | null) {
   const equipment: any = { ...EMPTY };
   if (rarity) for (const s of SLOTS) {
+    if (gated(s.type, level, rarity)) continue;
     const b = buildItem(s, level, rarity);
     equipment[s.chain] = { statBonuses: b.bonus, minDamage: b.min, maxDamage: b.max, itemType: b.type, slotType: b.slotType };
   }
@@ -176,6 +182,7 @@ for (const L of TABLE_LEVELS) {
   out.push(`|---|${RARITIES.map(() => '---').join('|')}|`);
   for (const s of [...SLOTS, ...EXTRA_SLOTS]) {
     const cells = RARITIES.map((r) => {
+      if (s.type !== 0 && gated(s.type, L, r)) return '—';
       const b = buildItem(s, L, r);
       if (b.budgetUsed > r.budget) { overBudget++; return `${fmt(b)} ⚠️ over budget`; }
       return fmt(b);
@@ -187,10 +194,11 @@ for (const L of TABLE_LEVELS) {
 const val: string[] = [];
 val.push('| Level | Common set vs naked | Uncommon vs Common | Rare vs Uncommon | Epic vs Rare | Legendary vs Epic |');
 val.push('|---|---|---|---|---|---|');
-for (const L of [1, 5, 10, 15, 20]) {
+for (const L of [1, 3, 5, 8, 11, 15, 20]) {
   const row: string[] = [];
   let prev: any = setChar('P', L, null);
   for (const r of RARITIES) {
+    if (L < r.minLevel) { row.push('—'); continue; }
     const cur = setChar('C', L, r);
     row.push(`${Math.round(fight(cur, prev, FIGHTS) * 100)}%`);
     prev = { ...cur, id: 'P', walletAddress: 'P' };

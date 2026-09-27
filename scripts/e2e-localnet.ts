@@ -381,10 +381,10 @@ async function main() {
 
   // ------------------------------------------------------------ items
   section('Items — mint (budget rules), transfer, equip');
-  const mint = (name: string, type: number, rarity: number, slotType: number, b: number[], minD: number, maxD: number) => (tx: Transaction) => {
+  const mint = (name: string, type: number, rarity: number, slotType: number, b: number[], minD: number, maxD: number, level = 3) => (tx: Transaction) => {
     const item = tx.moveCall({ target: t('item', 'mint_item_admin'), arguments: [
       tx.object(ADMIN), tx.pure.string(name), tx.pure.string(`ipfs://${name.toLowerCase().replace(/ /g, '-')}`),
-      tx.pure.u8(type), tx.pure.u8(0), tx.pure.u8(1), tx.pure.u8(rarity), tx.pure.u8(slotType),
+      tx.pure.u8(type), tx.pure.u8(0), tx.pure.u8(level), tx.pure.u8(rarity), tx.pure.u8(slotType),
       ...b.map((v) => tx.pure.u16(v)), tx.pure.u16(minD), tx.pure.u16(maxD),
     ] });
     void item;
@@ -393,6 +393,11 @@ async function main() {
   const Z = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   const sword = [2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0]; // + dmg 3-8 → budget 12/20
   await mustAbort(TREASURY, 'mint Common with 25 STR (budget 20)', 'item', 5, mint('Greedy Blade', 1, 1, 0, [25, ...Z.slice(1)], 1, 2));
+  await mustAbort(TREASURY, 'v5.3 gate: weapon at level 2', 'item', 9, mint('Baby Sword', 1, 1, 0, sword, 3, 8, 2));
+  await mustAbort(TREASURY, 'v5.3 gate: shield at level 1', 'item', 9, mint('Baby Shield', 2, 1, 1, Z, 0, 0, 1));
+  await mustAbort(TREASURY, 'v5.3 gate: Legendary helmet at level 10', 'item', 8, mint('Early Crown', 3, 5, 0, [0, 0, 0, 0, 5, ...Z.slice(5)], 0, 0, 10));
+  await mustAbort(TREASURY, 'v5.3 gate: Uncommon helmet at level 2', 'item', 8, mint('Early Cap', 3, 2, 0, [0, 0, 0, 0, 5, ...Z.slice(5)], 0, 0, 2));
+  await mustRun(TREASURY, 'v5.3 gate: Common helmet at level 1 is allowed', mint('Leather Cap', 3, 1, 0, [0, 0, 0, 0, 5, ...Z.slice(5)], 0, 0, 1));
   await mustAbort(TREASURY, 'mint shield as mainhand', 'item', 6, mint('Wrong Shield', 2, 1, 0, Z, 0, 0));
   await mustFail(ALICE, 'player mints using TREASURY\'s AdminCap', mint('Stolen Blade', 1, 1, 0, sword, 3, 8));
   const m1 = await mustRun(TREASURY, 'mint Common "Iron Gladius" (STR+2 ATK+2 dmg 3-8)', mint('Iron Gladius', 1, 1, 0, sword, 3, 8));
@@ -400,6 +405,15 @@ async function main() {
   const m2 = await mustRun(TREASURY, 'mint Uncommon "Bronze Hoplon" shield (ARM+6 DEF+4 HP+12)', mint('Bronze Hoplon', 2, 2, 1, [0, 0, 0, 0, 12, 6, 4, 0, 0, 0, 0, 0, 0], 0, 0));
   const SHIELD = created(m2, '::item::Item');
   await mustRun(TREASURY, 'transfer both items to ALICE', (tx) => { tx.transferObjects([tx.object(SWORD), tx.object(SHIELD)], ALICE.addr); });
+  await mustAbort(ALICE, 'level-1 ALICE equips a level-3 sword', 'equipment', 3, (tx) => {
+    tx.moveCall({ target: t('equipment', 'equip_weapon'), arguments: [tx.object(chars.ALICE), tx.object(SWORD), tx.object(CLOCK)] });
+  });
+  await mustRun(TREASURY, 'server grants ALICE 300 XP (a won fight) → level 3', (tx) => {
+    tx.moveCall({ target: t('character', 'update_after_fight'), arguments: [
+      tx.object(ADMIN), tx.object(chars.ALICE), tx.pure.bool(true), tx.pure.u64(300), tx.pure.u16(1016), tx.object(CLOCK),
+    ] });
+  });
+  check(Number((await fields(chars.ALICE)).level) === 3, 'ALICE is level 3 on chain');
   await mustFail(BOB, 'BOB equips ALICE\'s sword onto ALICE\'s character', (tx) => {
     tx.moveCall({ target: t('equipment', 'equip_weapon'), arguments: [tx.object(chars.ALICE), tx.object(SWORD), tx.object(CLOCK)] });
   });

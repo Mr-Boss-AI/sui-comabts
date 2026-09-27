@@ -104,9 +104,10 @@ export function computeDerivedStats(
     + eqAttack;
 
   const opAntiCrit = opponentStats ? opponentStats.endurance * 0.3 : 0;
-  const critChance = Math.min(25, stats.intuition * 0.5 + eqCritChance - opAntiCrit);
+  // v5.3 — mirrors server CRIT_CHANCE_CAP=30, CRIT_CHANCE_PER_INTUITION=1.25.
+  const critChance = Math.min(30, stats.intuition * 1.25 + eqCritChance - opAntiCrit);
 
-  const critMultiplier = 1.5 + stats.intuition * 0.01 + eqCritMult / 100;
+  const critMultiplier = 1.5 + stats.intuition * 0.02 + eqCritMult / 100;
 
   const opAntiEvasion = opponentStats ? opponentStats.strength * 0.3 : 0;
   const evasionChance = Math.min(30, stats.dexterity * 0.5 + eqEvasion - opAntiEvasion);

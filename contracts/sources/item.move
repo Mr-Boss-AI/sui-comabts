@@ -18,6 +18,12 @@ module sui_combats::item {
     const EInvalidSlotType: u64 = 6;
     /// v5.1 — Weapon slot_type must be 0 (mainhand) or 2 (both_hands).
     const EWeaponSlotTypeInvalid: u64 = 7;
+    /// v5.3 — level_req is below the minimum for the item's rarity
+    /// (no Legendary at level 1). See min_level_for_rarity.
+    const ERarityLevelTooLow: u64 = 8;
+    /// v5.3 — weapons and shields need level_req >= MIN_HAND_ITEM_LEVEL
+    /// (levels 1-2 fight bare-handed).
+    const EHandItemLevelTooLow: u64 = 9;
 
     // ===== Item type constants =====
     const WEAPON: u8 = 1;
@@ -57,6 +63,17 @@ module sui_combats::item {
 
     /// Items above MAX_LEVEL_REQ would be permanently unusable (max char level = 20).
     const MAX_LEVEL_REQ: u8 = 20;
+
+    // ===== Level gates (v5.3) =====
+    /// Weapons + shields start at this level; levels 1-2 are bare-handed.
+    const MIN_HAND_ITEM_LEVEL: u8 = 3;
+    /// Minimum level_req per rarity. Keeps high-rarity power out of the
+    /// low levels, where one point of armor/attack decides fights.
+    const MIN_LEVEL_COMMON: u8 = 1;
+    const MIN_LEVEL_UNCOMMON: u8 = 3;
+    const MIN_LEVEL_RARE: u8 = 5;
+    const MIN_LEVEL_EPIC: u8 = 8;
+    const MIN_LEVEL_LEGENDARY: u8 = 11;
 
     // ===== Per-rarity stat budgets (v5.1) =====
     // Sum of every *_bonus field + max_damage must be ≤ budget. This caps the
@@ -137,6 +154,18 @@ module sui_combats::item {
         else { 0 }  // unreachable — EInvalidRarity catches it before this is called
     }
 
+    /// v5.3 — Minimum level_req for a rarity. Pure helper for tests + clients.
+    public fun min_level_for_rarity(rarity: u8): u8 {
+        if (rarity == COMMON) { MIN_LEVEL_COMMON }
+        else if (rarity == UNCOMMON) { MIN_LEVEL_UNCOMMON }
+        else if (rarity == RARE) { MIN_LEVEL_RARE }
+        else if (rarity == EPIC) { MIN_LEVEL_EPIC }
+        else { MIN_LEVEL_LEGENDARY }
+    }
+
+    /// v5.3 — Minimum level_req for weapons and shields.
+    public fun min_hand_item_level(): u8 { MIN_HAND_ITEM_LEVEL }
+
     // ===== Mint (admin-gated) =====
 
     /// Mint a new item NFT. Admin-only — requires the AdminCap held by the server/treasury.
@@ -173,6 +202,12 @@ module sui_combats::item {
         assert!(rarity >= COMMON && rarity <= LEGENDARY, EInvalidRarity);
         assert!(level_req <= MAX_LEVEL_REQ, ELevelReqTooHigh);
         assert!(min_damage <= max_damage, EDamageRangeInvalid);
+
+        // v5.3 — level gates.
+        assert!(level_req >= min_level_for_rarity(rarity), ERarityLevelTooLow);
+        if (item_type == WEAPON || item_type == SHIELD) {
+            assert!(level_req >= MIN_HAND_ITEM_LEVEL, EHandItemLevelTooLow);
+        };
 
         // v5.1 — slot_type shape per item_type
         if (item_type == WEAPON) {

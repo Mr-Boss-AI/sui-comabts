@@ -75,5 +75,28 @@ for (let i = 0; i < 300; i++) {
 check(bothBlocked, 'both strikes into a guarded zone are blocked (the risk)');
 check(bothLand, 'both strikes into an open zone land (the reward)');
 
+console.log('\n[5] Crit through block (v5.3)');
+{
+  const mage = { id: 'm', walletAddress: 'm', level: 10, stats: { strength: 5, dexterity: 5, intuition: 40, endurance: 5 }, equipment: { ...EMPTY, weapon: sword } };
+  const tank = ch({ weapon: sword });
+  let pierced = 0, plainBlocked = 0, leakedWithoutCrit = 0, total = 2000;
+  const ratios: number[] = [];
+  for (let i = 0; i < total; i++) {
+    const a = C.createFighterState(mage, tank); const b = C.createFighterState(tank, mage);
+    const r = C.resolveTurn(1, a, b, { attackZones: ['head'], blockZones: ['chest', 'stomach'] }, { attackZones: ['legs'], blockZones: ['head', 'chest'] });
+    const h = r.playerB.hits[0];
+    if (!h.blocked) continue;
+    if (h.crit && h.damage > 0) { pierced++; ratios.push(h.damage / (a.derivedStats.attackPower * a.derivedStats.critMultiplier)); }
+    else { plainBlocked++; if (h.damage > 0) leakedWithoutCrit++; }
+  }
+  const rate = pierced / total * 100;
+  const cc = C.createFighterState(mage, tank).derivedStats.critChance;
+  check(Math.abs(rate - cc) < 3, `blocked strikes crit through at ≈ crit chance (${rate.toFixed(1)}% vs ${cc}%)`);
+  const maxRatio = Math.max(...ratios), minRatio = Math.min(...ratios);
+  const P = GAME_CONSTANTS.CRIT_BLOCK_PIERCE;
+  check(minRatio >= P * 0.8 - 1e-6 && maxRatio <= P * 1.2 + 1e-6, `pierce damage = ${P * 100}% of crit damage (±20% roll): ${(minRatio * 100).toFixed(1)}–${(maxRatio * 100).toFixed(1)}%`);
+  check(leakedWithoutCrit === 0 && plainBlocked > 0, 'non-crit blocked strikes deal 0 (no shield leak)');
+}
+
 console.log(`\n${'='.repeat(60)}\noffhand-rules gauntlet: ${passes}/${passes + failures} PASS, ${failures} FAIL\n${'='.repeat(60)}`);
 process.exit(failures ? 1 : 0);

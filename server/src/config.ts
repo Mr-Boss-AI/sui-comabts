@@ -145,10 +145,11 @@ export const GAME_CONSTANTS = {
   DEX_DAMAGE_BONUS: 0.15,
   EVASION_PER_DEXTERITY: 0.5,
   EVASION_CAP: 30,
-  CRIT_CHANCE_PER_INTUITION: 0.5,
-  CRIT_CHANCE_CAP: 25,
+  // v5.3 INT buff (scripts/stat-balance.ts): INT build 36% → 51% avg win.
+  CRIT_CHANCE_PER_INTUITION: 1.25,
+  CRIT_CHANCE_CAP: 30,
   CRIT_MULTIPLIER_BASE: 1.5,
-  CRIT_MULTIPLIER_PER_INTUITION: 0.01,
+  CRIT_MULTIPLIER_PER_INTUITION: 0.02,
   DEFENSE_PER_ENDURANCE: 0.3,
   ANTI_CRIT_PER_ENDURANCE: 0.3,
   // Flat max-HP granted per point of (effective) Endurance, on top of the
@@ -159,6 +160,9 @@ export const GAME_CONSTANTS = {
   HP_PER_ENDURANCE: 3,
   ANTI_EVASION_PER_STRENGTH: 0.3,
   CRIT_ARMOR_PEN: 0.5,
+  // v5.3 — a critical strike into a guarded zone still smashes through for
+  // this share of the crit damage (ignores armor). 0 = blocks stop crits.
+  CRIT_BLOCK_PIERCE: 0.2,
   DEFAULT_ATTACK_ZONES: 1,
   DEFAULT_BLOCK_ZONES: 2,
   SHIELD_BLOCK_ZONES: 3,
@@ -175,9 +179,9 @@ export const GAME_CONSTANTS = {
   //   DUAL_WIELD_HIT_FACTOR — each dual-wield strike lands this share of
   //     attack power (two lighter strikes instead of one full one).
   OFFHAND_WEAPON_DAMAGE_FACTOR: 0.5,
-  DUAL_WIELD_HIT_FACTOR: 0.725,
+  DUAL_WIELD_HIT_FACTOR: 0.675,
   SHIELD_BLOCK_LEAK: 0,
-  TWO_HAND_DAMAGE_MULT: 1.5,
+  TWO_HAND_DAMAGE_MULT: 1.4,
   SHIELD_BLOCK_LINES: [
     ['head', 'chest', 'stomach'],
     ['chest', 'stomach', 'belt'],

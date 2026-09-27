@@ -279,11 +279,16 @@ function resolveAttack(
   defenderStats: DerivedStats
 ): HitResult {
   if (defenderBlockZones.includes(attackZone)) {
-    // v5.3 — a shield block still lets `blockLeak` of the raw hit through.
+    const raw = attackerStats.attackPower * randomFloat(GAME_CONSTANTS.DAMAGE_RANGE_LOW, GAME_CONSTANTS.DAMAGE_RANGE_HIGH);
+    // v5.3 — a crit smashes through the guard for CRIT_BLOCK_PIERCE of the
+    // crit damage (ignores armor).
+    if (GAME_CONSTANTS.CRIT_BLOCK_PIERCE > 0 && Math.random() * 100 < attackerStats.critChance) {
+      const pierced = raw * attackerStats.critMultiplier * GAME_CONSTANTS.CRIT_BLOCK_PIERCE * (attackerStats.damageMult ?? 1);
+      return { zone: attackZone, blocked: true, dodged: false, crit: true, damage: Math.round(Math.max(1, pierced) * 100) / 100 };
+    }
+    // v5.3 — a shield block may leak `blockLeak` of the raw hit (0 by default).
     const leak = defenderStats.blockLeak ?? 0;
-    const leaked = leak > 0
-      ? Math.round(attackerStats.attackPower * randomFloat(GAME_CONSTANTS.DAMAGE_RANGE_LOW, GAME_CONSTANTS.DAMAGE_RANGE_HIGH) * leak * 100) / 100
-      : 0;
+    const leaked = leak > 0 ? Math.round(raw * leak * 100) / 100 : 0;
     return { zone: attackZone, blocked: true, dodged: false, crit: false, damage: leaked };
   }
 

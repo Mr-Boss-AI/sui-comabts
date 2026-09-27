@@ -25,6 +25,9 @@ All notable changes to SUI Combats. Format follows
 ### Changed
 - **combat — fighting styles rebalanced** (`scripts/offhand-balance.ts`): dual-wield now 2 strikes (same zone allowed) + 2 guards, strikes land 72.5%, offhand weapon adds 50% of its damage; two-handers ×1.5 landed damage; shield unchanged. Styles win 46–57% against each other from level 8 up (was: shield 86% vs empty offhand, 2-hand 14%). Frontend picker supports double strike (×2) and the 2-zone dual-wield guard. `scripts/qa-offhand-rules.ts` 17/17.
 
+- **combat — INT buff + crit through block** (`scripts/stat-balance.ts`): INT gives 1.25% crit chance (was 0.5) and +0.02× crit dmg (was 0.01) per point, crit cap 30% (was 25); a crit into a guarded zone still lands 20% of its crit damage. INT build 36% → 51% average win rate. Dual-wield strike factor re-tuned to 0.675, two-hander ×1.4.
+- **item.move — level gates:** weapons and shields need `level_req` ≥ 3 (`EHandItemLevelTooLow = 9`); minimum level per rarity Uncommon 3 / Rare 5 / Epic 8 / Legendary 11 (`ERarityLevelTooLow = 8`). 9 new Move tests (161/161).
+
 ### Added
 - **guild.move:** guilds (1 SUI fee, 30 members, Leader/Officer/Member, invite/open join, treasury, disband, war-lock hook). 44 Move tests.
 - `scripts/e2e-localnet.ts` — full publish + characters + guilds + wagers + items + battles on a local chain (102/102).

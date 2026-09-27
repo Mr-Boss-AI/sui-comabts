@@ -43,8 +43,28 @@ module sui_combats::equipment_tests {
             );
             ts::return_shared(registry);
         };
+        // v5.3 — items are level-gated (weapons/shields >= 3, Rare >= 5), so
+        // ALICE starts at level 5 to equip the helpers' items.
+        ts::next_tx(scenario, ALICE);
+        {
+            let mut c = ts::take_shared<Character>(scenario);
+            character::set_level_for_testing(&mut c, ALICE_LEVEL);
+            ts::return_shared(c);
+        };
 
         clock
+    }
+
+    const ALICE_LEVEL: u8 = 5;
+
+    /// v5.3 — lift a requested level_req to the item's legal minimum
+    /// (rarity gate, and the weapon/shield gate when `hand`).
+    fun gated(level_req: u8, rarity: u8, hand: bool): u8 {
+        let mut l = level_req;
+        let r = item::min_level_for_rarity(rarity);
+        if (l < r) { l = r };
+        if (hand && l < item::min_hand_item_level()) { l = item::min_hand_item_level() };
+        l
     }
 
     /// Mint a mainhand weapon and transfer to ALICE.
@@ -57,7 +77,7 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Sword"),
                 string::utf8(b"ipfs://sword"),
                 item::weapon_type(),
-                0, level_req, 2,
+                0, gated(level_req, 2, true), 2,
                 item::slot_mainhand(),
                 0, 0, 0, 0, 0, 0, 0, 5,
                 0, 0, 0, 0, 0,
@@ -84,7 +104,7 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Greatsword"),
                 string::utf8(b"ipfs://greatsword"),
                 item::weapon_type(),
-                0, level_req, 3,                     // RARE
+                0, gated(level_req, 3, true), 3,     // RARE
                 item::slot_both_hands(),
                 0, 0, 0, 0, 0, 0, 0, 5,
                 0, 0, 0, 0, 0,
@@ -111,7 +131,7 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Buckler"),
                 string::utf8(b"ipfs://shield"),
                 item::shield_type(),
-                0, level_req, 2,
+                0, gated(level_req, 2, true), 2,
                 item::slot_offhand(),
                 0, 0, 0, 0, 0, 5, 0, 0,
                 0, 0, 0, 0, 0,
@@ -206,7 +226,7 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Helm"),
                 string::utf8(b"ipfs://helm"),
                 item::helmet_type(),
-                0, 1, 2,
+                0, 3, 2,
                 item::slot_mainhand(),
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0,
@@ -269,7 +289,7 @@ module sui_combats::equipment_tests {
     fun test_equip_level_too_low_aborts() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        mint_weapon_to_alice(&mut scenario, 5);
+        mint_weapon_to_alice(&mut scenario, ALICE_LEVEL + 1);
 
         ts::next_tx(&mut scenario, ALICE);
         {
@@ -300,7 +320,7 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Sword2"),
                 string::utf8(b"ipfs://sword2"),
                 item::weapon_type(),
-                0, 1, 2,
+                0, 3, 2,
                 item::slot_mainhand(),
                 0, 0, 0, 0, 0, 0, 0, 5,
                 0, 0, 0, 0, 0,
@@ -515,7 +535,7 @@ module sui_combats::equipment_tests {
                 string::utf8(name_bytes),
                 string::utf8(b"ipfs://misc"),
                 item_type,
-                0, level_req, rarity,
+                0, gated(level_req, rarity, item_type == item::weapon_type() || item_type == item::shield_type()), rarity,
                 item::slot_mainhand(),
                 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0,
                 0, 0,
@@ -654,7 +674,7 @@ module sui_combats::equipment_tests {
     fun test_equip_ring_3_level_too_low_aborts() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        // Level-15 ring; ALICE is level 1.
+        // Level-15 ring; ALICE is level 5.
         mint_misc_to_alice(&mut scenario, item::ring_type(), 15, 4, b"Epic Ring");
 
         ts::next_tx(&mut scenario, ALICE);

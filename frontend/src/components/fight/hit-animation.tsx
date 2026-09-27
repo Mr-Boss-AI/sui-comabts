@@ -23,7 +23,12 @@ export function FloatingText({ hit, side }: FloatingTextProps) {
   let color: string;
   let size: string;
 
-  if (hit.blocked) {
+  if (hit.blocked && hit.crit && hit.damage > 0) {
+    // v5.3 — crit through block
+    text = `CRIT THROUGH -${Math.round(hit.damage)}`;
+    color = "text-red-400";
+    size = "text-base font-black";
+  } else if (hit.blocked) {
     text = "BLOCKED";
     color = "text-blue-400";
     size = "text-sm";

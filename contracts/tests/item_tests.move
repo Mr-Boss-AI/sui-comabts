@@ -50,7 +50,7 @@ module sui_combats::item_tests {
         ts::next_tx(&mut scenario, PUBLISHER);
         {
             let admin = ts::take_from_sender<AdminCap>(&scenario);
-            mint_test_weapon(&mut scenario, &admin, b"Iron Sword", 1, 5);
+            mint_test_weapon(&mut scenario, &admin, b"Iron Sword", 3, 5);
             ts::return_to_sender(&scenario, admin);
         };
 
@@ -58,7 +58,7 @@ module sui_combats::item_tests {
         {
             let item = ts::take_from_sender<Item>(&scenario);
             assert!(item::item_type(&item) == item::weapon_type(), 0);
-            assert!(item::level_req(&item) == 1, 1);
+            assert!(item::level_req(&item) == 3, 1);
             assert!(item::attack_bonus(&item) == 5, 2);
             assert!(item::min_damage(&item) == 10, 3);
             assert!(item::max_damage(&item) == 20, 4);
@@ -157,7 +157,7 @@ module sui_combats::item_tests {
                 &admin,
                 string::utf8(b"Backwards"),
                 string::utf8(b"ipfs://x"),
-                1, 0, 1, 1, 0,
+                1, 0, 3, 1, 0,
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 50, 10,
                 ts::ctx(&mut scenario),
@@ -183,7 +183,7 @@ module sui_combats::item_tests {
                 &admin,
                 string::utf8(b"Cheat"),
                 string::utf8(b"ipfs://x"),
-                1, 0, 1, 5, 0,             // rarity=LEGENDARY (budget 160) — irrelevant; individual cap fires first
+                1, 0, 11, 5, 0,             // rarity=LEGENDARY (budget 160) — irrelevant; individual cap fires first
                 1001u16, 0, 0, 0,
                 0, 0, 0, 0,
                 0, 0, 0, 0, 0,
@@ -213,7 +213,7 @@ module sui_combats::item_tests {
                 string::utf8(b"Weird Weapon"),
                 string::utf8(b"ipfs://x"),
                 item::weapon_type(),
-                0, 1, 2,
+                0, 3, 2,
                 item::slot_offhand(),
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 10, 20,
@@ -240,7 +240,7 @@ module sui_combats::item_tests {
                 string::utf8(b"Mainhand Shield"),
                 string::utf8(b"ipfs://x"),
                 item::shield_type(),
-                0, 1, 2,
+                0, 3, 2,
                 item::slot_mainhand(),
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 ts::ctx(&mut scenario),
@@ -266,7 +266,7 @@ module sui_combats::item_tests {
                 string::utf8(b"Weird Helmet"),
                 string::utf8(b"ipfs://x"),
                 item::helmet_type(),
-                0, 1, 2,
+                0, 3, 2,
                 item::slot_offhand(),
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 ts::ctx(&mut scenario),
@@ -328,7 +328,7 @@ module sui_combats::item_tests {
                 string::utf8(b"OverBudgetCommon"),
                 string::utf8(b"ipfs://x"),
                 item::weapon_type(),
-                0, 1, 1,                       // COMMON
+                0, 3, 1,                       // COMMON
                 item::slot_mainhand(),
                 5, 5, 5, 5,                    // 20 in stats
                 10, 0, 0, 0, 0, 0, 0, 0, 0,    // +10 hp
@@ -384,5 +384,65 @@ module sui_combats::item_tests {
         assert!(item::slot_mainhand() == 0, 0);
         assert!(item::slot_offhand() == 1, 1);
         assert!(item::slot_both_hands() == 2, 2);
+    }
+
+    // ===== v5.3 level gates =====
+
+    fun mint_with(item_type: u8, level_req: u8, rarity: u8, slot_type: u8) {
+        let mut scenario = ts::begin(PUBLISHER);
+        init_for_testing(ts::ctx(&mut scenario));
+        ts::next_tx(&mut scenario, PUBLISHER);
+        {
+            let admin = ts::take_from_sender<AdminCap>(&scenario);
+            item::mint_item_admin(
+                &admin,
+                string::utf8(b"Gate"),
+                string::utf8(b"ipfs://gate"),
+                item_type, 0, level_req, rarity, slot_type,
+                0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0,
+                ts::ctx(&mut scenario),
+            );
+            ts::return_to_sender(&scenario, admin);
+        };
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 9, location = sui_combats::item)]
+    fun test_weapon_at_level_2_aborts() { mint_with(item::weapon_type(), 2, 1, item::slot_mainhand()); }
+
+    #[test]
+    #[expected_failure(abort_code = 9, location = sui_combats::item)]
+    fun test_shield_at_level_2_aborts() { mint_with(item::shield_type(), 2, 1, item::slot_offhand()); }
+
+    #[test]
+    fun test_weapon_at_level_3_ok() { mint_with(item::weapon_type(), 3, 1, item::slot_mainhand()); }
+
+    #[test]
+    fun test_common_helmet_at_level_1_ok() { mint_with(item::helmet_type(), 1, 1, item::slot_mainhand()); }
+
+    #[test]
+    #[expected_failure(abort_code = 8, location = sui_combats::item)]
+    fun test_uncommon_at_level_2_aborts() { mint_with(item::helmet_type(), 2, 2, item::slot_mainhand()); }
+
+    #[test]
+    #[expected_failure(abort_code = 8, location = sui_combats::item)]
+    fun test_rare_at_level_4_aborts() { mint_with(item::helmet_type(), 4, 3, item::slot_mainhand()); }
+
+    #[test]
+    #[expected_failure(abort_code = 8, location = sui_combats::item)]
+    fun test_epic_at_level_7_aborts() { mint_with(item::helmet_type(), 7, 4, item::slot_mainhand()); }
+
+    #[test]
+    #[expected_failure(abort_code = 8, location = sui_combats::item)]
+    fun test_legendary_at_level_10_aborts() { mint_with(item::helmet_type(), 10, 5, item::slot_mainhand()); }
+
+    #[test]
+    fun test_rarity_minimum_levels_ok() {
+        mint_with(item::helmet_type(), 3, 2, item::slot_mainhand());
+        mint_with(item::helmet_type(), 5, 3, item::slot_mainhand());
+        mint_with(item::helmet_type(), 8, 4, item::slot_mainhand());
+        mint_with(item::helmet_type(), 11, 5, item::slot_mainhand());
     }
 }
