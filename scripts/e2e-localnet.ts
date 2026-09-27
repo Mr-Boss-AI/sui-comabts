@@ -313,6 +313,63 @@ async function main() {
   check(!!gone.error, 'Guild object deleted from chain');
   await mustRun(DAVE, 'DAVE re-uses the freed name "Iron Wolves"', createGuild(DAVE, 'Iron Wolves', true, SUI));
 
+  // ------------------------------------------------------------ guild wars
+  section('Guild wars — declare, accept, sign up, guards');
+  const STAKE = SUI / 2n;
+  const WAR_REG = created(pub, '::guild_war::WarRegistry');
+  // DAVE founded "Iron Wolves" above; CAROL founds a second guild.
+  const g2 = await mustRun(CAROL, 'CAROL founds "Black Crows"', createGuild(CAROL, 'Black Crows', true, SUI));
+  const CROWS = created(g2, '::guild::Guild');
+  const regFields = await fields(GUILD_REG);
+  void regFields;
+  const WOLVES2 = (await client.getOwnedObjects({ owner: DAVE.addr })).data && (await (async () => {
+    const r = await client.queryEvents({ query: { MoveEventType: `${PKG}::guild::GuildCreated` } });
+    const e = r.data.find((x: any) => x.parsedJson?.leader === DAVE.addr);
+    return (e?.parsedJson as any)?.guild_id as string;
+  })());
+  check(!!WOLVES2, 'found DAVE\'s guild id from GuildCreated events');
+  await mustRun(ALICE, 'ALICE joins DAVE\'s guild', (tx) => {
+    tx.moveCall({ target: t('guild', 'join_guild'), arguments: [tx.object(WOLVES2), tx.object(GUILD_REG), tx.object(chars.ALICE), tx.object(CLOCK)] });
+  });
+  await mustRun(BOB, 'BOB joins CAROL\'s guild', (tx) => {
+    tx.moveCall({ target: t('guild', 'join_guild'), arguments: [tx.object(CROWS), tx.object(GUILD_REG), tx.object(chars.BOB), tx.object(CLOCK)] });
+  });
+  const declare = (w: Wallet, team: number, stake: bigint, delay: number) => (tx: Transaction) => {
+    tx.moveCall({ target: t('guild_war', 'declare_war'), arguments: [
+      tx.object(WOLVES2), tx.object(CROWS), tx.object(chars[w.name]), tx.pure.u64(team), tx.pure.u64(stake), tx.pure.u8(0), tx.pure.u64(delay), tx.object(CLOCK),
+    ] });
+  };
+  await mustAbort(ALICE, 'member (not officer) declares war', 'guild_war', 0, declare(ALICE, 2, STAKE, 300_000));
+  await mustAbort(DAVE, 'war with 11 per side', 'guild_war', 2, declare(DAVE, 11, STAKE, 300_000));
+  const wr = await mustRun(DAVE, 'DAVE declares war on Black Crows (2v2, 0.5 SUI, starts in 5 min)', declare(DAVE, 2, STAKE, 300_000));
+  const WAR = created(wr, '::guild_war::GuildWar');
+  await mustAbort(DAVE, 'second war while one is open', 'guild', 24, declare(DAVE, 2, STAKE, 300_000));
+  await mustRun(CAROL, 'CAROL (leader) accepts', (tx) => {
+    tx.moveCall({ target: t('guild_war', 'accept_war'), arguments: [tx.object(WAR), tx.object(CROWS), tx.object(CLOCK)] });
+  });
+  const joinWar = (w: Wallet, guildId: string, stake: bigint) => (tx: Transaction) => {
+    const [c] = tx.splitCoins(tx.gas, [tx.pure.u64(stake)]);
+    tx.moveCall({ target: t('guild_war', 'join_war'), arguments: [tx.object(WAR), tx.object(WAR_REG), tx.object(guildId), tx.object(chars[w.name]), c, tx.object(CLOCK)] });
+  };
+  await mustRun(DAVE, 'DAVE signs up (Wolves)', joinWar(DAVE, WOLVES2, STAKE));
+  await mustRun(ALICE, 'ALICE signs up (Wolves)', joinWar(ALICE, WOLVES2, STAKE));
+  await mustAbort(BOB, 'BOB signs up for the wrong guild', 'guild_war', 9, joinWar(BOB, WOLVES2, STAKE));
+  await mustAbort(BOB, 'BOB signs up with wrong stake', 'guild_war', 14, joinWar(BOB, CROWS, STAKE - 1n));
+  await mustRun(BOB, 'BOB signs up (Crows)', joinWar(BOB, CROWS, STAKE));
+  await mustAbort(BOB, 'BOB signs up twice', 'guild_war', 12, joinWar(BOB, CROWS, STAKE));
+  const lw = await mustRun(BOB, 'BOB leaves before start (refund)', (tx) => {
+    tx.moveCall({ target: t('guild_war', 'leave_war'), arguments: [tx.object(WAR), tx.object(WAR_REG), tx.object(CLOCK)] });
+  });
+  check(balanceDelta(lw, BOB.addr) + gasOf(lw) === STAKE, 'BOB refunded 0.5 SUI');
+  await mustAbort(TREASURY, 'TREASURY starts before start time', 'guild_war', 17, (tx) => {
+    tx.moveCall({ target: t('guild_war', 'start_war'), arguments: [tx.object(WAR), tx.object(WAR_REG), tx.object(WOLVES2), tx.object(CROWS), tx.object(CLOCK)] });
+  });
+  await mustAbort(ALICE, 'player starts the war', 'guild_war', 16, (tx) => {
+    tx.moveCall({ target: t('guild_war', 'start_war'), arguments: [tx.object(WAR), tx.object(WAR_REG), tx.object(WOLVES2), tx.object(CROWS), tx.object(CLOCK)] });
+  });
+  const warF = await fields(WAR);
+  check(num(warF.escrow) === 2n * STAKE, `war escrow holds 1 SUI (got ${Number(num(warF.escrow)) / 1e9})`);
+
   // ------------------------------------------------------------ wagers
   section('1v1 wagers — request/approve/settle, tie, decline, withdraw, exploit guards');
   const createWager = (w: Wallet, stake: bigint) => (tx: Transaction) => {
@@ -326,7 +383,6 @@ async function main() {
   const aCall = (fn: string, args: (tx: Transaction) => any[]) => (tx: Transaction) => {
     tx.moveCall({ target: t('arena', fn), arguments: args(tx) });
   };
-  const STAKE = SUI / 2n;
 
   const w1r = await mustRun(ALICE, 'ALICE creates 0.5 SUI wager', createWager(ALICE, STAKE));
   const W1 = created(w1r, '::arena::WagerMatch');
