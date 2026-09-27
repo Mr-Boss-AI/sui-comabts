@@ -752,7 +752,6 @@ export function buildListItemTx(
       tx.object(itemObjectId),
       tx.pure.u64(priceMist),
       feeCoin,
-      tx.pure.address(TREASURY_ADDRESS),
     ],
   });
   return tx;

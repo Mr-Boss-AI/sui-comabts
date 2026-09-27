@@ -11,6 +11,7 @@ module sui_combats::marketplace {
 
     use sui_combats::item::Item;
     use sui_combats::royalty_rule;
+    use sui_combats::arena;
 
     // ===== Error constants =====
     const EInvalidPrice: u64 = 0;
@@ -128,7 +129,7 @@ module sui_combats::marketplace {
     }
 
     /// List an Item in the player's Kiosk at `price` MIST. Caller pays a flat
-    /// `LISTING_FEE_MIST` listing fee, routed to `treasury`. Excess in `fee`
+    /// `LISTING_FEE_MIST` listing fee, routed to TREASURY. Excess in `fee`
     /// is refunded to the sender.
     public fun list_item(
         kiosk: &mut Kiosk,
@@ -136,7 +137,6 @@ module sui_combats::marketplace {
         item: Item,
         price: u64,
         mut fee: Coin<SUI>,
-        treasury: address,
         ctx: &mut TxContext,
     ) {
         assert!(price > 0, EInvalidPrice);
@@ -144,7 +144,9 @@ module sui_combats::marketplace {
 
         // Take exactly the listing fee, refund any excess
         let fee_coin = coin::split(&mut fee, LISTING_FEE_MIST, ctx);
-        transfer::public_transfer(fee_coin, treasury);
+        // v5.3 — fee always goes to TREASURY (was a caller-supplied address,
+        // letting sellers pay the listing fee to themselves).
+        transfer::public_transfer(fee_coin, arena::treasury_address());
 
         let sender = tx_context::sender(ctx);
         if (coin::value(&fee) > 0) {
