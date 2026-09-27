@@ -93,7 +93,9 @@ export function Wordmark({
 
   const sui: CSSProperties = {
     fontFamily: "var(--font-display)",
-    fontSize: v.suiSize,
+    // v5.3 — Cinzel runs wider than Slackey: cap the hero by viewport
+    // width so it never overflows a phone screen.
+    fontSize: size === "hero" ? `min(${v.suiSize}px, 24vw)` : v.suiSize,
     lineHeight: 0.95,
     color: "var(--wordmark-red)",
     WebkitTextStroke: `${v.strokeWidth}px var(--wordmark-ink)`,
@@ -106,7 +108,7 @@ export function Wordmark({
 
   const combats: CSSProperties = {
     fontFamily: "var(--font-display)",
-    fontSize: v.combatsSize,
+    fontSize: size === "hero" ? `min(${v.combatsSize}px, 14vw)` : v.combatsSize,
     lineHeight: 0.95,
     color: "var(--wordmark-yellow)",
     WebkitTextStroke: `${v.strokeWidth}px var(--wordmark-ink)`,

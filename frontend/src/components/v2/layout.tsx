@@ -452,7 +452,7 @@ export function PodiumBlock({
  * ListingCard — Market full NFT-art card.
  *
  * Used by the marketplace browser. Per the design-tool screenshot:
- *   - Rarity badge top-left (LEGENDARY / EPIC / RARE / COMMON)
+ *   - Level pill top-left (v5.3 — items have no rarity)
  *   - 2H badge top-right when applicable
  *   - Square NFT art middle (aspect-ratio 1:1)
  *   - Slackey item name
@@ -460,26 +460,15 @@ export function PodiumBlock({
  *   - SUI price in bronze mono + bronze Buy CTA
  * ════════════════════════════════════════════════════════════════════ */
 
-const RARITY_TINT: Record<number, { fg: string; bg: string }> = {
-  1: { fg: "var(--rarity-common)", bg: "rgba(138,138,138,.15)" },
-  2: { fg: "var(--rarity-uncommon)", bg: "rgba(74,156,74,.15)" },
-  3: { fg: "var(--rarity-rare)", bg: "rgba(61,109,163,.15)" },
-  4: { fg: "var(--rarity-epic)", bg: "rgba(125,75,165,.18)" },
-  5: { fg: "var(--rarity-legendary)", bg: "rgba(200,154,63,.16)" },
-};
-const RARITY_NAME: Record<number, string> = {
-  1: "Common",
-  2: "Uncommon",
-  3: "Rare",
-  4: "Epic",
-  5: "Legendary",
-};
 
 export interface ListingCardProps {
   imageUrl?: string;
   name: string;
   slotLabel: string;
-  rarity: number;
+  /** @deprecated v5.3 — items have no rarity; ignored. */
+  rarity?: number;
+  /** v5.3 — level requirement, shown as the top-left pill. */
+  level?: number;
   /** Stat summary line — e.g. "STR +6 / END +2". */
   statSummary?: string;
   priceSui: number;
@@ -493,14 +482,14 @@ export function ListingCard({
   imageUrl,
   name,
   slotLabel,
-  rarity,
+  level,
   statSummary,
   priceSui,
   twoHanded,
   onBuy,
   onClick,
 }: ListingCardProps) {
-  const tint = RARITY_TINT[rarity] ?? RARITY_TINT[1];
+  const tint = { fg: "var(--sc-bronze)", bg: "var(--sc-panel-2)" };
   return (
     <div
       onClick={onClick}
@@ -552,12 +541,13 @@ export function ListingCard({
             letterSpacing: "var(--ls-stamp)",
             textTransform: "uppercase",
             padding: "3px 8px",
-            background: tint.fg,
-            color: rarity === 5 ? "var(--sc-page)" : "var(--sc-parchment)",
+            background: "var(--sc-iron)",
+            color: "var(--sc-on-dark)",
             borderRadius: "var(--r-pill)",
+            display: level ? undefined : "none",
           }}
         >
-          {RARITY_NAME[rarity] ?? "Common"}
+          Lv {level}
         </span>
         {twoHanded && (
           <span
@@ -570,7 +560,7 @@ export function ListingCard({
               fontSize: 10,
               padding: "3px 8px",
               background: "var(--sc-blood)",
-              color: "var(--sc-parchment)",
+              color: "var(--sc-on-dark)",
               borderRadius: "var(--r-sm)",
               border: "1px solid var(--sc-blood-deep)",
             }}
@@ -672,7 +662,7 @@ export function ListingCard({
                 textTransform: "uppercase",
                 padding: "5px 14px",
                 background: "var(--sc-blood)",
-                color: "var(--sc-parchment)",
+                color: "var(--sc-on-dark)",
                 border: "1px solid var(--sc-blood-deep)",
                 borderRadius: "var(--r-button)",
                 cursor: "pointer",
@@ -802,7 +792,7 @@ export function DMRow({
             padding: "0 6px",
             borderRadius: 999,
             background: "var(--sc-blood)",
-            color: "var(--sc-parchment)",
+            color: "var(--sc-on-dark)",
             fontFamily: "var(--font-mono)",
             fontWeight: 800,
             fontSize: 10,

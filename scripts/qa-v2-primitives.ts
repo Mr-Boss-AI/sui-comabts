@@ -96,15 +96,16 @@ function main(): void {
   // ===========================================================================
   console.log('\n[2] canonical hex values pinned');
   const PINS: Array<[string, string]> = [
-    ['gunmetal page',     '#0a0d12'],
-    ['surface panel',     '#15191f'],
-    ['surface panel-2',   '#1a1f28'],
-    ['surface panel-3',   '#222831'],
-    ['parchment',         '#e8e2d4'],
-    ['bronze',            '#c89a3f'],
-    ['blood',             '#b53d2c'],
-    ['steel',             '#6d8fa3'],
-    ['steel rim',         '#2c333d'],
+    // v5.3 grey-stone palette (approved mock).
+    ['stone page',        '#8e8d89'],
+    ['surface panel',     '#c4c3bf'],
+    ['surface panel-2',   '#d6d5d1'],
+    ['surface panel-3',   '#b8b7b2'],
+    ['ink text',          '#1a1917'],
+    ['iron accent',       '#232323'],
+    ['blood',             '#8b1111'],
+    ['steel',             '#2f4a5c'],
+    ['stone rim',         '#4a4946'],
     ['rarity epic',       '#7d4ba5'],
   ];
   for (const [label, hex] of PINS) {
@@ -207,27 +208,26 @@ function main(): void {
   // — values come from App.jsx TWEAK_DEFAULTS in the live design source.
   console.log('\n[7] character-profile — extracted slot mapping');
   const charProfile = readSrc('frontend/src/components/character/character-profile.tsx');
-  // Left col (extracted): helmet → shoulders* → weapon → chest → belt
+  // v5.3 combats.ru paper doll — left col: helmet → bracers → weapon → chest → belt
   const leftOrderIdx = {
     helmet:    charProfile.indexOf('slot="helmet"'),
-    shoulders: charProfile.indexOf('futureLabel="Shoulders"'),
+    bracelets: charProfile.indexOf('slot="bracelets"'),
     weapon:    charProfile.indexOf('slot="weapon"'),
     chest:     charProfile.indexOf('slot="chest"'),
+    belt:      charProfile.indexOf('slot="belt"'),
   };
   if (
     leftOrderIdx.helmet > 0 &&
-    leftOrderIdx.shoulders > leftOrderIdx.helmet &&
-    leftOrderIdx.weapon > leftOrderIdx.shoulders &&
-    leftOrderIdx.chest > leftOrderIdx.weapon
+    leftOrderIdx.bracelets > leftOrderIdx.helmet &&
+    leftOrderIdx.weapon > leftOrderIdx.bracelets &&
+    leftOrderIdx.chest > leftOrderIdx.weapon &&
+    leftOrderIdx.belt > leftOrderIdx.chest
   ) {
-    ok('left col order: helmet → shoulders* → weapon → chest');
+    ok('left col order: helmet → bracers → weapon → chest → belt');
   } else {
-    fail(
-      'left col order',
-      `helmet=${leftOrderIdx.helmet}, shoulders=${leftOrderIdx.shoulders}, weapon=${leftOrderIdx.weapon}, chest=${leftOrderIdx.chest}`,
-    );
+    fail('left col order', JSON.stringify(leftOrderIdx));
   }
-  contains(charProfile, 'futureLabel="Shoulders"', 'left col[2] is future Shoulders (v5.1)');
+  contains(charProfile, 'slot="earrings"', 'v5.3 earrings slot on the doll');
   // Right col: necklace → ring row → gloves → off-hand → pants* → boots
   const ringRowIdx = charProfile.indexOf('Ring row');
   const glovesIdx = charProfile.indexOf('slot="gloves"');
@@ -268,8 +268,8 @@ function main(): void {
   // ===========================================================================
   console.log('\n[9] layout.tsx — Slackey + Poppins + JetBrains_Mono');
   const layout = readSrc('frontend/src/app/layout.tsx');
-  contains(layout, 'Slackey', 'Slackey display font imported');
-  contains(layout, 'Poppins', 'Poppins UI font imported');
+  contains(layout, 'Cinzel', 'Cinzel display font imported (v5.3)');
+  contains(layout, 'EB_Garamond', 'EB Garamond UI font imported (v5.3)');
   contains(layout, 'JetBrains_Mono', 'JetBrains Mono imported');
   contains(layout, '--font-display-src', 'display CSS var emitted');
   contains(layout, '--font-ui-src', 'ui CSS var emitted');

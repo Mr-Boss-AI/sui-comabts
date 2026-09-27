@@ -2310,7 +2310,7 @@ export function CharacterProfile({
                 letterSpacing: "var(--ls-button)",
                 textTransform: "uppercase",
                 background: "var(--sc-blood)",
-                color: "var(--sc-parchment)",
+                color: "var(--sc-on-dark)",
                 border: "2px solid var(--sc-blood-deep)",
                 borderRadius: "var(--r-button)",
                 cursor: "pointer",

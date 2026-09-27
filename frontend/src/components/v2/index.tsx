@@ -137,7 +137,7 @@ const STAMP_STYLES: Record<StampTone, CSSProperties> = {
   },
   blood: {
     background: "var(--sc-blood)",
-    color: "var(--sc-parchment)",
+    color: "var(--sc-on-dark)",
     border: "1px solid var(--sc-blood-deep)",
   },
   steel: {
@@ -286,21 +286,21 @@ function makeBtn(
 
 export const BronzeButton = makeBtn(
   "var(--sc-bronze)",
-  "var(--sc-page)",
+  "var(--sc-on-dark)",
   "var(--sc-bronze-deep)",
   "var(--sc-bronze-hot)",
 );
 export const DangerButton = makeBtn(
   "var(--sc-blood)",
-  "var(--sc-parchment)",
+  "var(--sc-on-dark)",
   "var(--sc-blood-deep)",
-  "#c8462f",
+  "#a51a1a",
 );
 export const SteelButton = makeBtn(
   "var(--sc-steel-low)",
-  "var(--sc-steel)",
   "var(--sc-steel-deep)",
-  "#2b3a45",
+  "var(--sc-steel-deep)",
+  "#9aa2a7",
 );
 export const SecondaryButton = makeBtn(
   "var(--sc-panel-2)",

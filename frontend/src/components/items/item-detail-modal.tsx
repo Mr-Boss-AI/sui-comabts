@@ -128,7 +128,7 @@ export function ItemDetailModal({ item, onClose, actions }: ItemDetailModalProps
                 textTransform: "uppercase",
               }}
             >
-              {ITEM_TYPE_LABELS[item.itemType]} · {RARITY_LABELS[item.rarity]}
+              {ITEM_TYPE_LABELS[item.itemType]} · Level {item.levelReq}
             </div>
             {item.levelReq > 1 && (
               <div

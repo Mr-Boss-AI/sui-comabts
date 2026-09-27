@@ -96,7 +96,7 @@ export function ErrorToast() {
             onClick={() => dispatch({ type: "SET_ERROR", message: null })}
             style={{
               background: "var(--sc-blood)",
-              color: "var(--sc-parchment)",
+              color: "var(--sc-on-dark)",
               border: "1px solid var(--sc-blood-deep)",
               padding: "5px 12px",
               fontFamily: "var(--font-ui)",

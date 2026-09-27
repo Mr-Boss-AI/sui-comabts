@@ -15,13 +15,12 @@
 import { useMemo, useState } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useMarketplace } from "@/hooks/useMarketplace";
+import { LEVEL_BRACKETS, inLevelBracket, type LevelBracketId } from "@/lib/level-brackets";
 import {
   ITEM_TYPE_LABELS,
   ITEM_TYPES,
-  RARITY_LABELS,
   type ItemType,
   type MarketplaceListing,
-  type Rarity,
 } from "@/types/game";
 import { BuyListingModal } from "./buy-listing-modal";
 import { MyKioskPanel } from "./my-kiosk-panel";
@@ -70,7 +69,7 @@ export function MarketplaceBrowser() {
   const { listings } = useMarketplace();
   const bp = useBreakpoint();
   const [filterType, setFilterType] = useState<ItemType | "all">("all");
-  const [filterRarity, setFilterRarity] = useState<Rarity | "all">("all");
+  const [filterLevel, setFilterLevel] = useState<LevelBracketId>("all");
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
   const [selected, setSelected] = useState<MarketplaceListing | null>(null);
@@ -81,8 +80,8 @@ export function MarketplaceBrowser() {
     let out = listings.filter((l) => l.seller.toLowerCase() !== myWallet);
     if (filterType !== "all")
       out = out.filter((l) => l.item.itemType === filterType);
-    if (filterRarity !== "all")
-      out = out.filter((l) => l.item.rarity === filterRarity);
+    if (filterLevel !== "all")
+      out = out.filter((l) => inLevelBracket(l.item.levelReq, filterLevel));
     const q = search.trim().toLowerCase();
     if (q) out = out.filter((l) => l.item.name.toLowerCase().includes(q));
     out = [...out].sort((a, b) => {
@@ -91,7 +90,7 @@ export function MarketplaceBrowser() {
       return b.listedAt - a.listedAt;
     });
     return out;
-  }, [listings, myWallet, filterType, filterRarity, sortBy, search]);
+  }, [listings, myWallet, filterType, filterLevel, sortBy, search]);
 
   const left = (
     <div
@@ -116,26 +115,26 @@ export function MarketplaceBrowser() {
         />
       </div>
       <div>
-        <SectionLabel>Rarity</SectionLabel>
+        <SectionLabel>Level</SectionLabel>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <V2Chip
-            active={filterRarity === "all"}
+            active={filterLevel === "all"}
             tone="bronze"
-            onClick={() => setFilterRarity("all")}
+            onClick={() => setFilterLevel("all")}
             style={{ width: "100%", justifyContent: "flex-start" }}
           >
-            All Rarities
+            All levels
           </V2Chip>
-          {(Object.entries(RARITY_LABELS) as Array<[string, string]>).map(
-            ([k, v]) => (
+          {LEVEL_BRACKETS.map(
+            (b) => (
               <V2Chip
-                key={k}
-                active={filterRarity === (Number(k) as Rarity)}
+                key={b.id}
+                active={filterLevel === b.id}
                 tone="bronze"
-                onClick={() => setFilterRarity(Number(k) as Rarity)}
+                onClick={() => setFilterLevel(b.id)}
                 style={{ width: "100%", justifyContent: "flex-start" }}
               >
-                {v}
+                {b.label}
               </V2Chip>
             ),
           )}
@@ -191,7 +190,7 @@ export function MarketplaceBrowser() {
               tone="bronze"
               onClick={() => setSortBy("price_desc")}
             >
-              Rarity
+              Priciest
             </V2Chip>
           </div>
         }
@@ -230,10 +229,10 @@ export function MarketplaceBrowser() {
               imageUrl={listing.item.imageUrl}
               name={listing.item.name}
               slotLabel={ITEM_TYPE_LABELS[listing.item.itemType]}
-              rarity={listing.item.rarity}
+              level={listing.item.levelReq}
               statSummary={statSummary(listing.item)}
               priceSui={listing.price}
-              twoHanded={TWO_HANDED_HINT.test(listing.item.name)}
+              twoHanded={listing.item.slotType === 2 || TWO_HANDED_HINT.test(listing.item.name)}
               onBuy={() => setSelected(listing)}
               onClick={() => setSelected(listing)}
             />

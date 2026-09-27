@@ -34,7 +34,7 @@ const VARIANT_STYLES: Record<string, CSSProperties> = {
   },
   danger: {
     background: "var(--sc-blood)",
-    color: "var(--sc-parchment)",
+    color: "var(--sc-on-dark)",
     border: "1px solid var(--sc-blood-deep)",
   },
   info: {
@@ -84,30 +84,7 @@ const RARITY_BG: Record<Rarity, string> = {
   5: "var(--rarity-legendary)",
 };
 
-export function RarityBadge({ rarity }: { rarity: Rarity }) {
-  const bg = RARITY_BG[rarity];
-  // Bronze (legendary) reads on light → dark text; everything else
-  // gets parchment text.
-  const text = rarity === 5 ? "var(--sc-page)" : "var(--sc-parchment)";
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        fontFamily: "var(--font-ui)",
-        fontWeight: 700,
-        fontSize: 10,
-        letterSpacing: "var(--ls-stamp)",
-        textTransform: "uppercase",
-        padding: "3px 9px",
-        borderRadius: "var(--r-pill)",
-        background: bg,
-        color: text,
-        border: `1px solid ${bg}`,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {RARITY_LABELS[rarity]}
-    </span>
-  );
+/** v5.3 — items have no rarity any more; kept as a no-op for old callers. */
+export function RarityBadge(_props: { rarity: Rarity }) {
+  return null;
 }

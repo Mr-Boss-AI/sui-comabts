@@ -135,9 +135,10 @@ export function Navbar() {
 
   return (
     <nav
+      className="theme-iron"
       style={{
         background: "var(--sc-page)",
-        borderBottom: "2px solid var(--sc-bronze)",
+        borderBottom: "2px solid #0e0e0e",
         position: "sticky",
         top: 0,
         zIndex: 40,

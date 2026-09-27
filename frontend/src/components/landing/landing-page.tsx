@@ -54,7 +54,7 @@ import { ListingCard, useBreakpoint, bpGte } from "@/components/v2/layout";
 const FEATURED: Array<{
   name: string;
   slotLabel: string;
-  rarity: number;
+  level: number;
   statSummary: string;
   priceSui: number;
   imageUrl: string;
@@ -66,7 +66,7 @@ const FEATURED: Array<{
   {
     name: "Whisperwind Amulet",
     slotLabel: "Necklace",
-    rarity: 5,
+    level: 8,
     statSummary: "INT +6",
     priceSui: 0.3,
     imageUrl:
@@ -79,7 +79,7 @@ const FEATURED: Array<{
   {
     name: "Dancer's Aegis",
     slotLabel: "Off-hand",
-    rarity: 4,
+    level: 6,
     statSummary: "DEX +4 / END +2",
     priceSui: 0.17,
     imageUrl:
@@ -92,7 +92,7 @@ const FEATURED: Array<{
   {
     name: "Pendant of Wrath",
     slotLabel: "Necklace",
-    rarity: 5,
+    level: 7,
     statSummary: "STR +5 / END +3",
     priceSui: 0.3,
     imageUrl:
@@ -441,7 +441,7 @@ function FloatingNftCard({
         imageUrl={card.imageUrl}
         name={card.name}
         slotLabel={card.slotLabel}
-        rarity={card.rarity}
+        level={card.level}
         statSummary={card.statSummary}
         priceSui={card.priceSui}
       />

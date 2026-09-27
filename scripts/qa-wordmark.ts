@@ -55,9 +55,10 @@ function main(): void {
   // [2] Hex values pinned
   // ===========================================================================
   console.log('\n[2] hex values pinned');
-  contains(tokens.toLowerCase(), '#d63b2e', 'wordmark-red = #d63b2e (hot blood)');
-  contains(tokens.toLowerCase(), '#e0b03a', 'wordmark-yellow = #e0b03a (punchy bronze)');
-  contains(tokens.toLowerCase(), '#08080a', 'wordmark-ink = #08080a (near-black)');
+  // v5.3 grey-stone palette: blood red + bone white on black ink.
+  contains(tokens.toLowerCase(), '--wordmark-red:      #8b1111', 'wordmark-red = #8b1111 (blood)');
+  contains(tokens.toLowerCase(), '--wordmark-yellow:   #ece8df', 'wordmark-yellow = #ece8df (bone white)');
+  contains(tokens.toLowerCase(), '--wordmark-ink:      #0e0e0e', 'wordmark-ink = #0e0e0e (iron black)');
 
   // ===========================================================================
   // [3] Component exports

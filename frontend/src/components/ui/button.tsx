@@ -41,7 +41,7 @@ const VARIANT_STYLES: Record<Variant, CSSProperties> = {
   },
   danger: {
     background: "var(--sc-blood)",
-    color: "var(--sc-parchment)",
+    color: "var(--sc-on-dark)",
     borderColor: "var(--sc-blood-deep)",
   },
   secondary: {

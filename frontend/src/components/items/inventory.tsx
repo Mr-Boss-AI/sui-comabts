@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useGame } from "@/hooks/useGameStore";
+import { LEVEL_BRACKETS, inLevelBracket, type LevelBracketId } from "@/lib/level-brackets";
 import { useEquipmentActions } from "@/hooks/useEquipmentActions";
 import { useKiosk } from "@/hooks/useKiosk";
 import { useMarketplaceActions } from "@/hooks/useMarketplaceActions";
@@ -10,10 +11,8 @@ import { ItemDetailModal } from "./item-detail-modal";
 import { ListItemModal } from "@/components/marketplace/list-item-modal";
 import {
   ITEM_TYPES,
-  RARITY_LABELS,
   EQUIPMENT_SLOT_LABELS,
   type ItemType,
-  type Rarity,
   type Item,
   type EquipmentSlots,
 } from "@/types/game";
@@ -298,7 +297,7 @@ export function Inventory() {
   const kiosk = useKiosk(state.onChainRefreshTrigger);
   const { retrieveFromKiosk, signing: marketSigning } = useMarketplaceActions();
   const [category, setCategory] = useState<Category>("all");
-  const [filterRarity, setFilterRarity] = useState<Rarity | "all">("all");
+  const [filterLevel, setFilterLevel] = useState<LevelBracketId>("all");
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [listingItem, setListingItem] = useState<Item | null>(null);
 
@@ -329,7 +328,7 @@ export function Inventory() {
   const filtered = allItems.filter((item) => {
     const typeList = CATEGORY_TYPES[category];
     if (typeList && !typeList.includes(item.itemType)) return false;
-    if (filterRarity !== "all" && item.rarity !== filterRarity) return false;
+    if (!inLevelBracket(item.levelReq, filterLevel)) return false;
     return true;
   });
 
@@ -423,10 +422,8 @@ export function Inventory() {
             </div>
 
             <select
-              value={filterRarity}
-              onChange={(e) =>
-                setFilterRarity(e.target.value === "all" ? "all" : (Number(e.target.value) as Rarity))
-              }
+              value={filterLevel}
+              onChange={(e) => setFilterLevel(e.target.value as LevelBracketId)}
               style={{
                 fontFamily: "var(--font-ui)",
                 fontSize: 11,
@@ -438,10 +435,10 @@ export function Inventory() {
                 cursor: "pointer",
               }}
             >
-              <option value="all">All Rarities</option>
-              {Object.entries(RARITY_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
+              <option value="all">All levels</option>
+              {LEVEL_BRACKETS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
                 </option>
               ))}
             </select>

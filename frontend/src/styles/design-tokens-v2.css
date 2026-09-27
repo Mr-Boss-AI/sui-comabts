@@ -11,10 +11,12 @@
  * Source of truth from this point forward. Every component reads from
  * these vars; never inline a hex literal in JSX.
  *
- * Aesthetic: gunmetal panels, burnished bronze accents, oxidized blood
- * red for damage/wager, steel blue for defense/info, parchment text on
- * dark. Hard corners (3px max), flat plate shadows, no gradients on
- * chrome.
+ * v5.3 aesthetic (approved "grey stone" mock): flat medieval greys with
+ * bevelled plates, black iron accents + top bar, near-black text, and
+ * blood red kept for HP / damage / danger only. Cinzel headings,
+ * EB Garamond text. The `--sc-bronze*` names are kept for compatibility
+ * but now hold the iron-black accent. `.theme-iron` re-scopes the tokens
+ * for dark iron surfaces (top bar).
  *
  * Backward-compat: the v1 "Ponke" token names (--sc-yellow, --sc-red,
  * --sc-paper, --sc-night) are kept as aliases pointing at the new metal
@@ -25,66 +27,66 @@
 
 :root {
   /* ---------- Backgrounds ---------- */
-  --bg-page:           #0a0d12;          /* gunmetal — page canvas */
-  --bg-surface:        #15191f;          /* panel default */
-  --bg-surface-2:      #1a1f28;          /* nested panel */
-  --bg-surface-3:      #222831;          /* focused panel */
+  --bg-page:           #8e8d89;          /* gunmetal — page canvas */
+  --bg-surface:        #c4c3bf;          /* panel default */
+  --bg-surface-2:      #d6d5d1;          /* nested panel */
+  --bg-surface-3:      #b8b7b2;          /* focused panel */
   --sc-page:           var(--bg-page);
   --sc-panel:          var(--bg-surface);
   --sc-panel-2:        var(--bg-surface-2);
   --sc-panel-3:        var(--bg-surface-3);
 
   /* ---------- Foreground / Parchment ---------- */
-  --sc-parchment:      #e8e2d4;          /* warm off-white — body text */
-  --fg-1:              #e8e2d4;          /* primary text */
-  --fg-2:              #b8b2a8;          /* secondary text */
-  --fg-3:              #8a8474;          /* tertiary / muted */
+  --sc-parchment:      #1a1917;          /* warm off-white — body text */
+  --fg-1:              #1a1917;          /* primary text */
+  --fg-2:              #34322e;          /* secondary text */
+  --fg-3:              #4a4843;          /* tertiary / muted */
 
   /* ---------- Bronze accent (primary) ---------- */
-  --sc-bronze:         #c89a3f;          /* canonical bronze */
-  --sc-bronze-deep:    #9c7530;          /* darker — shadows/borders */
-  --sc-bronze-hot:     #e0b258;          /* hover state, brighter */
-  --sc-bronze-glow:    #f0c878;          /* highlight */
+  --sc-bronze:         #232323;          /* canonical bronze */
+  --sc-bronze-deep:    #0e0e0e;          /* darker — shadows/borders */
+  --sc-bronze-hot:     #3a3835;          /* hover state, brighter */
+  --sc-bronze-glow:    #55524c;          /* highlight */
 
   /* ---------- Blood red accent (secondary) ---------- */
-  --sc-blood:          #b53d2c;          /* oxidized blood */
-  --sc-blood-deep:     #7d2618;          /* deeper red for shadows */
+  --sc-blood:          #8b1111;          /* oxidized blood */
+  --sc-blood-deep:     #5e0b0b;          /* deeper red for shadows */
 
   /* ---------- Steel blue accent (tertiary) ---------- */
-  --sc-steel:          #6d8fa3;          /* desaturated cool steel */
-  --sc-steel-deep:     #4a6577;          /* darker steel for borders */
-  --sc-steel-low:      #1f2a32;          /* background-tint steel */
+  --sc-steel:          #2f4a5c;          /* desaturated cool steel */
+  --sc-steel-deep:     #1f3340;          /* darker steel for borders */
+  --sc-steel-low:      #aeb4b8;          /* background-tint steel */
 
   /* ---------- Grape (INT / CRIT family per Character spec) ---------- */
-  --sc-grape:          #8a6abf;          /* amethyst — INT bar, CRIT, Epic */
+  --sc-grape:          #5a3d82;          /* amethyst — INT bar, CRIT, Epic */
 
   /* ---------- Victory (WIN outcome) ---------- */
-  --sc-victory:        #5a8a3a;          /* deep victory green — WIN badge */
+  --sc-victory:        #2f5a1f;          /* deep victory green — WIN badge */
 
   /* ---------- Muted parchment & dim outline ---------- */
-  --sc-parchment-dim:  #c8c1b0;          /* secondary text on dark */
-  --sc-muted:          #8a8474;          /* labels / metadata (alias --fg-3) */
-  --sc-dim:            #5e5a52;          /* deepest empty-slot outline */
+  --sc-parchment-dim:  #2a2826;          /* secondary text on dark */
+  --sc-muted:          #4a4843;          /* labels / metadata (alias --fg-3) */
+  --sc-dim:            #6b6862;          /* deepest empty-slot outline */
 
   /* ---------- Rims & ashes ---------- */
-  --sc-rim:            #2c333d;          /* default steel rim, 1-2px */
-  --sc-rim-2:          #3a414c;          /* slightly lighter rim */
-  --sc-ash:            #5a6068;          /* empty-slot icon stroke */
-  --sc-ash-2:          #3e434b;          /* dimmer ash for disabled */
+  --sc-rim:            #4a4946;          /* default steel rim, 1-2px */
+  --sc-rim-2:          #6b6862;          /* slightly lighter rim */
+  --sc-ash:            #6b6862;          /* empty-slot icon stroke */
+  --sc-ash-2:          #8e8d89;          /* dimmer ash for disabled */
 
   /* ---------- Rarity ramp (locked) ---------- */
-  --rarity-common:     #8a8a8a;          /* iron-grey */
-  --rarity-uncommon:   #4a9c4a;          /* green */
-  --rarity-rare:       #3d6da3;          /* steel blue */
-  --rarity-epic:       #7d4ba5;          /* purple */
-  --rarity-legendary:  #c89a3f;          /* bronze */
+  --rarity-common:     #4a4946;          /* v5.3: rarity retired — neutral rim */
+  --rarity-uncommon:   #2f5a1f;          /* doubles as the success / online green */
+  --rarity-rare:       #4a4946;
+  --rarity-epic:       #4a4946;
+  --rarity-legendary:  #4a4946;
 
   /* ---------- Stat colors ---------- */
   --stat-hp:           #b53d2c;          /* blood */
   --stat-str:          #b53d2c;          /* blood */
   --stat-dex:          #6d8fa3;          /* steel */
-  --stat-int:          #c89a3f;          /* bronze */
-  --stat-end:          #4a9c4a;          /* green */
+  --stat-int:          #5a3d82;          /* bronze */
+  --stat-end:          #2f5a1f;          /* green */
 
   /* ---------- Radii (sharp; combats.ru density) ---------- */
   --r-sharp:           0px;              /* hype panels, frame */
@@ -94,12 +96,12 @@
   --r-pill:            999px;            /* stamps only */
 
   /* ---------- Shadows (flat plates, no blur) ---------- */
-  --sh-plate-sm:       2px 2px 0 0 #000;
-  --sh-plate:          3px 3px 0 0 #000;
-  --sh-plate-lg:       5px 5px 0 0 #000;
-  --sh-pop:            0 24px 64px -8px rgba(0, 0, 0, .9);
-  --rim-top:           inset 0 1px 0 rgba(255, 255, 255, .04);
-  --rim-bottom:        inset 0 -1px 0 rgba(0, 0, 0, .18);
+  --sh-plate-sm:       2px 2px 0 0 #1e1e1e;
+  --sh-plate:          0 0 0 1px #1e1e1e, 0 4px 12px rgba(0, 0, 0, .25);
+  --sh-plate-lg:       0 0 0 1px #1e1e1e, 0 6px 16px rgba(0, 0, 0, .3);
+  --sh-pop:            0 24px 64px -8px rgba(0, 0, 0, .6);
+  --rim-top:           inset 1px 1px 0 rgba(255, 255, 255, .55);
+  --rim-bottom:        inset -1px -1px 0 rgba(0, 0, 0, .35);
 
   /* ---------- Motion ---------- */
   --d-fast:            120ms;
@@ -118,8 +120,8 @@
    * --font-mono-src    (JetBrains Mono)
    * The aliases below stay stable so JSX reading var(--font-ui) works
    * regardless of whether the loader changes. */
-  --font-display:      var(--font-display-src, 'Slackey', cursive);
-  --font-ui:           var(--font-ui-src, 'Poppins', system-ui, sans-serif);
+  --font-display:      var(--font-display-src, 'Cinzel', Georgia, serif);
+  --font-ui:           var(--font-ui-src, 'EB Garamond', Georgia, serif);
   --font-mono:         var(--font-mono-src, 'JetBrains Mono', ui-monospace, monospace);
   --ls-button:         0.06em;
   --ls-stamp:          0.14em;
@@ -128,9 +130,13 @@
   /* The wordmark deliberately reaches outside the metal palette into
    * brighter, more saturated reds and yellows — it's the loud meme-coin
    * brand stamp, not chrome. Used by `components/v2/wordmark.tsx`. */
-  --wordmark-red:      #d63b2e;          /* hot blood-red */
-  --wordmark-yellow:   #e0b03a;          /* punchy bronze-yellow */
-  --wordmark-ink:      #08080a;          /* near-black outline */
+  --wordmark-red:      #8b1111;          /* hot blood-red */
+  --wordmark-yellow:   #ece8df;          /* punchy bronze-yellow */
+  --wordmark-ink:      #0e0e0e;
+
+  /* v5.3 — text on dark fills (blood / iron buttons, badges). */
+  --sc-on-dark:        #ece8df;
+  --sc-iron:           #232323;          /* near-black outline */
 
   /* ---------- Backward-compat aliases (v1 Ponke tokens) ---------- */
   /* Existing JSX in the codebase predates the v2 rename. Keep these
@@ -215,3 +221,40 @@
 .scroll-plate::-webkit-scrollbar-track        { background: transparent; }
 .scroll-plate::-webkit-scrollbar-thumb        { background: var(--sc-rim-2); border-radius: 3px; }
 .scroll-plate::-webkit-scrollbar-thumb:hover  { background: var(--sc-bronze-deep); }
+
+/* v5.3 — dark iron surface (top bar, splash overlays). Re-scopes the
+ * tokens so every child reads light text on black iron. */
+.theme-iron {
+  /* Aliases resolve where declared, so re-declare them here too. */
+  --bg-page: #232323;
+  --bg-surface: #2c2b29;
+  --bg-surface-2: #34322e;
+  --bg-surface-3: #3d3a35;
+  --sc-page: #232323;
+  --sc-panel: #2c2b29;
+  --sc-panel-2: #34322e;
+  --sc-panel-3: #3d3a35;
+  --sc-night: #232323;
+  --sc-paper: #2c2b29;
+  --sc-yellow: #ece8df;
+  --sc-yellow-hot: #ffffff;
+  --sc-yellow-deep: #b5b1a8;
+  --wordmark-red: #c42222;
+  --sc-parchment: #ece8df;
+  --fg-1: #ece8df;
+  --fg-2: #cfcac0;
+  --fg-3: #b5b1a8;
+  --sc-parchment-dim: #cfcac0;
+  --sc-muted: #b5b1a8;
+  --sc-bronze: #ece8df;
+  --sc-bronze-deep: #b5b1a8;
+  --sc-bronze-hot: #ffffff;
+  --sc-bronze-glow: #ffffff;
+  --sc-rim: #0e0e0e;
+  --sc-rim-2: #4a4946;
+  --sc-steel: #9fb4c2;
+  --rim-top: inset 0 1px 0 rgba(255, 255, 255, .06);
+  --rim-bottom: inset 0 -1px 0 rgba(0, 0, 0, .3);
+  background: var(--bg-page);
+  color: var(--sc-parchment);
+}

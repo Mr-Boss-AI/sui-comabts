@@ -229,7 +229,8 @@ function main(): void {
   console.log('\n[8] Character — slot mapping per extracted column layout');
   // Left: Helmet · Shoulders* · Weapon · Chest · Belt(56)
   const helmetIdx = char.indexOf('slot="helmet"');
-  const shouldersIdx = char.indexOf('futureLabel="Shoulders"');
+  // v5.3 paper doll: bracers sit where the old Shoulders placeholder was.
+  const shouldersIdx = char.indexOf('slot="bracelets"');
   const weaponIdx = char.indexOf('slot="weapon"');
   if (
     helmetIdx > 0 &&
@@ -247,7 +248,7 @@ function main(): void {
   const necklaceIdx = char.indexOf('slot="necklace"');
   const glovesIdx = char.indexOf('slot="gloves"');
   const offhandIdx = char.indexOf('slot="offhand"');
-  const pantsIdx = char.indexOf('futureLabel="Pants"');
+  const pantsIdx = char.indexOf('slot="pants"');
   const bootsIdx = char.indexOf('slot="boots"');
   if (
     necklaceIdx > 0 &&
@@ -282,7 +283,7 @@ function main(): void {
   contains(arena, 'bg: "var(--sc-bronze)"', 'ranked tile = bronze fill');
   contains(arena, 'bg: "var(--sc-blood)"', 'wager tile = blood-red fill');
   // CTAs per tile
-  contains(arena, 'Find a sparring partner', 'friendly CTA');
+  contains(arena, 'Practice against a bot', 'friendly CTA (v5.2.2 Test Bot Fight)');
   contains(arena, 'Enter Queue ▾', 'ranked CTA');
   contains(arena, 'Create Wager ▾', 'wager CTA');
   // Queue panel with frog mascot
