@@ -71,6 +71,29 @@ const configured: V = { cc: G.CRIT_CHANCE_PER_INTUITION, cm: G.CRIT_MULTIPLIER_P
 
 function spread(avg: Record<string, number>) { return BUILDS.reduce((e, b) => e + (avg[b] - 0.5) ** 2, 0); }
 
+// TUNE=core — tune END / DEX / STR constants with INT as configured.
+if (process.env.TUNE === 'core') {
+  type C = { hpEnd: number; defEnd: number; acEnd: number; evaDex: number; dmgDex: number; aeStr: number };
+  const applyC = (c: C) => { G.HP_PER_ENDURANCE = c.hpEnd; G.DEFENSE_PER_ENDURANCE = c.defEnd; G.ANTI_CRIT_PER_ENDURANCE = c.acEnd;
+    G.EVASION_PER_DEXTERITY = c.evaDex; G.DEX_DAMAGE_BONUS = c.dmgDex; G.ANTI_EVASION_PER_STRENGTH = c.aeStr; };
+  const start: C = { hpEnd: G.HP_PER_ENDURANCE, defEnd: G.DEFENSE_PER_ENDURANCE, acEnd: G.ANTI_CRIT_PER_ENDURANCE,
+    evaDex: G.EVASION_PER_DEXTERITY, dmgDex: G.DEX_DAMAGE_BONUS, aeStr: G.ANTI_EVASION_PER_STRENGTH };
+  let best: C & { err: number } = { ...start, err: Infinity };
+  for (const hpEnd of [2, 2.5, 3]) for (const defEnd of [0.1, 0.15, 0.2, 0.3]) for (const acEnd of [0.2, 0.3])
+    for (const evaDex of [0.5, 0.65, 0.8]) for (const dmgDex of [0.15, 0.3]) for (const aeStr of [0.2, 0.3]) {
+      const c = { hpEnd, defEnd, acEnd, evaDex, dmgDex, aeStr }; applyC(c);
+      const { avg } = matrix(FIGHTS);
+      const err = spread(avg);
+      if (err < best.err) best = { ...c, err };
+    }
+  console.log(`best core: HP_PER_ENDURANCE=${best.hpEnd} DEFENSE_PER_ENDURANCE=${best.defEnd} ANTI_CRIT_PER_ENDURANCE=${best.acEnd} EVASION_PER_DEXTERITY=${best.evaDex} DEX_DAMAGE_BONUS=${best.dmgDex} ANTI_EVASION_PER_STRENGTH=${best.aeStr}`);
+  applyC(best);
+  const f = matrix(FIGHTS * 3);
+  console.log('| Build | ' + BUILDS.join(' | ') + ' |\n|---|' + BUILDS.map(() => '---').join('|') + '|');
+  console.log('| win % | ' + BUILDS.map((b) => `${Math.round(f.avg[b] * 100)}%`).join(' | ') + ' |');
+  process.exit(0);
+}
+
 if (!process.env.REPORT_ONLY) {
   apply({ ...configured, cc: 0.5, cm: 0.01, pierce: 0, cap: 25 });
   const before = matrix(FIGHTS);

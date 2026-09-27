@@ -380,29 +380,31 @@ async function main() {
   await mustRun(BOB, 'BOB can open a new wager after cancelling', createWager(BOB, STAKE));
 
   // ------------------------------------------------------------ items
-  section('Items — mint (budget rules), transfer, equip');
-  const mint = (name: string, type: number, rarity: number, slotType: number, b: number[], minD: number, maxD: number, level = 3) => (tx: Transaction) => {
-    const item = tx.moveCall({ target: t('item', 'mint_item_admin'), arguments: [
+  section('Items — mint (level power limits), transfer, equip');
+  const mint = (name: string, type: number, slotType: number, b: number[], minD: number, maxD: number, level = 3) => (tx: Transaction) => {
+    tx.moveCall({ target: t('item', 'mint_item_admin'), arguments: [
       tx.object(ADMIN), tx.pure.string(name), tx.pure.string(`ipfs://${name.toLowerCase().replace(/ /g, '-')}`),
-      tx.pure.u8(type), tx.pure.u8(0), tx.pure.u8(level), tx.pure.u8(rarity), tx.pure.u8(slotType),
+      tx.pure.u8(type), tx.pure.u8(0), tx.pure.u8(level), tx.pure.u8(slotType),
       ...b.map((v) => tx.pure.u16(v)), tx.pure.u16(minD), tx.pure.u16(maxD),
     ] });
-    void item;
   };
-  //                      STR DEX INT END HP ARM DEF ATK CRT CMUL EVA ACRT AEVA
+  //           STR DEX INT END HP ARM DEF ATK CRT CMUL EVA ACRT AEVA
   const Z = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  const sword = [2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0]; // + dmg 3-8 → budget 12/20
-  await mustAbort(TREASURY, 'mint Common with 25 STR (budget 20)', 'item', 5, mint('Greedy Blade', 1, 1, 0, [25, ...Z.slice(1)], 1, 2));
-  await mustAbort(TREASURY, 'v5.3 gate: weapon at level 2', 'item', 9, mint('Baby Sword', 1, 1, 0, sword, 3, 8, 2));
-  await mustAbort(TREASURY, 'v5.3 gate: shield at level 1', 'item', 9, mint('Baby Shield', 2, 1, 1, Z, 0, 0, 1));
-  await mustAbort(TREASURY, 'v5.3 gate: Legendary helmet at level 10', 'item', 8, mint('Early Crown', 3, 5, 0, [0, 0, 0, 0, 5, ...Z.slice(5)], 0, 0, 10));
-  await mustAbort(TREASURY, 'v5.3 gate: Uncommon helmet at level 2', 'item', 8, mint('Early Cap', 3, 2, 0, [0, 0, 0, 0, 5, ...Z.slice(5)], 0, 0, 2));
-  await mustRun(TREASURY, 'v5.3 gate: Common helmet at level 1 is allowed', mint('Leather Cap', 3, 1, 0, [0, 0, 0, 0, 5, ...Z.slice(5)], 0, 0, 1));
-  await mustAbort(TREASURY, 'mint shield as mainhand', 'item', 6, mint('Wrong Shield', 2, 1, 0, Z, 0, 0));
-  await mustFail(ALICE, 'player mints using TREASURY\'s AdminCap', mint('Stolen Blade', 1, 1, 0, sword, 3, 8));
-  const m1 = await mustRun(TREASURY, 'mint Common "Iron Gladius" (STR+2 ATK+2 dmg 3-8)', mint('Iron Gladius', 1, 1, 0, sword, 3, 8));
+  const withStat = (i: number, v: number) => Z.map((x, j) => (j === i ? v : x));
+  const sword = [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0];   // STR+1 ATK+1, dmg 1-2 → power 5+7+12 = 24 ≤ 28 (level 3)
+  await mustAbort(TREASURY, 'level-3 sword with STR +25 (power 125 > 28)', 'item', 5, mint('Greedy Blade', 1, 0, withStat(0, 25), 1, 2));
+  await mustAbort(TREASURY, 'level-1 chest with ARM +100', 'item', 5, mint('Cheat Plate', 4, 0, withStat(5, 100), 0, 0, 1));
+  await mustAbort(TREASURY, 'ring with crit +21 (chance cap 20)', 'item', 10, mint('Cheat Ring', 8, 0, withStat(8, 21), 0, 0, 20));
+  await mustAbort(TREASURY, 'item with level_req 0', 'item', 11, mint('Nothing', 3, 0, Z, 0, 0, 0));
+  await mustAbort(TREASURY, 'weapon at level 2 (bare-handed levels)', 'item', 9, mint('Baby Sword', 1, 0, sword, 1, 2, 2));
+  await mustAbort(TREASURY, 'shield at level 1', 'item', 9, mint('Baby Shield', 2, 1, Z, 0, 0, 1));
+  await mustRun(TREASURY, 'level-1 helmet HP +5 is allowed', mint('Leather Cap', 3, 0, withStat(4, 5), 0, 0, 1));
+  await mustRun(TREASURY, 'level-20 ring INT +10 (chance 20) is allowed', mint('Seer Band', 8, 0, withStat(2, 10), 0, 0, 20));
+  await mustAbort(TREASURY, 'mint shield as mainhand', 'item', 6, mint('Wrong Shield', 2, 0, Z, 0, 0));
+  await mustFail(ALICE, 'player mints using TREASURY\'s AdminCap', mint('Stolen Blade', 1, 0, sword, 1, 2));
+  const m1 = await mustRun(TREASURY, 'mint level-3 "Iron Gladius" (STR+1 ATK+1 dmg 1-2)', mint('Iron Gladius', 1, 0, sword, 1, 2));
   const SWORD = created(m1, '::item::Item');
-  const m2 = await mustRun(TREASURY, 'mint Uncommon "Bronze Hoplon" shield (ARM+6 DEF+4 HP+12)', mint('Bronze Hoplon', 2, 2, 1, [0, 0, 0, 0, 12, 6, 4, 0, 0, 0, 0, 0, 0], 0, 0));
+  const m2 = await mustRun(TREASURY, 'mint level-3 "Bronze Hoplon" shield (ARM+2 HP+5)', mint('Bronze Hoplon', 2, 1, [0, 0, 0, 0, 5, 2, 0, 0, 0, 0, 0, 0, 0], 0, 0));
   const SHIELD = created(m2, '::item::Item');
   await mustRun(TREASURY, 'transfer both items to ALICE', (tx) => { tx.transferObjects([tx.object(SWORD), tx.object(SHIELD)], ALICE.addr); });
   await mustAbort(ALICE, 'level-1 ALICE equips a level-3 sword', 'equipment', 3, (tx) => {

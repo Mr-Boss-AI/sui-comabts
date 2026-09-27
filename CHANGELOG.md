@@ -28,6 +28,10 @@ All notable changes to SUI Combats. Format follows
 - **combat — INT buff + crit through block** (`scripts/stat-balance.ts`): INT gives 1.25% crit chance (was 0.5) and +0.02× crit dmg (was 0.01) per point, crit cap 30% (was 25); a crit into a guarded zone still lands 20% of its crit damage. INT build 36% → 51% average win rate. Dual-wield strike factor re-tuned to 0.675, two-hander ×1.4.
 - **item.move — level gates:** weapons and shields need `level_req` ≥ 3 (`EHandItemLevelTooLow = 9`); minimum level per rarity Uncommon 3 / Rare 5 / Epic 8 / Legendary 11 (`ERarityLevelTooLow = 8`). 9 new Move tests (161/161).
 
+- **item.move — rarity removed.** Items have only a level and stats. The `rarity` field, parameter and per-rarity budgets/gates are gone; replaced by a level-scaled **flat power limit** (HP×1, ARM/DEF/ATK/END×7, max_damage×6, STR×5, DEX×3 ≤ 0.477L²+4.62L+10.8) and a **chance-points limit** (INT×2 + crit% + evasion% + anti-crit% + anti-evasion% + critdmg÷10 ≤ 20). New codes 10 `EChancePointsExceeded`, 11 `ELevelReqZero`; 1 and 8 retired. Weapons/shields still need level 3+.
+- **combat — core stat rebalance** (`scripts/stat-balance.ts`, `scripts/item-catalog.ts`): END defense 0.3→0.1 per point, DEX evasion 0.5%→0.8% per point, evasion cap 30→35%, crits ignore 20% of armor (was 50%), crit through block 10%, dual-wield strike 0.725, two-hander ×1.5. Stat builds win 49–52% vs each other; build-themed gear sets 43–58% (INT vs END at Lv20 64%).
+- **docs/ITEM_DESIGN_GUIDE.md** rewritten: build variants per slot (STR/DEX/INT/END, heavy/light/mystic) instead of rarity tiers.
+
 ### Added
 - **guild.move:** guilds (1 SUI fee, 30 members, Leader/Officer/Member, invite/open join, treasury, disband, war-lock hook). 44 Move tests.
 - `scripts/e2e-localnet.ts` — full publish + characters + guilds + wagers + items + battles on a local chain (102/102).

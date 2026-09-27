@@ -110,10 +110,11 @@ export function computeDerivedStats(
   const critMultiplier = 1.5 + stats.intuition * 0.02 + eqCritMult / 100;
 
   const opAntiEvasion = opponentStats ? opponentStats.strength * 0.3 : 0;
-  const evasionChance = Math.min(30, stats.dexterity * 0.5 + eqEvasion - opAntiEvasion);
+  // v5.3 — mirrors server EVASION_PER_DEXTERITY=0.8, EVASION_CAP=35, DEFENSE_PER_ENDURANCE=0.1.
+  const evasionChance = Math.min(35, stats.dexterity * 0.8 + eqEvasion - opAntiEvasion);
 
   const armor = eqArmor;
-  const defense = Math.max(0, stats.endurance * 0.3 + eqDefense);
+  const defense = Math.max(0, stats.endurance * 0.1 + eqDefense);
 
   return {
     maxHp: Math.round(Math.max(1, maxHp)),

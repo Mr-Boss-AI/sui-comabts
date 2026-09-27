@@ -21,7 +21,6 @@ const { createFighterState, resolveTurn, checkFightEnd, generateRandomAction, ge
 const G = GAME_CONSTANTS as any;
 const FIGHTS = Number(process.env.FIGHTS ?? 800);
 const LEVELS = [3, 8, 12, 18];
-const RARITY = process.env.RARITY ?? 'Rare';
 const EMPTY = { weapon: null, offhand: null, helmet: null, chest: null, gloves: null, boots: null, belt: null,
   ring1: null, ring2: null, necklace: null, ring3: null, pants: null, bracelets: null };
 
@@ -29,13 +28,27 @@ const EMPTY = { weapon: null, offhand: null, helmet: null, chest: null, gloves: 
 const guide = fs.readFileSync(path.resolve(__dirname, '../docs/ITEM_DESIGN_GUIDE.md'), 'utf8');
 const KEYMAP: Record<string, string> = { HP: 'hp', ARM: 'armor', DEF: 'defense', ATK: 'damage', STR: 'strength', DEX: 'dexterity',
   END: 'endurance', 'CRIT%': 'critBonus', 'EVA%': 'evasion', 'ANTICRIT%': 'antiCrit', 'ANTIEVA%': 'antiEvasion' };
-const SLOTMAP: Record<string, string> = { 'Weapon (1-hand)': 'weapon', Shield: 'offhand', Helmet: 'helmet', Chest: 'chest', Gloves: 'gloves',
-  Boots: 'boots', Belt: 'belt', Legs: 'pants', Bracers: 'bracelets', Necklace: 'necklace', 'Ring (Strength)': 'ring1',
-  'Ring (Endurance)': 'ring2', 'Ring (Dexterity)': 'ring3', 'Weapon (2-hand, no shield)': 'twoHand' };
+// Which build variant from the guide to use per slot (STR / heavy kit).
+const PICK: Record<string, [string, string, number, number]> = {
+  weapon: ['Weapon (1-hand)', 'Sword — STR', 1, 0],
+  twoHand: ['Weapon (2-hand)', 'Greatsword — STR', 1, 2],
+  offhand: ['Shield', 'Heater shield', 2, 1],
+  helmet: ['Helmet', 'Helm — heavy', 3, 0],
+  chest: ['Chest', 'Plate / mail — heavy', 4, 0],
+  gloves: ['Gloves', 'Gauntlets — striker', 5, 0],
+  boots: ['Boots', 'Greaves — heavy', 6, 0],
+  belt: ['Belt', 'Girdle', 7, 0],
+  pants: ['Legs', 'Chausses — heavy', 10, 0],
+  bracelets: ['Bracers', 'Vambraces — STR', 11, 0],
+  necklace: ['Necklace', 'Amulet — crit', 9, 0],
+  ring1: ['Ring', 'Ring of Strength', 8, 0],
+  ring2: ['Ring', 'Ring of Strength', 8, 0],
+  ring3: ['Ring', 'Ring of Strength', 8, 0],
+};
 
 function parseCell(cell: string, type: number, slotType: number) {
   const bonus: Record<string, number> = {}; let min = 0, max = 0;
-  for (const part of cell.replace('⚠️ over budget', '').split(',').map((x) => x.trim()).filter(Boolean)) {
+  for (const part of cell.split(',').map((x) => x.trim()).filter(Boolean)) {
     const d = part.match(/^DMG (\d+)-(\d+)$/);
     if (d) { min = Number(d[1]); max = Number(d[2]); continue; }
     const m = part.match(/^(\S+) \+(\d+)$/);
@@ -44,20 +57,25 @@ function parseCell(cell: string, type: number, slotType: number) {
   return { statBonuses: bonus, minDamage: min, maxDamage: max, itemType: type, slotType };
 }
 
+function cellFor(section: string, variant: string, level: number): string | null {
+  const block = guide.split(`\n### ${section}\n`)[1]?.split('\n### ')[0];
+  if (!block) throw new Error(`no section ${section}`);
+  let header: string[] = [];
+  for (const line of block.split('\n')) {
+    if (!line.startsWith('| ')) continue;
+    const cells = line.split('|').slice(1, -1).map((x) => x.trim());
+    if (cells[0] === 'Variant') { header = cells; continue; }
+    const col = header.indexOf(`Lv${level}`);
+    if (cells[0] === variant && col > 0) return cells[col] === '—' ? null : cells[col];
+  }
+  throw new Error(`no cell ${section}/${variant}/Lv${level}`);
+}
+
 function gear(level: number): Record<string, any> {
-  const block = guide.split(`### Level ${level} items`)[1];
-  if (!block) throw new Error(`no table for level ${level} in guide`);
-  const lines = block.split('\n').filter((l) => l.startsWith('| ')).slice(0);
-  const header = lines[0].split('|').map((x) => x.trim()).filter(Boolean);
-  const col = header.indexOf(RARITY);
   const out: Record<string, any> = {};
-  for (const l of lines.slice(1)) {
-    const cells = l.split('|').map((x) => x.trim()).filter((x, i, a) => i > 0 && i < a.length - 1);
-    const slot = SLOTMAP[cells[0]];
-    if (!slot) continue;
-    const type = slot === 'weapon' || slot === 'twoHand' ? 1 : slot === 'offhand' ? 2 : 3;
-    const slotType = slot === 'twoHand' ? 2 : slot === 'offhand' ? 1 : 0;
-    out[slot] = parseCell(cells[col], type, slotType);
+  for (const [slot, [section, variant, type, slotType]] of Object.entries(PICK)) {
+    const c = cellFor(section, variant, level);
+    if (c) out[slot] = parseCell(c, type, slotType);
   }
   return out;
 }
@@ -131,7 +149,7 @@ if (!process.env.REPORT_ONLY) {
 function report(label: string, v: V) {
   apply(v);
   const { rates } = score(FIGHTS * 3);
-  console.log(`\n${label} (offhand dmg ${v.f}, dual hit ${v.hit}, shield leak ${v.leak}, 2H mult ${v.mult}) — ${RARITY} gear\n| Level | ${PAIRS.map((p) => p[0]).join(' | ')} |\n|---|---|---|---|`);
+  console.log(`\n${label} (offhand dmg ${v.f}, dual hit ${v.hit}, shield leak ${v.leak}, 2H mult ${v.mult}) — STR/heavy kit\n| Level | ${PAIRS.map((p) => p[0]).join(' | ')} |\n|---|---|---|---|`);
   LEVELS.forEach((L, i) => console.log(`| ${L} | ${rates[i].map((r) => `${Math.round(r * 100)}%`).join(' | ')} |`));
 }
 if (!process.env.REPORT_ONLY) report('Best found', best);

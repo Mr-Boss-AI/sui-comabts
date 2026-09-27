@@ -8,22 +8,25 @@ module sui_combats::item {
 
     // ===== Error constants =====
     const EInvalidItemType: u64 = 0;
-    const EInvalidRarity: u64 = 1;
+    // v5.3 — code 1 (EInvalidRarity) retired with rarity.
     const EBonusTooHigh: u64 = 2;
     const ELevelReqTooHigh: u64 = 3;
     const EDamageRangeInvalid: u64 = 4;
-    /// v5.1 — Sum of all stat bonuses exceeds the rarity budget.
-    const ERarityBudgetExceeded: u64 = 5;
+    /// v5.3 — Item's weighted flat-stat power exceeds max_flat_power(level_req).
+    const EPowerBudgetExceeded: u64 = 5;
     /// v5.1 — Generic slot_type-shape mismatch (helmet/chest/etc with slot_type != 0).
     const EInvalidSlotType: u64 = 6;
     /// v5.1 — Weapon slot_type must be 0 (mainhand) or 2 (both_hands).
     const EWeaponSlotTypeInvalid: u64 = 7;
-    /// v5.3 — level_req is below the minimum for the item's rarity
-    /// (no Legendary at level 1). See min_level_for_rarity.
-    const ERarityLevelTooLow: u64 = 8;
+    // v5.3 — code 8 (ERarityLevelTooLow) retired with rarity.
     /// v5.3 — weapons and shields need level_req >= MIN_HAND_ITEM_LEVEL
     /// (levels 1-2 fight bare-handed).
     const EHandItemLevelTooLow: u64 = 9;
+    /// v5.3 — Item's chance points (INT, crit %, evasion %, anti-crit %,
+    /// anti-evasion %, crit damage) exceed MAX_CHANCE_POINTS.
+    const EChancePointsExceeded: u64 = 10;
+    /// v5.3 — level_req must be at least 1.
+    const ELevelReqZero: u64 = 11;
 
     // ===== Item type constants =====
     const WEAPON: u8 = 1;
@@ -40,12 +43,6 @@ module sui_combats::item {
     const PANTS: u8 = 10;
     const BRACELETS: u8 = 11;
 
-    // ===== Rarity constants =====
-    const COMMON: u8 = 1;
-    const UNCOMMON: u8 = 2;
-    const RARE: u8 = 3;
-    const EPIC: u8 = 4;
-    const LEGENDARY: u8 = 5;
 
     // ===== Slot type constants (v5.1) =====
     /// Single-slot mainhand weapon. Goes in the weapon slot only.
@@ -67,24 +64,30 @@ module sui_combats::item {
     // ===== Level gates (v5.3) =====
     /// Weapons + shields start at this level; levels 1-2 are bare-handed.
     const MIN_HAND_ITEM_LEVEL: u8 = 3;
-    /// Minimum level_req per rarity. Keeps high-rarity power out of the
-    /// low levels, where one point of armor/attack decides fights.
-    const MIN_LEVEL_COMMON: u8 = 1;
-    const MIN_LEVEL_UNCOMMON: u8 = 3;
-    const MIN_LEVEL_RARE: u8 = 5;
-    const MIN_LEVEL_EPIC: u8 = 8;
-    const MIN_LEVEL_LEGENDARY: u8 = 11;
 
-    // ===== Per-rarity stat budgets (v5.1) =====
-    // Sum of every *_bonus field + max_damage must be ≤ budget. This caps the
-    // power a Legendary can have without disabling individual-field caps. User-
-    // specified per GDD §5.4 update — see docs/V5.1_OVERNIGHT_LOG_2026-05-28.md
-    // §D4 for rationale.
-    const BUDGET_COMMON: u32 = 20;
-    const BUDGET_UNCOMMON: u32 = 40;
-    const BUDGET_RARE: u32 = 70;
-    const BUDGET_EPIC: u32 = 110;
-    const BUDGET_LEGENDARY: u32 = 160;
+
+    // ===== Item power limits (v5.3 — no rarity tiers) =====
+    // Every item is judged only by its level and stats. Two limits, both
+    // derived from simulated fights (scripts/balance-sim.ts):
+    //
+    // 1. Flat power — stats whose value grows with level. Each point costs
+    //    its fight value in HP-equivalents:
+    //      HP 1 · ARM 7 · DEF 7 · ATK 7 · max_damage 6 · STR 5 · DEX 3 · END 7
+    //    Cap = max_flat_power(level_req) ≈ 3 "edge units" at that level
+    //    (0.477·L² + 4.62·L + 10.8). The design tables use far less; the cap
+    //    only stops broken mints (e.g. ARM +100 at level 1).
+    // 2. Chance points — stats worth about the same at every level:
+    //      INT ×2 · crit % · evasion % · anti-crit % · anti-evasion % · crit dmg ÷10
+    //    Cap = MAX_CHANCE_POINTS per item.
+    const W_HP: u64 = 1;
+    const W_ARMOR: u64 = 7;
+    const W_DEFENSE: u64 = 7;
+    const W_ATTACK: u64 = 7;
+    const W_MAX_DAMAGE: u64 = 6;
+    const W_STRENGTH: u64 = 5;
+    const W_DEXTERITY: u64 = 3;
+    const W_ENDURANCE: u64 = 7;
+    const MAX_CHANCE_POINTS: u64 = 20;
 
     // ===== One-time witness for Publisher =====
     public struct ITEM has drop {}
@@ -97,7 +100,6 @@ module sui_combats::item {
         item_type: u8,
         class_req: u8,
         level_req: u8,
-        rarity: u8,
         /// v5.1 — slot_type enforces the shield-vs-dual-wield-vs-two-handed
         /// trinity. 0=mainhand, 1=offhand, 2=both_hands. equip_weapon /
         /// equip_offhand consume this field; the frontend reads it directly
@@ -127,7 +129,7 @@ module sui_combats::item {
         item_id: ID,
         name: String,
         item_type: u8,
-        rarity: u8,
+        level_req: u8,
         slot_type: u8,
         owner: address,
     }
@@ -144,24 +146,41 @@ module sui_combats::item {
         transfer::public_transfer(publisher, tx_context::sender(ctx));
     }
 
-    /// v5.1 — Per-rarity budget lookup. Pure helper exposed for tests + clients.
-    public fun budget_for_rarity(rarity: u8): u32 {
-        if (rarity == COMMON) { BUDGET_COMMON }
-        else if (rarity == UNCOMMON) { BUDGET_UNCOMMON }
-        else if (rarity == RARE) { BUDGET_RARE }
-        else if (rarity == EPIC) { BUDGET_EPIC }
-        else if (rarity == LEGENDARY) { BUDGET_LEGENDARY }
-        else { 0 }  // unreachable — EInvalidRarity catches it before this is called
+    /// v5.3 — Max weighted flat-stat power for an item of `level`.
+    public fun max_flat_power(level: u8): u64 {
+        let l = level as u64;
+        (477 * l * l + 4620 * l + 10800) / 1000
     }
 
-    /// v5.3 — Minimum level_req for a rarity. Pure helper for tests + clients.
-    public fun min_level_for_rarity(rarity: u8): u8 {
-        if (rarity == COMMON) { MIN_LEVEL_COMMON }
-        else if (rarity == UNCOMMON) { MIN_LEVEL_UNCOMMON }
-        else if (rarity == RARE) { MIN_LEVEL_RARE }
-        else if (rarity == EPIC) { MIN_LEVEL_EPIC }
-        else { MIN_LEVEL_LEGENDARY }
+    /// v5.3 — Weighted flat-stat power (HP-equivalents).
+    public fun flat_power(
+        strength: u16, dexterity: u16, endurance: u16, hp: u16,
+        armor: u16, defense: u16, attack: u16, max_damage: u16,
+    ): u64 {
+        (hp as u64) * W_HP
+            + (armor as u64) * W_ARMOR
+            + (defense as u64) * W_DEFENSE
+            + (attack as u64) * W_ATTACK
+            + (max_damage as u64) * W_MAX_DAMAGE
+            + (strength as u64) * W_STRENGTH
+            + (dexterity as u64) * W_DEXTERITY
+            + (endurance as u64) * W_ENDURANCE
     }
+
+    /// v5.3 — Chance points (level-independent stats).
+    public fun chance_points(
+        intuition: u16, crit_chance: u16, crit_multiplier: u16,
+        evasion: u16, anti_crit: u16, anti_evasion: u16,
+    ): u64 {
+        (intuition as u64) * 2
+            + (crit_chance as u64)
+            + (evasion as u64)
+            + (anti_crit as u64)
+            + (anti_evasion as u64)
+            + (crit_multiplier as u64) / 10
+    }
+
+    public fun max_chance_points(): u64 { MAX_CHANCE_POINTS }
 
     /// v5.3 — Minimum level_req for weapons and shields.
     public fun min_hand_item_level(): u8 { MIN_HAND_ITEM_LEVEL }
@@ -171,7 +190,7 @@ module sui_combats::item {
     /// Mint a new item NFT. Admin-only — requires the AdminCap held by the server/treasury.
     /// Items mint to the sender (TREASURY) and are then transferred to players.
     /// Stat bonuses, level requirement, damage range, slot_type shape, and the
-    /// rarity stat-budget are all bounded.
+    /// v5.3 level-scaled power limits are all bounded. No rarity tiers.
     public fun mint_item_admin(
         _admin: &AdminCap,
         name: String,
@@ -179,7 +198,6 @@ module sui_combats::item {
         item_type: u8,
         class_req: u8,
         level_req: u8,
-        rarity: u8,
         slot_type: u8,
         strength_bonus: u16,
         dexterity_bonus: u16,
@@ -199,12 +217,11 @@ module sui_combats::item {
         ctx: &mut TxContext,
     ) {
         assert!(item_type >= WEAPON && item_type <= BRACELETS, EInvalidItemType);
-        assert!(rarity >= COMMON && rarity <= LEGENDARY, EInvalidRarity);
+        assert!(level_req >= 1, ELevelReqZero);
         assert!(level_req <= MAX_LEVEL_REQ, ELevelReqTooHigh);
         assert!(min_damage <= max_damage, EDamageRangeInvalid);
 
-        // v5.3 — level gates.
-        assert!(level_req >= min_level_for_rarity(rarity), ERarityLevelTooLow);
+        // v5.3 — weapons + shields start at MIN_HAND_ITEM_LEVEL.
         if (item_type == WEAPON || item_type == SHIELD) {
             assert!(level_req >= MIN_HAND_ITEM_LEVEL, EHandItemLevelTooLow);
         };
@@ -223,8 +240,8 @@ module sui_combats::item {
             assert!(slot_type == SLOT_MAINHAND, EInvalidSlotType);
         };
 
-        // Bound every stat-bonus field individually (defence-in-depth — rarity
-        // budget below is the tighter gate, but individual caps prevent
+        // Bound every stat-bonus field individually (defence-in-depth — the
+        // power limits below are the tighter gate, but individual caps prevent
         // overflow on combat math intermediaries).
         assert!(strength_bonus        <= MAX_BONUS, EBonusTooHigh);
         assert!(dexterity_bonus       <= MAX_BONUS, EBonusTooHigh);
@@ -241,24 +258,17 @@ module sui_combats::item {
         assert!(anti_evasion_bonus    <= MAX_BONUS, EBonusTooHigh);
         assert!(max_damage            <= MAX_BONUS, EBonusTooHigh);
 
-        // v5.1 — Rarity stat budget. Sum of every *_bonus field + max_damage
-        // must be ≤ the rarity's budget. Promotes a real power-tier hierarchy:
-        // a Legendary can stat-stack more than a Common but not arbitrarily.
-        let total_budget = (strength_bonus as u32)
-            + (dexterity_bonus as u32)
-            + (intuition_bonus as u32)
-            + (endurance_bonus as u32)
-            + (hp_bonus as u32)
-            + (armor_bonus as u32)
-            + (defense_bonus as u32)
-            + (attack_bonus as u32)
-            + (crit_chance_bonus as u32)
-            + (crit_multiplier_bonus as u32)
-            + (evasion_bonus as u32)
-            + (anti_crit_bonus as u32)
-            + (anti_evasion_bonus as u32)
-            + (max_damage as u32);
-        assert!(total_budget <= budget_for_rarity(rarity), ERarityBudgetExceeded);
+        // v5.3 — level-scaled power limits (replace rarity budgets).
+        let power = flat_power(
+            strength_bonus, dexterity_bonus, endurance_bonus, hp_bonus,
+            armor_bonus, defense_bonus, attack_bonus, max_damage,
+        );
+        assert!(power <= max_flat_power(level_req), EPowerBudgetExceeded);
+        let chance = chance_points(
+            intuition_bonus, crit_chance_bonus, crit_multiplier_bonus,
+            evasion_bonus, anti_crit_bonus, anti_evasion_bonus,
+        );
+        assert!(chance <= MAX_CHANCE_POINTS, EChancePointsExceeded);
 
         let item = Item {
             id: object::new(ctx),
@@ -267,7 +277,6 @@ module sui_combats::item {
             item_type,
             class_req,
             level_req,
-            rarity,
             slot_type,
             strength_bonus,
             dexterity_bonus,
@@ -293,7 +302,7 @@ module sui_combats::item {
             item_id,
             name: item.name,
             item_type,
-            rarity,
+            level_req,
             slot_type,
             owner,
         });
@@ -306,7 +315,6 @@ module sui_combats::item {
     public fun item_type(item: &Item): u8 { item.item_type }
     public fun class_req(item: &Item): u8 { item.class_req }
     public fun level_req(item: &Item): u8 { item.level_req }
-    public fun rarity(item: &Item): u8 { item.rarity }
     /// v5.1 — slot_type accessor. equipment.move consumes this; frontend reads
     /// it directly when building the equipment picker.
     public fun slot_type(item: &Item): u8 { item.slot_type }

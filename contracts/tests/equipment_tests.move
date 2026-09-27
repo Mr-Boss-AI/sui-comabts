@@ -57,12 +57,11 @@ module sui_combats::equipment_tests {
 
     const ALICE_LEVEL: u8 = 5;
 
-    /// v5.3 — lift a requested level_req to the item's legal minimum
-    /// (rarity gate, and the weapon/shield gate when `hand`).
-    fun gated(level_req: u8, rarity: u8, hand: bool): u8 {
+    /// v5.3 — lift a requested level_req to the legal minimum for
+    /// weapons/shields (`hand`); anything else must be at least 1.
+    fun gated(level_req: u8, hand: bool): u8 {
         let mut l = level_req;
-        let r = item::min_level_for_rarity(rarity);
-        if (l < r) { l = r };
+        if (l < 1) { l = 1 };
         if (hand && l < item::min_hand_item_level()) { l = item::min_hand_item_level() };
         l
     }
@@ -77,11 +76,11 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Sword"),
                 string::utf8(b"ipfs://sword"),
                 item::weapon_type(),
-                0, gated(level_req, 2, true), 2,
+                0, gated(level_req, true),
                 item::slot_mainhand(),
-                0, 0, 0, 0, 0, 0, 0, 5,
+                0, 0, 0, 0, 0, 0, 0, 1,
                 0, 0, 0, 0, 0,
-                10, 20,
+                1, 2,
                 ts::ctx(scenario),
             );
             ts::return_to_sender(scenario, admin);
@@ -104,11 +103,11 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Greatsword"),
                 string::utf8(b"ipfs://greatsword"),
                 item::weapon_type(),
-                0, gated(level_req, 3, true), 3,     // RARE
+                0, gated(level_req, true),
                 item::slot_both_hands(),
-                0, 0, 0, 0, 0, 0, 0, 5,
+                0, 0, 0, 0, 0, 0, 0, 1,
                 0, 0, 0, 0, 0,
-                25, 40,
+                2, 3,
                 ts::ctx(scenario),
             );
             ts::return_to_sender(scenario, admin);
@@ -131,9 +130,9 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Buckler"),
                 string::utf8(b"ipfs://shield"),
                 item::shield_type(),
-                0, gated(level_req, 2, true), 2,
+                0, gated(level_req, true),
                 item::slot_offhand(),
-                0, 0, 0, 0, 0, 5, 0, 0,
+                0, 0, 0, 0, 0, 2, 0, 0,
                 0, 0, 0, 0, 0,
                 0, 0,
                 ts::ctx(scenario),
@@ -226,7 +225,7 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Helm"),
                 string::utf8(b"ipfs://helm"),
                 item::helmet_type(),
-                0, 3, 2,
+                0, 3,
                 item::slot_mainhand(),
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0,
@@ -320,11 +319,11 @@ module sui_combats::equipment_tests {
                 string::utf8(b"Sword2"),
                 string::utf8(b"ipfs://sword2"),
                 item::weapon_type(),
-                0, 3, 2,
+                0, 3,
                 item::slot_mainhand(),
-                0, 0, 0, 0, 0, 0, 0, 5,
+                0, 0, 0, 0, 0, 0, 0, 1,
                 0, 0, 0, 0, 0,
-                10, 20,
+                1, 2,
                 ts::ctx(&mut scenario),
             );
             ts::return_to_sender(&scenario, admin);
@@ -524,7 +523,6 @@ module sui_combats::equipment_tests {
         scenario: &mut ts::Scenario,
         item_type: u8,
         level_req: u8,
-        rarity: u8,
         name_bytes: vector<u8>,
     ) {
         ts::next_tx(scenario, PUBLISHER);
@@ -535,9 +533,9 @@ module sui_combats::equipment_tests {
                 string::utf8(name_bytes),
                 string::utf8(b"ipfs://misc"),
                 item_type,
-                0, gated(level_req, rarity, item_type == item::weapon_type() || item_type == item::shield_type()), rarity,
+                0, gated(level_req, item_type == item::weapon_type() || item_type == item::shield_type()),
                 item::slot_mainhand(),
-                0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
                 0, 0,
                 ts::ctx(scenario),
             );
@@ -554,7 +552,7 @@ module sui_combats::equipment_tests {
     fun test_equip_unequip_pants_happy() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        mint_misc_to_alice(&mut scenario, item::pants_type(), 1, 2, b"Greaves");
+        mint_misc_to_alice(&mut scenario, item::pants_type(), 1, b"Greaves");
 
         ts::next_tx(&mut scenario, ALICE);
         {
@@ -578,7 +576,7 @@ module sui_combats::equipment_tests {
     fun test_equip_unequip_bracelets_happy() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, 2, b"Wraps");
+        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, b"Wraps");
 
         ts::next_tx(&mut scenario, ALICE);
         {
@@ -603,7 +601,7 @@ module sui_combats::equipment_tests {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
         // ring_3 takes item_type=RING (same as ring_1 / ring_2).
-        mint_misc_to_alice(&mut scenario, item::ring_type(), 1, 1, b"Third Band");
+        mint_misc_to_alice(&mut scenario, item::ring_type(), 1, b"Third Band");
 
         ts::next_tx(&mut scenario, ALICE);
         {
@@ -628,7 +626,7 @@ module sui_combats::equipment_tests {
     fun test_equip_pants_with_helmet_aborts() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        mint_misc_to_alice(&mut scenario, item::helmet_type(), 1, 2, b"Helm");
+        mint_misc_to_alice(&mut scenario, item::helmet_type(), 1, b"Helm");
 
         ts::next_tx(&mut scenario, ALICE);
         {
@@ -647,8 +645,8 @@ module sui_combats::equipment_tests {
     fun test_equip_bracelets_slot_occupied_aborts() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, 2, b"Br1");
-        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, 2, b"Br2");
+        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, b"Br1");
+        mint_misc_to_alice(&mut scenario, item::bracelets_type(), 1, b"Br2");
 
         ts::next_tx(&mut scenario, ALICE);
         {
@@ -675,7 +673,7 @@ module sui_combats::equipment_tests {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
         // Level-15 ring; ALICE is level 5.
-        mint_misc_to_alice(&mut scenario, item::ring_type(), 15, 4, b"Epic Ring");
+        mint_misc_to_alice(&mut scenario, item::ring_type(), 15, b"Epic Ring");
 
         ts::next_tx(&mut scenario, ALICE);
         {
@@ -694,7 +692,7 @@ module sui_combats::equipment_tests {
     fun test_equip_pants_during_fight_lock_aborts() {
         let mut scenario = ts::begin(PUBLISHER);
         let clock = bootstrap_alice(&mut scenario);
-        mint_misc_to_alice(&mut scenario, item::pants_type(), 1, 2, b"P");
+        mint_misc_to_alice(&mut scenario, item::pants_type(), 1, b"P");
 
         ts::next_tx(&mut scenario, PUBLISHER);
         {
