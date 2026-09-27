@@ -53,6 +53,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::weapon_type(), EWrongItemType);
@@ -84,6 +85,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         // Offhand accepts SHIELD or a single-hand WEAPON (dual-wield).
@@ -125,6 +127,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::helmet_type(), EWrongItemType);
@@ -146,6 +149,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::chest_type(), EWrongItemType);
@@ -167,6 +171,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::gloves_type(), EWrongItemType);
@@ -188,6 +193,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::boots_type(), EWrongItemType);
@@ -209,6 +215,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::belt_type(), EWrongItemType);
@@ -230,6 +237,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::ring_type(), EWrongItemType);
@@ -251,6 +259,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::ring_type(), EWrongItemType);
@@ -273,6 +282,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::ring_type(), EWrongItemType);
@@ -294,6 +304,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::necklace_type(), EWrongItemType);
@@ -318,6 +329,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::pants_type(), EWrongItemType);
@@ -339,6 +351,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::bracelets_type(), EWrongItemType);
@@ -361,6 +374,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
         assert!(item::item_type(&item) == item::earrings_type(), EWrongItemType);
@@ -386,6 +400,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -405,6 +420,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -424,6 +440,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -443,6 +460,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -462,6 +480,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -481,6 +500,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -500,6 +520,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -519,6 +540,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -538,6 +560,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -558,6 +581,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -577,6 +601,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -598,6 +623,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -617,6 +643,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -637,6 +664,7 @@ module sui_combats::equipment {
         clock: &Clock,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
         assert!(!character::is_fight_locked(character, clock), EFightLocked);
 
@@ -662,6 +690,7 @@ module sui_combats::equipment {
         character: &mut Character,
         ctx: &TxContext,
     ) {
+        character::check_version(character);
         assert!(character::owner(character) == tx_context::sender(ctx), ENotOwner);
 
         let owner = character::owner(character);

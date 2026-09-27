@@ -1,5 +1,6 @@
 #[allow(lint(self_transfer, share_owned))]
 module sui_combats::marketplace {
+    use sui_combats::version;
     use sui::event;
     use sui::coin::{Self, Coin};
     use sui::sui::SUI;
@@ -32,6 +33,7 @@ module sui_combats::marketplace {
     /// redundant after v5.1.
     public struct KioskRegistry has key {
         id: UID,
+        version: u64,
         table: Table<address, ID>,
     }
 
@@ -78,6 +80,7 @@ module sui_combats::marketplace {
     fun init(ctx: &mut TxContext) {
         let registry = KioskRegistry {
             id: object::new(ctx),
+            version: version::current(),
             table: table::new<address, ID>(ctx),
         };
         transfer::share_object(registry);
@@ -103,6 +106,7 @@ module sui_combats::marketplace {
         registry: &mut KioskRegistry,
         ctx: &mut TxContext,
     ): ID {
+        version::check(registry.version);
         let owner = tx_context::sender(ctx);
 
         if (table::contains(&registry.table, owner)) {
@@ -238,4 +242,9 @@ module sui_combats::marketplace {
     public fun registry_get(registry: &KioskRegistry, who: address): ID {
         *table::borrow(&registry.table, who)
     }
+
+    /// v5.3 — version gate for KioskRegistry (see version.move).
+    public(package) fun check_registry_version(x: &KioskRegistry) { version::check(x.version); }
+    /// v5.3 — permissionless: move a KioskRegistry to the current package version.
+    public fun migrate_registry(x: &mut KioskRegistry) { x.version = version::next(x.version); }
 }

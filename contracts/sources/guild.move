@@ -17,6 +17,7 @@
 ///     module); always 0 until then.
 #[allow(lint(self_transfer))]
 module sui_combats::guild {
+    use sui_combats::version;
     use std::string::{Self, String};
     use sui::event;
     use sui::coin::{Self, Coin};
@@ -81,6 +82,7 @@ module sui_combats::guild {
     /// unique (case-insensitive) guild names.
     public struct GuildRegistry has key {
         id: UID,
+        version: u64,
         /// member wallet → guild id
         members: Table<address, ID>,
         /// lowercase name → guild id
@@ -95,6 +97,7 @@ module sui_combats::guild {
     /// Shared guild object.
     public struct Guild has key {
         id: UID,
+        version: u64,
         name: String,
         description: String,
         emblem_url: String,
@@ -140,11 +143,13 @@ module sui_combats::guild {
         char_registry: &mut CharacterRegistry,
         ctx: &mut TxContext,
     ) {
+        character::check_registry_version(char_registry);
         let marker_host = character::registry_uid_mut(char_registry);
         assert!(!df::exists_(marker_host, GuildRegistryMarker {}), ERegistryExists);
 
         let registry = GuildRegistry {
             id: object::new(ctx),
+            version: version::current(),
             members: table::new<address, ID>(ctx),
             names: table::new<String, ID>(ctx),
             guild_count: 0,
@@ -169,6 +174,8 @@ module sui_combats::guild {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(registry.version);
+        character::check_version(founder_character);
         let sender = ctx.sender();
         assert!(character::owner(founder_character) == sender, ENotCharacterOwner);
         assert!(!table::contains(&registry.members, sender), EAlreadyInGuild);
@@ -182,6 +189,7 @@ module sui_combats::guild {
 
         let guild = Guild {
             id: object::new(ctx),
+            version: version::current(),
             name,
             description: string::utf8(b""),
             emblem_url: string::utf8(b""),
@@ -220,6 +228,8 @@ module sui_combats::guild {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(guild.version);
+        version::check(registry.version);
         let sender = ctx.sender();
         assert!(sender == guild.leader, ENotLeader);
         assert!(guild.member_count == 1, EGuildNotEmpty);
@@ -229,6 +239,7 @@ module sui_combats::guild {
         let guild_id = object::id(&guild);
         let Guild {
             id,
+            version: _,
             name,
             description: _,
             emblem_url: _,
@@ -276,6 +287,9 @@ module sui_combats::guild {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(guild.version);
+        version::check(registry.version);
+        character::check_version(character);
         let sender = ctx.sender();
         assert!(character::owner(character) == sender, ENotCharacterOwner);
         assert!(!table::contains(&registry.members, sender), EAlreadyInGuild);
@@ -304,6 +318,8 @@ module sui_combats::guild {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(guild.version);
+        version::check(registry.version);
         let sender = ctx.sender();
         assert!(table::contains(&guild.members, sender), ENotMember);
         assert!(sender != guild.leader, ELeaderCannotLeave);
@@ -322,6 +338,8 @@ module sui_combats::guild {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(guild.version);
+        version::check(registry.version);
         let sender = ctx.sender();
         assert!(member != sender, ECannotTargetSelf);
         let actor_role = role_or_abort(guild, sender);
@@ -341,6 +359,7 @@ module sui_combats::guild {
         invitee: address,
         ctx: &mut TxContext,
     ) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(role_or_abort(guild, sender) >= ROLE_OFFICER, ENotOfficer);
         assert!(!table::contains(&guild.members, invitee), EAlreadyMember);
@@ -357,6 +376,7 @@ module sui_combats::guild {
         invitee: address,
         ctx: &mut TxContext,
     ) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(role_or_abort(guild, sender) >= ROLE_OFFICER, ENotOfficer);
         assert!(vec_set::contains(&guild.invites, &invitee), ENotInvited);
@@ -367,6 +387,7 @@ module sui_combats::guild {
 
     /// Invitee declines their own pending invite.
     public fun decline_invite(guild: &mut Guild, ctx: &mut TxContext) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(vec_set::contains(&guild.invites, &sender), ENotInvited);
 
@@ -378,6 +399,7 @@ module sui_combats::guild {
 
     /// Leader promotes a MEMBER to OFFICER.
     public fun promote_to_officer(guild: &mut Guild, member: address, ctx: &mut TxContext) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(sender == guild.leader, ENotLeader);
         assert!(role_or_abort(guild, member) == ROLE_MEMBER, EInvalidRoleChange);
@@ -388,6 +410,7 @@ module sui_combats::guild {
 
     /// Leader demotes an OFFICER to MEMBER.
     public fun demote_to_member(guild: &mut Guild, member: address, ctx: &mut TxContext) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(sender == guild.leader, ENotLeader);
         assert!(role_or_abort(guild, member) == ROLE_OFFICER, EInvalidRoleChange);
@@ -399,6 +422,7 @@ module sui_combats::guild {
     /// Leader hands leadership to another member. The old leader becomes an
     /// OFFICER.
     public fun transfer_leadership(guild: &mut Guild, new_leader: address, ctx: &mut TxContext) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(sender == guild.leader, ENotLeader);
         assert!(new_leader != sender, ECannotTargetSelf);
@@ -414,6 +438,7 @@ module sui_combats::guild {
     // ===== Settings =====
 
     public fun set_open(guild: &mut Guild, open: bool, ctx: &mut TxContext) {
+        version::check(guild.version);
         assert!(ctx.sender() == guild.leader, ENotLeader);
         guild.open = open;
         event::emit(GuildSettingsUpdated { guild_id: object::id(guild), open });
@@ -425,6 +450,7 @@ module sui_combats::guild {
         emblem_url: String,
         ctx: &mut TxContext,
     ) {
+        version::check(guild.version);
         assert!(ctx.sender() == guild.leader, ENotLeader);
         assert!(description.length() <= MAX_DESCRIPTION_LEN, ETextTooLong);
         assert!(emblem_url.length() <= MAX_EMBLEM_URL_LEN, ETextTooLong);
@@ -437,6 +463,7 @@ module sui_combats::guild {
 
     /// Any member donates SUI to the guild treasury.
     public fun donate(guild: &mut Guild, payment: Coin<SUI>, ctx: &mut TxContext) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(table::contains(&guild.members, sender), ENotMember);
         let amount = coin::value(&payment);
@@ -454,6 +481,7 @@ module sui_combats::guild {
     /// Leader withdraws `amount` from the treasury to their own wallet.
     /// Blocked while war-locked (the treasury may back a war stake).
     public fun withdraw(guild: &mut Guild, amount: u64, clock: &Clock, ctx: &mut TxContext) {
+        version::check(guild.version);
         let sender = ctx.sender();
         assert!(sender == guild.leader, ENotLeader);
         assert!(amount > 0, EZeroAmount);
@@ -586,4 +614,14 @@ module sui_combats::guild {
     public fun role_member(): u8 { ROLE_MEMBER }
     public fun role_officer(): u8 { ROLE_OFFICER }
     public fun role_leader(): u8 { ROLE_LEADER }
+
+    /// v5.3 — version gate for GuildRegistry (see version.move).
+    public(package) fun check_registry_version(x: &GuildRegistry) { version::check(x.version); }
+    /// v5.3 — permissionless: move a GuildRegistry to the current package version.
+    public fun migrate_registry(x: &mut GuildRegistry) { x.version = version::next(x.version); }
+
+    /// v5.3 — version gate for Guild (see version.move).
+    public(package) fun check_version(x: &Guild) { version::check(x.version); }
+    /// v5.3 — permissionless: move a Guild to the current package version.
+    public fun migrate_guild(x: &mut Guild) { x.version = version::next(x.version); }
 }

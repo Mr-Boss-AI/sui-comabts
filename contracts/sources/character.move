@@ -1,5 +1,6 @@
 #[allow(lint(self_transfer, share_owned))]
 module sui_combats::character {
+    use sui_combats::version;
     use sui::event;
     use sui::clock::{Self, Clock};
     use sui::dynamic_field as df;
@@ -54,6 +55,7 @@ module sui_combats::character {
     /// pre-mint guards now act as defence-in-depth.
     public struct CharacterRegistry has key {
         id: UID,
+        version: u64,
         table: Table<address, ID>,
     }
 
@@ -62,6 +64,7 @@ module sui_combats::character {
     // No parallel Option<ID> pointers: DOFs are the single source of truth.
     public struct Character has key {
         id: UID,
+        version: u64,
         owner: address,
         name: String,
         level: u8,
@@ -151,6 +154,7 @@ module sui_combats::character {
 
         let registry = CharacterRegistry {
             id: object::new(ctx),
+            version: version::current(),
             table: table::new<address, ID>(ctx),
         };
         transfer::share_object(registry);
@@ -218,6 +222,7 @@ module sui_combats::character {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(registry.version);
         assert!(name.length() <= MAX_NAME_LENGTH, ENameTooLong);
         assert!(str + dex + int + end == INITIAL_STAT_POINTS, EInvalidStatTotal);
 
@@ -228,6 +233,7 @@ module sui_combats::character {
 
         let character = Character {
             id: object::new(ctx),
+            version: version::current(),
             owner: player,
             name,
             level: 1,
@@ -274,6 +280,8 @@ module sui_combats::character {
         character: Character,
         registry: &mut CharacterRegistry,
     ) {
+        version::check(character.version);
+        version::check(registry.version);
         let character_id = object::id(&character);
         let owner = character.owner;
 
@@ -289,6 +297,7 @@ module sui_combats::character {
         // of scope; only the UID needs explicit deletion.
         let Character {
             id,
+            version: _,
             owner: _,
             name: _,
             level: _,
@@ -320,6 +329,7 @@ module sui_combats::character {
         new_rating: u16,
         clock: &Clock,
     ) {
+        version::check(character.version);
         assert!(xp_gained <= MAX_XP_PER_FIGHT, EXpTooHigh);
 
         if (won) {
@@ -373,6 +383,7 @@ module sui_combats::character {
         xp_gained: u64,
         clock: &Clock,
     ) {
+        version::check(character.version);
         assert!(xp_gained <= MAX_XP_PER_FIGHT, EXpTooHigh);
 
         character.draws = character.draws + 1;
@@ -417,6 +428,7 @@ module sui_combats::character {
         end: u16,
         ctx: &TxContext,
     ) {
+        version::check(character.version);
         assert!(tx_context::sender(ctx) == character.owner, ENotOwner);
 
         let total = str + dex + int + end;
@@ -450,6 +462,7 @@ module sui_combats::character {
         expires_at_ms: u64,
         clock: &Clock,
     ) {
+        version::check(character.version);
         let now = clock::timestamp_ms(clock);
         assert!(
             expires_at_ms == 0 || expires_at_ms <= now + MAX_LOCK_MS,
@@ -526,4 +539,17 @@ module sui_combats::character {
     public(package) fun registry_uid_mut(registry: &mut CharacterRegistry): &mut UID {
         &mut registry.id
     }
+
+    /// v5.3 — version gate for Character (see version.move).
+    public(package) fun check_version(x: &Character) { version::check(x.version); }
+    /// v5.3 — permissionless: move a Character to the current package version.
+    public fun migrate_character(x: &mut Character) { x.version = version::next(x.version); }
+
+    /// v5.3 — version gate for CharacterRegistry (see version.move).
+    public(package) fun check_registry_version(x: &CharacterRegistry) { version::check(x.version); }
+    /// v5.3 — permissionless: move a CharacterRegistry to the current package version.
+    public fun migrate_registry(x: &mut CharacterRegistry) { x.version = version::next(x.version); }
+
+    #[test_only]
+    public fun set_version_for_testing(c: &mut Character, v: u64) { c.version = v; }
 }

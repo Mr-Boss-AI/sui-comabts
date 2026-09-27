@@ -18,6 +18,7 @@
 ///      reclaim_stalled_war — ACTIVE for WAR_RESOLUTION_TIMEOUT_MS → refunds.
 #[allow(lint(self_transfer))]
 module sui_combats::guild_war {
+    use sui_combats::version;
     use sui::event;
     use sui::coin::{Self, Coin};
     use sui::balance::{Self, Balance};
@@ -90,11 +91,13 @@ module sui_combats::guild_war {
     /// Shared, created at publish. One open war per fighter.
     public struct WarRegistry has key {
         id: UID,
+        version: u64,
         fighters: Table<address, ID>,
     }
 
     public struct GuildWar has key {
         id: UID,
+        version: u64,
         guild_a: ID,
         guild_b: ID,
         declared_by: address,
@@ -125,7 +128,7 @@ module sui_combats::guild_war {
     public struct WarSettled has copy, drop { war_id: ID, winner: u8, payout_each: u64, platform_fee: u64 }
 
     fun init(ctx: &mut TxContext) {
-        transfer::share_object(WarRegistry { id: object::new(ctx), fighters: table::new(ctx) });
+        transfer::share_object(WarRegistry { id: object::new(ctx), version: version::current(), fighters: table::new(ctx) });
     }
 
     #[test_only]
@@ -144,6 +147,9 @@ module sui_combats::guild_war {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        guild::check_version(guild_a);
+        guild::check_version(guild_b);
+        character::check_version(declarer_character);
         let sender = ctx.sender();
         assert!(guild::is_member(guild_a, sender) && guild::role_of(guild_a, sender) >= guild::role_officer(), ENotOfficer);
         assert!(object::id(guild_a) != object::id(guild_b), ESameGuild);
@@ -160,6 +166,7 @@ module sui_combats::guild_war {
         let now = clock::timestamp_ms(clock);
         let war = GuildWar {
             id: object::new(ctx),
+            version: version::current(),
             guild_a: object::id(guild_a),
             guild_b: object::id(guild_b),
             declared_by: sender,
@@ -185,6 +192,8 @@ module sui_combats::guild_war {
     // ===== 2. Accept =====
 
     public fun accept_war(war: &mut GuildWar, guild_b: &mut Guild, clock: &Clock, ctx: &mut TxContext) {
+        version::check(war.version);
+        guild::check_version(guild_b);
         let sender = ctx.sender();
         assert!(war.status == STATUS_DECLARED, EWrongStatus);
         assert!(object::id(guild_b) == war.guild_b, EWrongGuild);
@@ -206,6 +215,10 @@ module sui_combats::guild_war {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(war.version);
+        version::check(registry.version);
+        guild::check_version(guild);
+        character::check_version(character);
         let sender = ctx.sender();
         assert!(war.status == STATUS_DECLARED || war.status == STATUS_ACCEPTED, EWrongStatus);
         assert!(clock::timestamp_ms(clock) < war.start_at, ESignupClosed);
@@ -230,6 +243,8 @@ module sui_combats::guild_war {
     }
 
     public fun leave_war(war: &mut GuildWar, registry: &mut WarRegistry, clock: &Clock, ctx: &mut TxContext) {
+        version::check(war.version);
+        version::check(registry.version);
         let sender = ctx.sender();
         assert!(war.status == STATUS_DECLARED || war.status == STATUS_ACCEPTED, EWrongStatus);
         assert!(clock::timestamp_ms(clock) < war.start_at, ESignupClosed);
@@ -250,6 +265,10 @@ module sui_combats::guild_war {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(war.version);
+        version::check(registry.version);
+        guild::check_version(guild_a);
+        guild::check_version(guild_b);
         assert!(ctx.sender() == arena::treasury_address(), EUnauthorized);
         assert!(war.status == STATUS_ACCEPTED, EWrongStatus);
         assert!(object::id(guild_a) == war.guild_a && object::id(guild_b) == war.guild_b, EWrongGuild);
@@ -291,6 +310,10 @@ module sui_combats::guild_war {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(war.version);
+        version::check(registry.version);
+        guild::check_version(guild_a);
+        guild::check_version(guild_b);
         assert!(ctx.sender() == arena::treasury_address(), EUnauthorized);
         assert!(war.status == STATUS_ACTIVE, EWrongStatus);
         assert!(object::id(guild_a) == war.guild_a && object::id(guild_b) == war.guild_b, EWrongGuild);
@@ -339,6 +362,10 @@ module sui_combats::guild_war {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(war.version);
+        version::check(registry.version);
+        guild::check_version(guild_a);
+        guild::check_version(guild_b);
         assert!(object::id(guild_a) == war.guild_a && object::id(guild_b) == war.guild_b, EWrongGuild);
         let now = clock::timestamp_ms(clock);
         let expired = (war.status == STATUS_DECLARED && now >= war.start_at)
@@ -359,6 +386,10 @@ module sui_combats::guild_war {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(war.version);
+        version::check(registry.version);
+        guild::check_version(guild_a);
+        guild::check_version(guild_b);
         assert!(war.status == STATUS_ACTIVE, EWrongStatus);
         assert!(object::id(guild_a) == war.guild_a && object::id(guild_b) == war.guild_b, EWrongGuild);
         let sender = ctx.sender();
@@ -474,4 +505,14 @@ module sui_combats::guild_war {
     public fun status_active(): u8 { STATUS_ACTIVE }
     public fun status_settled(): u8 { STATUS_SETTLED }
     public fun status_cancelled(): u8 { STATUS_CANCELLED }
+
+    /// v5.3 — version gate for WarRegistry (see version.move).
+    public(package) fun check_registry_version(x: &WarRegistry) { version::check(x.version); }
+    /// v5.3 — permissionless: move a WarRegistry to the current package version.
+    public fun migrate_registry(x: &mut WarRegistry) { x.version = version::next(x.version); }
+
+    /// v5.3 — version gate for GuildWar (see version.move).
+    public(package) fun check_war_version(x: &GuildWar) { version::check(x.version); }
+    /// v5.3 — permissionless: move a GuildWar to the current package version.
+    public fun migrate_war(x: &mut GuildWar) { x.version = version::next(x.version); }
 }

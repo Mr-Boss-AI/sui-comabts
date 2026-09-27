@@ -1,4 +1,5 @@
 module sui_combats::arena {
+    use sui_combats::version;
     use sui::event;
     use sui::coin::{Self, Coin};
     use sui::balance::{Self, Balance};
@@ -151,12 +152,14 @@ module sui_combats::arena {
     /// reclaim_stalled_wager).
     public struct OpenWagerRegistry has key {
         id: UID,
+        version: u64,
         table: Table<address, ID>,
     }
 
     // ===== WagerMatch (shared) — v5.2 adds 4 fields =====
     public struct WagerMatch has key {
         id: UID,
+        version: u64,
         player_a: address,
         /// v5.2 — Snapshot of the creator's character level at create
         /// time. The ±1 bracket check in request_accept_wager compares
@@ -284,6 +287,7 @@ module sui_combats::arena {
     fun init(ctx: &mut TxContext) {
         let registry = OpenWagerRegistry {
             id: object::new(ctx),
+            version: version::current(),
             table: table::new<address, ID>(ctx),
         };
         transfer::share_object(registry);
@@ -307,6 +311,8 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        character::check_version(creator_character);
+        version::check(registry.version);
         let stake_amount = coin::value(&stake);
         assert!(stake_amount > 0, EInvalidStake);
 
@@ -323,6 +329,7 @@ module sui_combats::arena {
 
         let wager = WagerMatch {
             id: object::new(ctx),
+            version: version::current(),
             player_a,
             player_a_level: character::level(creator_character),
             player_b: option::none(),
@@ -361,6 +368,9 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
+        character::check_version(challenger_character);
+        version::check(registry.version);
         // Assertion order per spec §7.2 — each abort gives a more
         // specific error than the next.
         assert!(wager.status == STATUS_WAITING, EMatchNotWaiting);
@@ -420,6 +430,7 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
         assert!(wager.status == STATUS_PENDING_APPROVAL, ENotPendingApproval);
         assert!(tx_context::sender(ctx) == wager.player_a, ENotCreatorForApproval);
         assert!(option::is_some(&wager.pending_challenger), ENoOpponent);
@@ -454,6 +465,7 @@ module sui_combats::arena {
         wager: &mut WagerMatch,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
         assert!(wager.status == STATUS_PENDING_APPROVAL, ENotPendingApproval);
         assert!(tx_context::sender(ctx) == wager.player_a, ENotCreatorForApproval);
         assert!(option::is_some(&wager.pending_challenger), ENoOpponent);
@@ -486,6 +498,7 @@ module sui_combats::arena {
         wager: &mut WagerMatch,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
         assert!(wager.status == STATUS_PENDING_APPROVAL, ENotPendingApproval);
         assert!(option::is_some(&wager.pending_challenger), ENoOpponent);
         let challenger = *option::borrow(&wager.pending_challenger);
@@ -518,6 +531,7 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
         assert!(wager.status == STATUS_PENDING_APPROVAL, ENotPendingApproval);
         let now = clock::timestamp_ms(clock);
         assert!(now >= wager.pending_at + CHALLENGE_TIMEOUT_MS, EChallengeNotExpired);
@@ -552,6 +566,8 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
+        version::check(registry.version);
         assert!(tx_context::sender(ctx) == TREASURY, EUnauthorized);
         assert!(wager.status == STATUS_ACTIVE, EMatchNotActive);
         assert!(option::is_some(&wager.player_b), ENoOpponent);
@@ -599,6 +615,8 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
+        version::check(registry.version);
         assert!(tx_context::sender(ctx) == TREASURY, EUnauthorized);
         assert!(wager.status == STATUS_ACTIVE, EMatchNotActive);
         assert!(option::is_some(&wager.player_b), ENoOpponent);
@@ -641,6 +659,8 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
+        version::check(registry.version);
         assert!(wager.status == STATUS_WAITING, EMatchNotWaiting);
 
         let sender = tx_context::sender(ctx);
@@ -678,6 +698,8 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
+        version::check(registry.version);
         assert!(tx_context::sender(ctx) == TREASURY, EUnauthorized);
         assert!(wager.status != STATUS_SETTLED, EMatchAlreadySettled);
 
@@ -773,6 +795,8 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
+        version::check(registry.version);
         assert!(wager.status != STATUS_SETTLED, EMatchAlreadySettled);
         // v5.2 — Route PENDING_APPROVAL callers to cancel_expired_challenge
         // before they hit the WAITING/ACTIVE branches.
@@ -845,6 +869,8 @@ module sui_combats::arena {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        version::check(wager.version);
+        version::check(registry.version);
         // Assertion order per spec §7.11 — each abort gives a more
         // specific error than the next.
         assert!(wager.status == STATUS_ACTIVE, ENotActiveForReclaim);
@@ -901,10 +927,12 @@ module sui_combats::arena {
     public fun escrow_value(wager: &WagerMatch): u64 { balance::value(&wager.escrow) }
     /// v5.2 — Challenger's stake while in PENDING_APPROVAL; 0 otherwise.
     public fun challenger_escrow_value(wager: &WagerMatch): u64 {
+        version::check(wager.version);
         balance::value(&wager.challenger_escrow)
     }
     /// v5.2 — Currently-pending challenger (Some only in PENDING_APPROVAL).
     public fun pending_challenger(wager: &WagerMatch): Option<address> {
+        version::check(wager.version);
         wager.pending_challenger
     }
     /// v5.2 — Timestamp pending_challenger was registered.
@@ -946,4 +974,14 @@ module sui_combats::arena {
     public fun force_status_for_testing(wager: &mut WagerMatch, status: u8) {
         wager.status = status;
     }
+
+    /// v5.3 — version gate for OpenWagerRegistry (see version.move).
+    public(package) fun check_registry_version(x: &OpenWagerRegistry) { version::check(x.version); }
+    /// v5.3 — permissionless: move a OpenWagerRegistry to the current package version.
+    public fun migrate_registry(x: &mut OpenWagerRegistry) { x.version = version::next(x.version); }
+
+    /// v5.3 — version gate for WagerMatch (see version.move).
+    public(package) fun check_wager_version(x: &WagerMatch) { version::check(x.version); }
+    /// v5.3 — permissionless: move a WagerMatch to the current package version.
+    public fun migrate_wager(x: &mut WagerMatch) { x.version = version::next(x.version); }
 }
